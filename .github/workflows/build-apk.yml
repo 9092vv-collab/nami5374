@@ -1,7 +1,6 @@
 name: Build SGU APK (Fold 8)
+# Builds only when started by hand (Actions tab -> Run workflow, or Claude via the API).
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
 permissions:
   contents: write
