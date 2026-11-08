@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -191,7 +192,7 @@ private fun Page(title: String, subtitle: String?, onBack: () -> Unit, actions: 
     Scaffold(containerColor = Sgu.Bg, topBar = { SguTopBar(title, subtitle, onBack = onBack, actions = actions) }) { pad ->
         androidx.compose.runtime.CompositionLocalProvider(LocalGroupInset provides 0.dp) {
             Column(
-                Modifier.fillMaxSize().padding(pad).imePadding().verticalScroll(rememberScrollState())
+                Modifier.fillMaxSize().padding(pad).consumeWindowInsets(pad).imePadding().verticalScroll(rememberScrollState())
                     .padding(start = 16.dp, end = 16.dp, bottom = 48.dp),
             ) { content() }
         }

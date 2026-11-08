@@ -1,6 +1,7 @@
 package space.sgu.next.ui
 
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
@@ -77,7 +78,7 @@ fun FieldEditorScreen(characterId: String, key: String, onBack: () -> Unit) {
         },
     ) { pad ->
         Box(
-            Modifier.fillMaxSize().padding(pad).imePadding()
+            Modifier.fillMaxSize().padding(pad).consumeWindowInsets(pad).imePadding()
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 22.dp, vertical = 8.dp),
         ) {

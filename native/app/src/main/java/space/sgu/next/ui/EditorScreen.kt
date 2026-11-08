@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -126,7 +127,7 @@ fun EditorScreen(characterId: String, onBack: (() -> Unit)?, openField: (String)
             )
         },
     ) { pad ->
-        Column(Modifier.fillMaxSize().padding(pad).imePadding()) {
+        Column(Modifier.fillMaxSize().padding(pad).consumeWindowInsets(pad).imePadding()) {
             PillTabs(
                 options = editorTabs,
                 selected = pager.currentPage,
@@ -299,7 +300,8 @@ private fun FieldCard(label: String, value: String, maxLines: Int = 4, onClick: 
 @Composable
 private fun WorkshopPage() {
     val turns = remember { mutableStateListOf<Turn>().apply { addAll(FakeData.turns) } }
-    val listState = rememberLazyListState(initialFirstVisibleItemIndex = (turns.size - 1).coerceAtLeast(0))
+    // Chat-style: newest turn sits right above the input and stays there when the keyboard opens.
+    val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
     var input by rememberSaveable { mutableStateOf("") }
 
@@ -307,10 +309,11 @@ private fun WorkshopPage() {
         LazyColumn(
             state = listState,
             modifier = Modifier.weight(1f),
+            reverseLayout = true,
             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(18.dp),
+            verticalArrangement = Arrangement.spacedBy(18.dp, Alignment.Bottom),
         ) {
-            items(turns, key = { it.id }) { t -> TurnCard(t) }
+            items(turns.asReversed(), key = { it.id }) { t -> TurnCard(t) }
         }
         // Claude-style input pill: white, soft shadow, grey round +, ink round send.
         Row(
@@ -342,7 +345,7 @@ private fun WorkshopPage() {
                         val id = (turns.maxOfOrNull { it.id } ?: 0) + 1
                         turns.add(Turn(id, input.trim(), "(아직 AI 연결 전이라 가짜 응답이에요)", emptyList()))
                         input = ""
-                        scope.launch { listState.animateScrollToItem(turns.size - 1) }
+                        scope.launch { listState.animateScrollToItem(0) }
                     }
                 },
                 contentAlignment = Alignment.Center,
