@@ -37,6 +37,7 @@ import space.sgu.next.data.CharacterStore
  * Full-screen editor for one card field. It is its own navigation destination, so the system
  * back gesture returns to the field list. Changes are saved when leaving the screen.
  */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 fun FieldEditorScreen(characterId: String, key: String, onBack: () -> Unit) {
     val original = remember(characterId, key) { CharacterStore.getField(CharacterStore.readCard(characterId), key) }

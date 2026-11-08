@@ -97,6 +97,7 @@ fun fieldLabel(key: String): String =
     else CardFields.firstOrNull { it.first == key }?.second ?: key
 
 /** Character workspace. onBack == null when shown as the right pane on the unfolded screen. */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 fun EditorScreen(characterId: String, onBack: (() -> Unit)?, openField: (String) -> Unit) {
     val ctx = LocalContext.current
