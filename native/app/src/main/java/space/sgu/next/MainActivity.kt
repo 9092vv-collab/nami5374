@@ -7,6 +7,7 @@ import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import space.sgu.next.data.CharacterStore
+import space.sgu.next.data.SettingsStore
 import space.sgu.next.ui.SguApp
 import space.sgu.next.ui.SguTheme
 
@@ -17,6 +18,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge(statusBarStyle = bars, navigationBarStyle = bars)
         super.onCreate(savedInstanceState)
         CharacterStore.init(applicationContext)
+        SettingsStore.init(applicationContext)
         setContent { SguTheme { SguApp() } }
     }
 }

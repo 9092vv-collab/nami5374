@@ -35,6 +35,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.TopAppBarScrollBehavior
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
 import androidx.compose.ui.Alignment
@@ -186,6 +187,9 @@ fun Badge(text: String, container: Color = Sgu.Ink, content: Color = Color.White
 
 // ---------- Cards ----------
 
+/** Side inset of grouped rows; pages that already pad their content provide 0.dp. */
+val LocalGroupInset = compositionLocalOf { 16.dp }
+
 private val Big = 24.dp
 private val Small = 6.dp
 
@@ -212,7 +216,7 @@ fun GroupRow(
     Row(
         modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp)
+            .padding(horizontal = LocalGroupInset.current)
             .padding(top = if (index == 0) 0.dp else 3.dp)
             .clip(groupShape(index, count))
             .background(Sgu.Card)

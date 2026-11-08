@@ -51,6 +51,11 @@ import space.sgu.next.data.AppState
 import space.sgu.next.data.CharacterStore
 import space.sgu.next.data.FakeData
 import space.sgu.next.data.RefKind
+import space.sgu.next.data.SettingsStore
+import space.sgu.next.data.b
+import space.sgu.next.data.o
+import space.sgu.next.data.s
+import space.sgu.next.data.sOrNull
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -123,8 +128,15 @@ private fun ActivationBadge(a: Activation) = when (a) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SettingsScreen() {
+fun SettingsScreen(open: (String) -> Unit) {
     val scroll = TopAppBarDefaults.enterAlwaysScrollBehavior(rememberTopAppBarState())
+    val procs = SettingsStore.root.o("processors")
+    val mainModel = SettingsStore.model(procs.o("main").sOrNull("modelId"))
+    val subLabel = when {
+        procs.o("sub").b("disabled") -> "서브 꺼짐"
+        procs.o("sub").s("strategy") == "jev" -> "서브 Jev"
+        else -> SettingsStore.model(procs.o("sub").sOrNull("modelId"))?.s("name")?.let { "서브 $it" } ?: "서브 미지정"
+    }
     Scaffold(
         containerColor = Sgu.Bg,
         modifier = Modifier.nestedScroll(scroll.nestedScrollConnection),
@@ -132,24 +144,24 @@ fun SettingsScreen() {
     ) { pad ->
         LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(top = pad.calculateTopPadding(), bottom = 40.dp)) {
             item { SectionLabel("실행") }
-            item { GroupRow(0, 3, "프로세서 배정", subtitle = "메인 · 서브 모델 지정", icon = Icons.Outlined.Tune, onClick = {}) }
-            item { GroupRow(1, 3, "프로바이더", subtitle = "OpenAI · Anthropic · Gemini · Vertex · Copilot", icon = Icons.Outlined.Key, onClick = {}) }
-            item { GroupRow(2, 3, "모델", subtitle = "등록된 모델과 파라미터", icon = Icons.Outlined.Memory, onClick = {}) }
+            item { GroupRow(0, 3, "프로세서 배정", subtitle = "메인 ${mainModel?.s("name") ?: "미지정"} · $subLabel", icon = Icons.Outlined.Tune, onClick = { open("processors") }) }
+            item { GroupRow(1, 3, "프로바이더", subtitle = SettingsStore.providers.size.let { if (it == 0) "없음 · 눌러서 추가" else "${it}개 · " + SettingsStore.providers.joinToString(", ") { p -> p.s("name") } }, icon = Icons.Outlined.Key, onClick = { open("providers") }) }
+            item { GroupRow(2, 3, "모델", subtitle = "등록된 모델 ${SettingsStore.models.size}개", icon = Icons.Outlined.Memory, onClick = { open("models") }) }
             item { SectionLabel("권한 · 프롬프트") }
-            item { GroupRow(0, 2, "새 캐릭터 기본 권한", subtitle = "필드별 열람/편집 기본 등급", icon = Icons.Outlined.Shield, onClick = {}) }
-            item { GroupRow(1, 2, "프롬프트 프리셋", subtitle = "여러 프리셋을 저장하고 캐릭터마다 골라 쓰기", icon = Icons.Outlined.SmartToy, onClick = {}) }
+            item { GroupRow(0, 2, "새 캐릭터 기본 권한", subtitle = "필드별 열람/편집 기본 등급 · 작업실 단계에서 열려요", icon = Icons.Outlined.Shield) }
+            item { GroupRow(1, 2, "프롬프트 프리셋", subtitle = "백업에서 가져온 프리셋은 보관돼요 · 작업실 단계에서 열려요", icon = Icons.Outlined.SmartToy) }
             item { SectionLabel("화면 · 저장") }
             item { GroupRow(0, 3, "세이프 모드", subtitle = "모든 이미지를 썸네일로 표시", trailing = { SguSwitch(AppState.safeMode) { AppState.safeMode = it } }) }
             item { GroupRow(1, 3, "자동 압축", subtitle = "내보낼 때 이미지를 WebP 80%로 압축", trailing = { SguSwitch(AppState.autoCompress) { AppState.autoCompress = it } }) }
             item { GroupRow(2, 3, "저장된 캐릭터", subtitle = "${CharacterStore.items.size}개 · 폴더 ${CharacterStore.folders.size}개", icon = Icons.Outlined.Folder) }
             item { SectionLabel("기타") }
-            item { GroupRow(0, 4, "백그라운드 작업", subtitle = "앱이 뒤로 가도 작업을 이어갑니다", icon = Icons.Outlined.Notifications, onClick = {}) }
-            item { GroupRow(1, 4, "요청 로그", subtitle = "서브/메인 프로세서 요청과 응답", icon = Icons.Outlined.History, onClick = {}) }
-            item { GroupRow(2, 4, "백업 · 복원", subtitle = "설정 JSON 내보내기/가져오기", icon = Icons.Outlined.Backup, onClick = {}) }
-            item { GroupRow(3, 4, "언어", subtitle = "한국어", icon = Icons.Outlined.Language, onClick = {}) }
+            item { GroupRow(0, 4, "백업 · 복원", subtitle = "설정 JSON 내보내기/가져오기 (기존 앱 백업 호환)", icon = Icons.Outlined.Backup, onClick = { open("backup") }) }
+            item { GroupRow(1, 4, "백그라운드 작업", subtitle = "앱이 뒤로 가도 작업을 이어갑니다 · 작업실 단계에서 열려요", icon = Icons.Outlined.Notifications) }
+            item { GroupRow(2, 4, "요청 로그", subtitle = "서브/메인 프로세서 요청과 응답 · 작업실 단계에서 열려요", icon = Icons.Outlined.History) }
+            item { GroupRow(3, 4, "언어", subtitle = "한국어", icon = Icons.Outlined.Language) }
             item {
                 Text(
-                    "SGU Next 0.2.0 · 캐릭터 저장·가져오기·내보내기 작동, 나머지는 미리보기",
+                    "SGU Next 0.3.0 · 캐릭터 저장·가져오기·내보내기, 프로바이더·모델·프로세서 설정 작동. 작업실·이미지·참고 자료는 다음 단계",
                     modifier = Modifier.fillMaxWidth().padding(24.dp),
                     style = MaterialTheme.typography.bodySmall, color = Sgu.Sub,
                 )

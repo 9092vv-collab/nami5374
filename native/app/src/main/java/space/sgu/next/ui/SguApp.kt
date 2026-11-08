@@ -75,8 +75,17 @@ fun SguApp() {
             HomeScreen(
                 openCharacter = { id -> nav.navigate("character/$id") },
                 openField = ::openField,
+                openSettings = { route -> nav.navigate(route) },
             )
         }
+        val back: () -> Unit = { nav.popBackStack() }
+        val go: (String) -> Unit = { route -> nav.navigate(route) }
+        composable("providers") { ProvidersScreen(open = go, onBack = back) }
+        composable("provider/{id}") { e -> ProviderScreen(e.arguments?.getString("id") ?: "", open = go, onBack = back) }
+        composable("models") { ModelsScreen(open = go, onBack = back) }
+        composable("model/{id}") { e -> ModelScreen(e.arguments?.getString("id") ?: "", onBack = back) }
+        composable("processors") { ProcessorsScreen(open = go, onBack = back) }
+        composable("backup") { BackupScreen(onBack = back) }
         composable("character/{id}") { entry ->
             val id = entry.arguments?.getString("id") ?: ""
             EditorScreen(characterId = id, onBack = { nav.popBackStack() }, openField = { key -> openField(id, key) })
@@ -92,7 +101,7 @@ fun SguApp() {
 }
 
 @Composable
-private fun HomeScreen(openCharacter: (String) -> Unit, openField: (String, String) -> Unit) {
+private fun HomeScreen(openCharacter: (String) -> Unit, openField: (String, String) -> Unit, openSettings: (String) -> Unit) {
     var tab by rememberSaveable { mutableIntStateOf(0) }
     var picked by rememberSaveable { mutableStateOf("") }
     val wide = isWide()
@@ -116,7 +125,7 @@ private fun HomeScreen(openCharacter: (String) -> Unit, openField: (String, Stri
                 CharactersScreen(selectedId = "", onOpen = openCharacter, inPane = false)
             }
             1 -> ReferencesScreen()
-            else -> SettingsScreen()
+            else -> SettingsScreen(open = openSettings)
         }
     }
 
