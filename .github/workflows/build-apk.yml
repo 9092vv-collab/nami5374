@@ -92,6 +92,14 @@ jobs:
         with:
           name: SGU-fold-apk
           path: android/app/build/outputs/apk/release/*.apk
+      - name: Publish APK as a release (fixed download link, no login needed)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp android/app/build/outputs/apk/release/*.apk SGU-fold.apk
+          V=$(node -p "require('./app.json').expo.version")
+          TAG="v$V-build${{ github.run_number }}"
+          gh release create "$TAG" SGU-fold.apk -R "${{ github.repository }}" --title "SGU 폴드 $V (빌드 ${{ github.run_number }})" --notes "commit ${{ github.sha }}" --latest
       - name: Save error log for Claude (branch build-logs)
         if: failure()
         run: |
