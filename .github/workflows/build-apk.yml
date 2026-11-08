@@ -43,6 +43,29 @@ jobs:
           test -s "$HOME/$F"
           sed -i "s#^distributionUrl=.*#distributionUrl=file\\:$HOME/$F#" "$P"
           cat "$P"
+      - name: Use Google's Maven Central mirror (avoids timeouts)
+        run: |
+          mkdir -p ~/.gradle/init.d
+          cat > ~/.gradle/init.d/sgu-mirror.gradle <<'EOF'
+          def MIRROR = 'https://maven-central.storage-download.googleapis.com/maven2/'
+          def patch = { repos ->
+            repos.withType(MavenArtifactRepository).configureEach { r ->
+              def u = r.url.toString()
+              if (u.contains('repo.maven.apache.org') || u.contains('repo1.maven.org')) { r.url = MIRROR }
+            }
+          }
+          beforeSettings { s ->
+            patch(s.pluginManagement.repositories)
+            patch(s.buildscript.repositories)
+            patch(s.dependencyResolutionManagement.repositories)
+          }
+          allprojects {
+            patch(buildscript.repositories)
+            patch(repositories)
+          }
+          EOF
+          cat ~/.gradle/init.d/sgu-mirror.gradle
+          curl -sSI "https://maven-central.storage-download.googleapis.com/maven2/org/jetbrains/kotlin/kotlin-compiler-embeddable/2.1.20/kotlin-compiler-embeddable-2.1.20.jar" | head -3 || true
       - name: Build release APK (retries on download timeouts)
         working-directory: android
         run: |
