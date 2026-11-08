@@ -43,9 +43,19 @@ jobs:
           test -s "$HOME/$F"
           sed -i "s#^distributionUrl=.*#distributionUrl=file\\:$HOME/$F#" "$P"
           cat "$P"
-      - name: Build release APK
+      - name: Build release APK (retries on download timeouts)
         working-directory: android
-        run: ./gradlew assembleRelease --no-daemon
+        run: |
+          for i in 1 2 3 4; do
+            ./gradlew assembleRelease --no-daemon \
+              -Dorg.gradle.internal.repository.max.retries=10 \
+              -Dorg.gradle.internal.repository.initial.backoff=3000 \
+              -Dorg.gradle.internal.http.connectionTimeout=120000 \
+              -Dorg.gradle.internal.http.socketTimeout=120000 && exit 0
+            echo "::warning::Gradle attempt $i failed, retrying in 45s"
+            sleep 45
+          done
+          exit 1
       - uses: actions/upload-artifact@v4
         with:
           name: SGU-fold-apk
