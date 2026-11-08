@@ -71,30 +71,15 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import space.sgu.next.data.CardIO
 import space.sgu.next.data.CharacterStore
+import space.sgu.next.data.FieldKind
+import space.sgu.next.data.Fields
+import kotlinx.serialization.json.JsonPrimitive
 import space.sgu.next.data.FakeData
 import space.sgu.next.data.Turn
 
 private val editorTabs = listOf("캐릭터", "이미지", "작업실", "스크립트", "기타")
 
-/** Card text fields shown on the 캐릭터 tab, in order. */
-val CardFields = listOf(
-    "name" to "이름",
-    "nickname" to "닉네임",
-    "creator" to "제작자",
-    "description" to "디스크립션",
-    "personality" to "성격",
-    "scenario" to "시나리오",
-    "first_mes" to "첫 메시지",
-    "mes_example" to "예시 대화",
-    "system_prompt" to "시스템 프롬프트",
-    "post_history_instructions" to "탈옥 프롬프트",
-    "creator_notes" to "제작자 노트",
-    "character_version" to "버전",
-)
-
-fun fieldLabel(key: String): String =
-    if (key.startsWith("alt:")) "추가 첫 메시지 ${(key.removePrefix("alt:").toIntOrNull() ?: 0) + 1}"
-    else CardFields.firstOrNull { it.first == key }?.second ?: key
+fun fieldLabel(key: String): String = Fields.label(key)
 
 /** Character workspace. onBack == null when shown as the right pane on the unfolded screen. */
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
@@ -149,49 +134,153 @@ fun EditorScreen(characterId: String, onBack: (() -> Unit)?, openField: (String)
             )
             HorizontalPager(state = pager, modifier = Modifier.weight(1f), beyondViewportPageCount = 1) { page ->
                 when (page) {
-                    0 -> FieldsPage(characterId, card, openField)
+                    0 -> GroupPage("character", characterId, card, openField)
                     1 -> ImagesPage()
                     2 -> WorkshopPage()
-                    3 -> ScriptsPage(card)
-                    else -> MiscPage()
+                    3 -> GroupPage("script", characterId, card, openField)
+                    else -> GroupPage("etc", characterId, card, openField)
                 }
             }
         }
     }
 }
 
-// ---------- 캐릭터 tab: preview cards, no inner scrolling ----------
+// ---------- 캐릭터 / 스크립트 / 기타 tabs: the original's field groups, preview cards only ----------
 
 @Composable
-private fun FieldsPage(id: String, card: JsonObject, openField: (String) -> Unit) {
-    val alts = CharacterStore.altGreetings(card)
+private fun GroupPage(group: String, id: String, card: JsonObject, openField: (String) -> Unit) {
+    val data = card["data"] as? JsonObject
+    val fields = Fields.inGroup(group)
     LazyColumn(contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 40.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        items(CardFields, key = { it.first }) { (key, label) ->
-            FieldCard(label, CharacterStore.getField(card, key)) { openField(key) }
-        }
-        item(key = "altHeader") {
-            Row(Modifier.fillMaxWidth().padding(top = 14.dp, start = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("추가 첫 메시지 ${alts.size}개", style = MaterialTheme.typography.bodyMedium, color = Sgu.Sub, modifier = Modifier.weight(1f))
-                PillChip("추가", selected = false, icon = Icons.Outlined.Add) {
-                    val i = CharacterStore.addAltGreeting(id)
-                    openField("alt:$i")
+        fields.forEach { f ->
+            when (f.kind) {
+                FieldKind.Text, FieldKind.LongText -> item(key = f.id) {
+                    FieldCard(f.label, CharacterStore.getField(card, f.id), maxLines = if (f.kind == FieldKind.Text) 1 else 4) { openField(f.id) }
+                }
+                FieldKind.Toggle -> item(key = f.id) {
+                    LineCard {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text(f.label, style = MaterialTheme.typography.bodyLarge)
+                                if (f.hint.isNotEmpty()) Text(f.hint, style = MaterialTheme.typography.bodySmall, color = Sgu.Sub)
+                            }
+                            SguSwitch(Fields.getBool(data, f.path)) { CharacterStore.setBool(id, f.id, it) }
+                        }
+                    }
+                }
+                FieldKind.TextList -> {
+                    val alts = CharacterStore.altGreetings(card)
+                    item(key = f.id) {
+                        Row(Modifier.fillMaxWidth().padding(top = 6.dp, start = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text("${f.label} ${alts.size}개", style = MaterialTheme.typography.bodyMedium, color = Sgu.Sub, modifier = Modifier.weight(1f))
+                            PillChip("추가", selected = false, icon = Icons.Outlined.Add) {
+                                val i = CharacterStore.addAltGreeting(id)
+                                openField("alt:$i")
+                            }
+                        }
+                    }
+                    items(alts.size, key = { "alt$it" }) { i -> FieldCard("${f.label} ${i + 1}", alts[i]) { openField("alt:$i") } }
+                }
+                FieldKind.Lorebook -> item(key = f.id) {
+                    val entries = ((Fields.get(data, f.path) as? JsonArray) ?: JsonArray(emptyList())).mapNotNull { it as? JsonObject }
+                    LineCard {
+                        Column {
+                            Text("${f.label} ${entries.size}개", style = MaterialTheme.typography.bodySmall, color = Sgu.Sub)
+                            if (entries.isEmpty()) Text("항목이 없어요", style = MaterialTheme.typography.bodyMedium, color = Sgu.Sub.copy(alpha = 0.7f))
+                            entries.take(30).forEach { e ->
+                                val title = CardIO.str(e, "comment").ifBlank { CardIO.str(e, "name") }.ifBlank { "(이름 없음)" }
+                                val folder = CardIO.str(e, "mode") == "folder"
+                                Text((if (folder) "폴더 · " else "• ") + title, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 4.dp))
+                            }
+                            if (entries.size > 30) Text("외 ${entries.size - 30}개", style = MaterialTheme.typography.bodySmall, color = Sgu.Sub)
+                            Text("항목 편집은 작업실 단계에서 열려요", style = MaterialTheme.typography.bodySmall, color = Sgu.Sub, modifier = Modifier.padding(top = 8.dp))
+                        }
+                    }
+                }
+                FieldKind.LoreSettings -> item(key = f.id) { LoreSettingsCard(id, card) }
+                FieldKind.Regex -> item(key = f.id) {
+                    val list = ((Fields.get(data, f.path) as? JsonArray) ?: JsonArray(emptyList())).mapNotNull { it as? JsonObject }
+                    SummaryCard(f.label, if (list.isEmpty()) emptyList() else list.map { r ->
+                        val name = CardIO.str(r, "comment").ifBlank { CardIO.str(r, "in").take(40) }
+                        "$name · ${CardIO.str(r, "type")}" + if (r["disabled"]?.toString() == "true") " · 꺼짐" else ""
+                    })
+                }
+                FieldKind.Trigger -> item(key = f.id) {
+                    val list = ((Fields.get(data, f.path) as? JsonArray) ?: JsonArray(emptyList())).mapNotNull { it as? JsonObject }
+                    val lua = list.flatMap { t -> (t["effect"] as? JsonArray)?.mapNotNull { it as? JsonObject } ?: emptyList() }
+                        .firstOrNull { CardIO.str(it, "type") == "triggerlua" }?.let { CardIO.str(it, "code") }
+                    SummaryCard(f.label, when {
+                        lua != null -> listOf("Lua · ${lua.lines().size}줄") + lua.lines().filter { it.isNotBlank() }.take(3)
+                        list.isNotEmpty() -> listOf("V2 트리거 ${list.size}개")
+                        else -> emptyList()
+                    })
+                }
+                FieldKind.Onboarding -> item(key = f.id) {
+                    SummaryCard(f.label, if (Fields.get(data, f.path).let { it == null || it is kotlinx.serialization.json.JsonNull }) emptyList() else listOf("설정됨"))
+                }
+                FieldKind.Bias -> item(key = f.id) {
+                    val list = (Fields.get(data, f.path) as? JsonArray) ?: JsonArray(emptyList())
+                    SummaryCard(f.label, list.mapNotNull { it as? JsonArray }.map { pair ->
+                        "${(pair.getOrNull(0) as? JsonPrimitive)?.content ?: ""} → ${(pair.getOrNull(1) as? JsonPrimitive)?.content ?: ""}"
+                    })
                 }
             }
         }
-        items(alts.size, key = { "alt$it" }) { i ->
-            FieldCard("추가 첫 메시지 ${i + 1}", alts[i]) { openField("alt:$i") }
+    }
+}
+
+@Composable
+private fun SummaryCard(label: String, lines: List<String>) {
+    LineCard {
+        Column {
+            Text(label, style = MaterialTheme.typography.bodySmall, color = Sgu.Sub)
+            Spacer(Modifier.height(4.dp))
+            if (lines.isEmpty()) Text("없음", style = MaterialTheme.typography.bodyMedium, color = Sgu.Sub.copy(alpha = 0.7f))
+            lines.take(8).forEach { Text(it, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+            if (lines.size > 8) Text("외 ${lines.size - 8}개", style = MaterialTheme.typography.bodySmall, color = Sgu.Sub)
+            if (lines.isNotEmpty()) Text("보기 전용 · 편집은 작업실 단계에서 열려요", style = MaterialTheme.typography.bodySmall, color = Sgu.Sub, modifier = Modifier.padding(top = 6.dp))
         }
-        item(key = "book") {
-            val entries = (((card["data"] as? JsonObject)?.get("character_book") as? JsonObject)?.get("entries") as? JsonArray)?.size ?: 0
-            Spacer(Modifier.height(6.dp))
-            FieldCard("로어북", if (entries == 0) "" else "항목 ${entries}개 · 편집은 다음 단계에서 열려요", onClick = null)
+    }
+}
+
+/** 로어북 설정: "글로벌 설정 사용" or own scan depth / token budget / recursive / full-word. */
+@Composable
+private fun LoreSettingsCard(id: String, card: JsonObject) {
+    val ls = CharacterStore.loreSettings(card)
+    LineCard {
+        Column {
+            Text("로어북 설정", style = MaterialTheme.typography.bodySmall, color = Sgu.Sub)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("글로벌 설정 사용", style = MaterialTheme.typography.bodyLarge)
+                    Text("켜 두면 앱/RisuAI의 전역 로어북 설정을 따릅니다.", style = MaterialTheme.typography.bodySmall, color = Sgu.Sub)
+                }
+                SguSwitch(ls.usesGlobal) { on ->
+                    CharacterStore.setLoreSettings(id, if (on) CharacterStore.LoreSettings(null, null, null, null)
+                    else CharacterStore.LoreSettings(4, 2048, true, false))
+                }
+            }
+            if (!ls.usesGlobal) {
+                FieldLabel("스캔 깊이")
+                NumberBox("$id-scan", ls.scanDepth?.toDouble(), { v -> CharacterStore.setLoreSettings(id, ls.copy(scanDepth = v?.toInt())) }, "글로벌")
+                FieldLabel("토큰 예산")
+                NumberBox("$id-budget", ls.tokenBudget?.toDouble(), { v -> CharacterStore.setLoreSettings(id, ls.copy(tokenBudget = v?.toInt())) }, "글로벌")
+                Row(Modifier.padding(top = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text("재귀 검색", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+                    SguSwitch(ls.recursiveScanning == true) { CharacterStore.setLoreSettings(id, ls.copy(recursiveScanning = it)) }
+                }
+                Row(Modifier.padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text("단어 단위 일치", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+                    SguSwitch(ls.fullWordMatching == true) { CharacterStore.setLoreSettings(id, ls.copy(fullWordMatching = it)) }
+                }
+            }
         }
     }
 }
 
 /** A few lines of preview. Tapping opens the full-screen editor, so the list never traps scrolling. */
 @Composable
-private fun FieldCard(label: String, value: String, onClick: (() -> Unit)?) {
+private fun FieldCard(label: String, value: String, maxLines: Int = 4, onClick: (() -> Unit)?) {
     LineCard(onClick = onClick) {
         Column {
             Text(label, style = MaterialTheme.typography.bodySmall, color = Sgu.Sub)
@@ -199,7 +288,7 @@ private fun FieldCard(label: String, value: String, onClick: (() -> Unit)?) {
             if (value.isBlank()) {
                 Text("비어 있음 · 눌러서 작성", style = MaterialTheme.typography.bodyMedium, color = Sgu.Sub.copy(alpha = 0.7f))
             } else {
-                Text(value, style = MaterialTheme.typography.bodyMedium, maxLines = 4, overflow = TextOverflow.Ellipsis)
+                Text(value, style = MaterialTheme.typography.bodyMedium, maxLines = maxLines, overflow = TextOverflow.Ellipsis)
             }
         }
     }
@@ -311,32 +400,6 @@ private fun TurnCard(t: Turn) {
                 }
             }
         }
-    }
-}
-
-@Composable
-private fun ScriptsPage(card: JsonObject) {
-    val data = card["data"] as? JsonObject
-    val book = ((data?.get("character_book") as? JsonObject)?.get("entries") as? JsonArray)?.mapNotNull { it as? JsonObject } ?: emptyList()
-    LazyColumn(contentPadding = PaddingValues(top = 4.dp, bottom = 40.dp)) {
-        item { SectionLabel("로어북 ${book.size}개") }
-        if (book.isEmpty()) item { EmptyPane("로어북 항목이 없어요", Modifier.padding(top = 20.dp)) }
-        items(book.size) { i ->
-            val e = book[i]
-            val title = CardIO.str(e, "comment").ifBlank { CardIO.str(e, "name") }.ifBlank { "항목 ${i + 1}" }
-            val keys = (e["keys"] as? JsonArray)?.joinToString(", ") { CardIO.str(JsonObject(mapOf("k" to it)), "k") } ?: ""
-            GroupRow(i, book.size, title, subtitle = keys.ifBlank { null })
-        }
-    }
-}
-
-@Composable
-private fun MiscPage() {
-    var lowLevel by rememberSaveable { mutableStateOf(true) }
-    LazyColumn(contentPadding = PaddingValues(top = 4.dp, bottom = 40.dp)) {
-        item { SectionLabel("기타") }
-        item { GroupRow(0, 2, "저수준 접근", trailing = { SguSwitch(lowLevel) { lowLevel = it } }) }
-        item { GroupRow(1, 2, "에셋 관리", subtitle = "이미지 단계에서 열려요") }
     }
 }
 

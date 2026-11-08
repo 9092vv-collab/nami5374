@@ -131,11 +131,12 @@ object CharacterStore {
     fun create(): String {
         val id = newId()
         dir(id).mkdirs()
-        val n = items.count { it.name.startsWith("새 캐릭터") } + 1
+        val n = items.count { it.name.startsWith("프로젝트") } + 1
         val data = buildJsonObject {
-            put("name", JsonPrimitive("새 캐릭터 $n"))
+            put("name", JsonPrimitive("프로젝트 $n"))
             for (k in listOf("description", "personality", "scenario", "first_mes", "mes_example", "creator_notes",
-                "system_prompt", "post_history_instructions", "creator", "character_version")) put(k, JsonPrimitive(""))
+                "system_prompt", "post_history_instructions", "creator", "nickname")) put(k, JsonPrimitive(""))
+            put("character_version", JsonPrimitive("1.0"))
             put("alternate_greetings", JsonArray(emptyList()))
             put("tags", JsonArray(emptyList()))
         }
@@ -183,14 +184,15 @@ object CharacterStore {
 
     // ---------- fields ----------
 
-    /** Field keys: plain data keys ("description"…) or "alt:N" for alternate greeting N. */
+    /** Field keys: a Fields id ("description"…) or "alt:N" for alternate greeting N. */
     fun getField(card: JsonObject, key: String): String {
         val data = card["data"] as? JsonObject
         if (key.startsWith("alt:")) {
             val i = key.removePrefix("alt:").toIntOrNull() ?: return ""
             return ((data?.get("alternate_greetings") as? JsonArray)?.getOrNull(i) as? JsonPrimitive)?.contentOrNull ?: ""
         }
-        return CardIO.str(data, key)
+        val f = Fields.byId[key] ?: return CardIO.str(data, key)
+        return Fields.getString(data, f.path)
     }
 
     fun altGreetings(card: JsonObject): List<String> =
@@ -213,8 +215,53 @@ object CharacterStore {
             list[i] = JsonPrimitive(value)
             data["alternate_greetings"] = JsonArray(list)
         } else {
-            data[key] = JsonPrimitive(value)
+            val path = Fields.byId[key]?.path ?: listOf(key)
+            replaceAll(data, Fields.set(JsonObject(data), path, JsonPrimitive(value)))
         }
+    }
+
+    fun setBool(id: String, key: String, value: Boolean) = editData(id) { data ->
+        val path = Fields.byId[key]?.path ?: return@editData
+        replaceAll(data, Fields.set(JsonObject(data), path, JsonPrimitive(value)))
+    }
+
+    /** Lorebook settings: null = "use global setting" (same as the original's loreSettings). */
+    data class LoreSettings(val scanDepth: Int?, val tokenBudget: Int?, val recursiveScanning: Boolean?, val fullWordMatching: Boolean?) {
+        val usesGlobal get() = scanDepth == null && tokenBudget == null && recursiveScanning == null && fullWordMatching == null
+    }
+
+    fun loreSettings(card: JsonObject): LoreSettings {
+        val data = card["data"] as? JsonObject
+        val ls = Fields.get(data, listOf("extensions", "risuai", "loreSettings")) as? JsonObject
+        val book = data?.get("character_book") as? JsonObject
+        fun int(o: JsonObject?, k: String) = (o?.get(k) as? JsonPrimitive)?.contentOrNull?.toDoubleOrNull()?.toInt()
+        fun bool(o: JsonObject?, k: String) = (o?.get(k) as? JsonPrimitive)?.contentOrNull?.toBooleanStrictOrNull()
+        return LoreSettings(
+            int(ls, "scanDepth") ?: int(book, "scan_depth"),
+            int(ls, "tokenBudget") ?: int(book, "token_budget"),
+            bool(ls, "recursiveScanning") ?: bool(book, "recursive_scanning"),
+            bool(ls, "fullWordMatching") ?: bool(book?.get("extensions") as? JsonObject, "risu_fullWordMatching"),
+        )
+    }
+
+    fun setLoreSettings(id: String, s: LoreSettings) = editData(id) { data ->
+        var d = JsonObject(data)
+        fun putPath(path: List<String>, v: JsonElement?) { d = if (v == null) Fields.remove(d, path) else Fields.set(d, path, v) }
+        putPath(listOf("character_book", "scan_depth"), s.scanDepth?.let { JsonPrimitive(it) })
+        putPath(listOf("character_book", "token_budget"), s.tokenBudget?.let { JsonPrimitive(it) })
+        putPath(listOf("character_book", "recursive_scanning"), s.recursiveScanning?.let { JsonPrimitive(it) })
+        putPath(listOf("character_book", "extensions", "risu_fullWordMatching"), s.fullWordMatching?.let { JsonPrimitive(it) })
+        putPath(listOf("extensions", "risuai", "loreSettings"), if (s.usesGlobal) null else buildJsonObject {
+            put("scanDepth", s.scanDepth?.let { JsonPrimitive(it) } ?: kotlinx.serialization.json.JsonNull)
+            put("tokenBudget", s.tokenBudget?.let { JsonPrimitive(it) } ?: kotlinx.serialization.json.JsonNull)
+            put("recursiveScanning", s.recursiveScanning?.let { JsonPrimitive(it) } ?: kotlinx.serialization.json.JsonNull)
+            put("fullWordMatching", s.fullWordMatching?.let { JsonPrimitive(it) } ?: kotlinx.serialization.json.JsonNull)
+        })
+        replaceAll(data, d)
+    }
+
+    private fun replaceAll(target: MutableMap<String, JsonElement>, with: Map<String, JsonElement>) {
+        target.clear(); target.putAll(with)
     }
 
     fun addAltGreeting(id: String): Int {
