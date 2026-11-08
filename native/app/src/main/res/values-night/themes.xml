@@ -1,7 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <style name="Theme.SGU" parent="android:Theme.Material.NoActionBar">
-        <item name="android:windowBackground">@color/sgu_bg</item>
-    </style>
-    <color name="sgu_bg">#1F1E1D</color>
-</resources>

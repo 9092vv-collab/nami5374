@@ -3,6 +3,6 @@
     <style name="Theme.SGU" parent="android:Theme.Material.Light.NoActionBar">
         <item name="android:windowBackground">@color/sgu_bg</item>
     </style>
-    <color name="sgu_bg">#F5F4ED</color>
+    <color name="sgu_bg">#FAF9F7</color>
     <color name="sgu_icon_bg">#D97757</color>
 </resources>
