@@ -1,0 +1,5 @@
+app/build/
+build/
+.gradle/
+app/src/main/res/font/
+local.properties

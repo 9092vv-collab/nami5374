@@ -1,0 +1,83 @@
+name: Build SGU Next (native)
+# Builds only when started by hand (Actions tab -> Run workflow, or Claude via the API).
+on:
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Fonts (Pretendard GOV)
+        run: bash native/fetch-fonts.sh
+      - name: Get Gradle 8.14.3 (GitHub mirror)
+        run: |
+          F=gradle-8.14.3-bin.zip
+          for i in 1 2 3; do
+            curl -fL --retry 3 -o "$HOME/$F" "https://github.com/gradle/gradle-distributions/releases/download/v8.14.3/$F" && break
+            sleep 10
+          done
+          unzip -q "$HOME/$F" -d "$HOME"
+          echo "$HOME/gradle-8.14.3/bin" >> "$GITHUB_PATH"
+      - name: Use Google's Maven Central mirror
+        run: |
+          mkdir -p ~/.gradle/init.d
+          cat > ~/.gradle/init.d/sgu-mirror.gradle <<'EOF'
+          def MIRROR = 'https://maven-central.storage-download.googleapis.com/maven2/'
+          def patch = { repos ->
+            repos.withType(MavenArtifactRepository).configureEach { r ->
+              def u = r.url.toString()
+              if (u.contains('repo.maven.apache.org') || u.contains('repo1.maven.org')) { r.url = MIRROR }
+            }
+          }
+          beforeSettings { s ->
+            patch(s.pluginManagement.repositories)
+            patch(s.dependencyResolutionManagement.repositories)
+          }
+          EOF
+      - name: Build release APK
+        working-directory: native
+        run: |
+          set -o pipefail
+          for i in 1 2 3; do
+            gradle assembleRelease --no-daemon --stacktrace 2>&1 | tee -a ../gradle-native.log && exit 0
+            grep -q "Could not GET\|Gateway Time-out\|Connection reset\|Read timed out\|Could not download" ../gradle-native.log || exit 1
+            echo "::warning::attempt $i failed on a download, retrying"; sleep 30
+          done
+          exit 1
+      - name: Publish (fixed link, tag next-latest)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp native/app/build/outputs/apk/release/app-release.apk SGU-next.apk
+          ls -la SGU-next.apk
+          gh release delete next-latest -R "${{ github.repository }}" --cleanup-tag -y || true
+          gh release create next-latest SGU-next.apk -R "${{ github.repository }}" --prerelease \
+            --title "SGU Next (네이티브 미리보기, 빌드 ${{ github.run_number }})" --notes "commit ${{ github.sha }}"
+      - name: Save error log for Claude (branch build-logs)
+        if: failure()
+        run: |
+          mkdir -p /tmp/logs
+          {
+            echo "native run: ${{ github.run_number }}  commit: ${{ github.sha }}"
+            if [ -f gradle-native.log ]; then
+              echo "===== errors ====="
+              grep -n -B2 -A20 -E "^e: |What went wrong|error:|FAILED|Unresolved reference|Could not resolve" gradle-native.log | head -400
+              echo "===== last 120 lines ====="
+              tail -120 gradle-native.log
+            fi
+          } > /tmp/logs/latest.txt
+          cd /tmp/logs
+          git init -q && git checkout -q -b build-logs
+          git config user.name "build-bot" && git config user.email "build-bot@users.noreply.github.com"
+          git add latest.txt && git commit -qm "native build log #${{ github.run_number }}"
+          git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" build-logs
