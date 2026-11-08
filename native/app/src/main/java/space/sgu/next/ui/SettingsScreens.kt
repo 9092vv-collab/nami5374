@@ -391,7 +391,12 @@ fun ProviderScreen(id: String, open: (String) -> Unit, onBack: () -> Unit) {
             Column {
                 FieldLabel("요청 포맷")
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Presets.formatLabels.forEach { (k, label) -> PillChip(label, p.s("format") == k) { set("format", k) } }
+                    Presets.formatLabels.forEach { (k, label) ->
+                        PillChip(label, p.s("format") == k) {
+                            set("format", k)
+                            if (k == "novelai-image" && (p.s("baseUrl").isBlank() || "text.novelai.net" in p.s("baseUrl"))) set("baseUrl", Presets.NAI_IMAGE_URL)
+                        }
+                    }
                 }
                 FieldLabel("인증 방식")
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {

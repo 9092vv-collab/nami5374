@@ -82,6 +82,14 @@ object SettingsStore {
         merged["background"] = JsonObject(d.o("background").orEmpty() + t.o("background").orEmpty())
         merged["logging"] = JsonObject(d.o("logging").orEmpty() + t.o("logging").orEmpty())
         merged.remove("_secrets")
+        // NovelAI image providers must call image.novelai.net (the text endpoint answers 401).
+        (merged["providers"] as? JsonArray)?.let { list ->
+            merged["providers"] = JsonArray(list.map { e ->
+                val p = e as? JsonObject ?: return@map e
+                val url = p.s("baseUrl")
+                if (p.s("format") == "novelai-image" && (url.isBlank() || "text.novelai.net" in url)) p.with("baseUrl" to JsonPrimitive(Presets.NAI_IMAGE_URL)) else p
+            })
+        }
         return JsonObject(merged)
     }
 

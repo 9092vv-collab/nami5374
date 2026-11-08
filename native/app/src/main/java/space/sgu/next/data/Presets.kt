@@ -21,6 +21,10 @@ data class Preset(
 
 object Presets {
     val all = listOf(
+        Preset("novelai-image", "NovelAI", "novelai-image", "https://image.novelai.net", "bearer",
+            "NovelAI 이미지 생성 (Persistent API Token). 이미지 탭 › 이미지 생성에서 사용합니다.", emptyList(), false, "pst-...",
+            listOf("모델 등록이 필요 없습니다. Persistent API Token을 연결하세요.", "이미지 탭 › 이미지 생성에서 사용합니다."),
+            "해당 없음.", "off", image = true),
         Preset("openai", "OpenAI", "openai-chat", "https://api.openai.com/v1", "bearer",
             "OpenAI Chat Completions. Responses API가 필요하면 포맷을 바꾸세요.",
             listOf("gpt-5", "gpt-5-mini", "gpt-4.1", "gpt-4o"), false, "sk-...",
@@ -69,7 +73,7 @@ object Presets {
             listOf("anthropic/claude-sonnet-4.5", "openai/gpt-5", "google/gemini-2.5-pro", "deepseek/deepseek-chat-v3.1"), false, "sk-or-...",
             listOf("모델 ID는 'vendor/model' 형식입니다.", "추가 바디 필드에 provider 라우팅({\"provider\":{\"order\":[...]}})을 넣을 수 있습니다."),
             "모델에 따라 다릅니다. Anthropic·Gemini 계열은 cache_control 지점이 필요하고, OpenAI·DeepSeek·Grok 계열은 자동 캐싱입니다.", "auto"),
-        Preset("novelai", "NovelAI", "openai-chat", "https://text.novelai.net/oa/v1", "bearer",
+        Preset("novelai", "NovelAI (텍스트 GLM)", "openai-chat", "https://text.novelai.net/oa/v1", "bearer",
             "NovelAI OpenAI 호환 엔드포인트 (Persistent API token).", listOf("glm-4-6", "glm-4-5"), true, "pst-...",
             listOf("GLM 계열 텍스트 모델을 OpenAI 호환 엔드포인트로 사용합니다. Persistent API Token(pst-…)이 필요합니다."),
             "캐싱을 지원하지 않습니다(설정 무시).", "off"),
@@ -82,10 +86,6 @@ object Presets {
             "System One 모델. 서브 프로세서 전용(열람/편집 필요 여부 판정).", listOf("jev-latest"), false, "TypeSafe API key",
             listOf("서브 프로세서 전용입니다. 예/아니오 판정만 수행합니다.", "설정 › 프로세서에서 '서브 = Jev'를 선택하고 이 프로바이더를 지정하세요."),
             "서브 프로세서 요청은 항상 캐싱을 쓰지 않습니다.", "off", jev = true),
-        Preset("novelai-image", "NovelAI (image)", "novelai-image", "https://image.novelai.net", "bearer",
-            "NovelAI 이미지 생성 (Persistent API Token). 이미지 탭 › 이미지 생성에서 사용합니다.", emptyList(), false, "pst-...",
-            listOf("모델 등록이 필요 없습니다. Persistent API Token을 연결하세요.", "이미지 탭 › 이미지 생성에서 사용합니다."),
-            "해당 없음.", "off", image = true),
         Preset("custom", "커스텀 (OpenAI 호환)", "openai-chat", "https://example.com/v1", "bearer",
             "Groq, DeepSeek, xAI, Mistral, 로컬 서버 등 OpenAI 호환 엔드포인트. 포맷·인증 방식을 바꿀 수 있습니다.",
             emptyList(), true, "API key",
@@ -98,6 +98,8 @@ object Presets {
     )
 
     val byId = all.associateBy { it.id }
+
+    const val NAI_IMAGE_URL = "https://image.novelai.net"
 
     val formatLabels = linkedMapOf(
         "openai-chat" to "OpenAI Chat Completions",
