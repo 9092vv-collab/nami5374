@@ -60,8 +60,13 @@ object Fields {
     val byId = all.associateBy { it.id }
     fun inGroup(g: String) = all.filter { it.group == g }
 
-    fun label(key: String): String =
-        if (key.startsWith("alt:")) "추가 첫 메세지 ${(key.removePrefix("alt:").toIntOrNull() ?: 0) + 1}" else byId[key]?.label ?: key
+    fun label(key: String): String = when {
+        key.startsWith("alt:") -> "추가 첫 메세지 ${(key.removePrefix("alt:").toIntOrNull() ?: 0) + 1}"
+        key.startsWith("lore:") -> "로어북 내용"
+        key == "trig:code" -> "트리거 코드"
+        key == "onb:html" -> "온보딩 HTML"
+        else -> byId[key]?.label ?: key
+    }
 
     // ---------- nested JSON access under card.data ----------
 

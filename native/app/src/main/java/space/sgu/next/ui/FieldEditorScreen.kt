@@ -51,11 +51,21 @@ fun FieldEditorScreen(characterId: String, key: String, onBack: () -> Unit) {
     val focus = remember { FocusRequester() }
     val latest by rememberUpdatedState(text)
     val isAlt = key.startsWith("alt:")
+    // 트리거 V2 must stay valid JSON (the original would replace broken JSON with an empty trigger on export).
+    val isV2 = remember(characterId, key) {
+        key == "trig:code" && space.sgu.next.data.Scripts.trigger(CharacterStore.readCard(characterId)["data"] as? kotlinx.serialization.json.JsonObject).mode == space.sgu.next.data.Scripts.TriggerMode.V2
+    }
+    val mono = key == "trig:code" || key == "onb:html"
+    val invalid = isV2 && text.isNotBlank() && space.sgu.next.data.Scripts.parseV2(text) == null
+    val latestInvalid by rememberUpdatedState(invalid)
+    var askLeave by remember { mutableStateOf(false) }
+    val leave: () -> Unit = { if (invalid && text != original) askLeave = true else onBack() }
+    androidx.activity.compose.BackHandler(enabled = invalid && text != original) { askLeave = true }
 
     // Save on leave (back gesture, back arrow or ✓).
     DisposableEffect(characterId, key) {
         onDispose {
-            if (!deleted && latest != original && CharacterStore.items.any { it.id == characterId }) {
+            if (!deleted && !latestInvalid && latest != original && CharacterStore.items.any { it.id == characterId }) {
                 if (isGen) space.sgu.next.data.ImageGenStore.setText(characterId, key, latest)
                 else CharacterStore.setField(characterId, key, latest)
             }
@@ -68,11 +78,11 @@ fun FieldEditorScreen(characterId: String, key: String, onBack: () -> Unit) {
         topBar = {
             SguTopBar(
                 title = if (isGen) space.sgu.next.data.ImageGenStore.label(characterId, key) else fieldLabel(key),
-                subtitle = CharacterStore.items.firstOrNull { it.id == characterId }?.name,
-                onBack = onBack,
+                subtitle = if (invalid) "JSON 형식 오류 · 고쳐야 저장돼요" else CharacterStore.items.firstOrNull { it.id == characterId }?.name,
+                onBack = leave,
                 actions = {
                     if (isAlt) IconButton(onClick = { confirmDelete = true }) { Icon(Icons.Outlined.Delete, "삭제") }
-                    IconButton(onClick = onBack) { Icon(Icons.Outlined.Check, "완료") }
+                    IconButton(onClick = leave) { Icon(Icons.Outlined.Check, "완료") }
                 },
             )
         },
@@ -82,15 +92,31 @@ fun FieldEditorScreen(characterId: String, key: String, onBack: () -> Unit) {
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 22.dp, vertical = 8.dp),
         ) {
-            if (text.isEmpty()) Text("여기에 내용을 쓰세요", style = MaterialTheme.typography.bodyLarge, color = Sgu.Sub)
+            if (text.isEmpty()) Text(
+                when (key) { "trig:code" -> if (isV2) "V2 트리거 JSON 배열" else "-- RisuAI Lua 트리거 코드"; else -> "여기에 내용을 쓰세요" },
+                style = MaterialTheme.typography.bodyLarge, color = Sgu.Sub,
+            )
             BasicTextField(
                 value = text,
                 onValueChange = { text = it },
-                textStyle = MaterialTheme.typography.bodyLarge.copy(color = Sgu.Ink),
+                textStyle = MaterialTheme.typography.bodyLarge.copy(color = Sgu.Ink).let {
+                    if (mono) it.copy(fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace, fontSize = androidx.compose.ui.unit.TextUnit(14f, androidx.compose.ui.unit.TextUnitType.Sp)) else it
+                },
                 cursorBrush = SolidColor(Sgu.Accent),
                 modifier = Modifier.fillMaxSize().focusRequester(focus).padding(bottom = 200.dp),
             )
         }
+    }
+
+    if (askLeave) {
+        AlertDialog(
+            onDismissRequest = { askLeave = false },
+            title = { Text("JSON이 올바르지 않아요") },
+            text = { Text("V2 트리거는 JSON 배열이어야 해요. 고치지 않고 나가면 이번에 바꾼 내용은 저장되지 않아요.") },
+            confirmButton = { TextButton(onClick = { askLeave = false; onBack() }) { Text("저장 안 하고 나가기", color = Sgu.Danger) } },
+            dismissButton = { TextButton(onClick = { askLeave = false }) { Text("계속 편집", color = Sgu.Ink) } },
+            containerColor = Sgu.Card,
+        )
     }
 
     if (confirmDelete) {

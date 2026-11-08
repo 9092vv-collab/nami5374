@@ -85,7 +85,7 @@ fun fieldLabel(key: String): String = Fields.label(key)
 /** Character workspace. onBack == null when shown as the right pane on the unfolded screen. */
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
-fun EditorScreen(characterId: String, onBack: (() -> Unit)?, openField: (String) -> Unit, openPreset: (String) -> Unit = {}) {
+fun EditorScreen(characterId: String, onBack: (() -> Unit)?, openField: (String) -> Unit, openPreset: (String) -> Unit = {}, openRoute: (String) -> Unit = {}) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     val meta = CharacterStore.items.firstOrNull { it.id == characterId }
@@ -135,23 +135,25 @@ fun EditorScreen(characterId: String, onBack: (() -> Unit)?, openField: (String)
             )
             HorizontalPager(state = pager, modifier = Modifier.weight(1f), beyondViewportPageCount = 1) { page ->
                 when (page) {
-                    0 -> GroupPage("character", characterId, card, openField)
+                    0 -> GroupPage("character", characterId, card, openField, openRoute)
                     1 -> ImagePage(characterId, openField, openPreset)
                     2 -> WorkshopPage()
-                    3 -> GroupPage("script", characterId, card, openField)
-                    else -> GroupPage("etc", characterId, card, openField)
+                    3 -> GroupPage("script", characterId, card, openField, openRoute)
+                    else -> GroupPage("etc", characterId, card, openField, openRoute)
                 }
             }
         }
     }
 }
 
-// ---------- 캐릭터 / 스크립트 / 기타 tabs: the original's field groups, preview cards only ----------
+// ---------- 캐릭터 / 스크립트 / 기타 tabs: the original's field groups ----------
 
 @Composable
-private fun GroupPage(group: String, id: String, card: JsonObject, openField: (String) -> Unit) {
+private fun GroupPage(group: String, id: String, card: JsonObject, openField: (String) -> Unit, openRoute: (String) -> Unit) {
     val data = card["data"] as? JsonObject
     val fields = Fields.inGroup(group)
+    val expanded = remember(id) { mutableStateOf(setOf<String>()) }
+    androidx.compose.runtime.CompositionLocalProvider(LocalGroupInset provides 0.dp) {
     LazyColumn(contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 40.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         fields.forEach { f ->
             when (f.kind) {
@@ -182,65 +184,15 @@ private fun GroupPage(group: String, id: String, card: JsonObject, openField: (S
                     }
                     items(alts.size, key = { "alt$it" }) { i -> FieldCard("${f.label} ${i + 1}", alts[i]) { openField("alt:$i") } }
                 }
-                FieldKind.Lorebook -> item(key = f.id) {
-                    val entries = ((Fields.get(data, f.path) as? JsonArray) ?: JsonArray(emptyList())).mapNotNull { it as? JsonObject }
-                    LineCard {
-                        Column {
-                            Text("${f.label} ${entries.size}개", style = MaterialTheme.typography.bodySmall, color = Sgu.Sub)
-                            if (entries.isEmpty()) Text("항목이 없어요", style = MaterialTheme.typography.bodyMedium, color = Sgu.Sub.copy(alpha = 0.7f))
-                            entries.take(30).forEach { e ->
-                                val title = CardIO.str(e, "comment").ifBlank { CardIO.str(e, "name") }.ifBlank { "(이름 없음)" }
-                                val folder = CardIO.str(e, "mode") == "folder"
-                                Text((if (folder) "폴더 · " else "• ") + title, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 4.dp))
-                            }
-                            if (entries.size > 30) Text("외 ${entries.size - 30}개", style = MaterialTheme.typography.bodySmall, color = Sgu.Sub)
-                            Text("항목 편집은 작업실 단계에서 열려요", style = MaterialTheme.typography.bodySmall, color = Sgu.Sub, modifier = Modifier.padding(top = 8.dp))
-                        }
-                    }
-                }
+                FieldKind.Lorebook -> loreItems(id, data, expanded, openRoute)
                 FieldKind.LoreSettings -> item(key = f.id) { LoreSettingsCard(id, card) }
-                FieldKind.Regex -> item(key = f.id) {
-                    val list = ((Fields.get(data, f.path) as? JsonArray) ?: JsonArray(emptyList())).mapNotNull { it as? JsonObject }
-                    SummaryCard(f.label, if (list.isEmpty()) emptyList() else list.map { r ->
-                        val name = CardIO.str(r, "comment").ifBlank { CardIO.str(r, "in").take(40) }
-                        "$name · ${CardIO.str(r, "type")}" + if (r["disabled"]?.toString() == "true") " · 꺼짐" else ""
-                    })
-                }
-                FieldKind.Trigger -> item(key = f.id) {
-                    val list = ((Fields.get(data, f.path) as? JsonArray) ?: JsonArray(emptyList())).mapNotNull { it as? JsonObject }
-                    val lua = list.flatMap { t -> (t["effect"] as? JsonArray)?.mapNotNull { it as? JsonObject } ?: emptyList() }
-                        .firstOrNull { CardIO.str(it, "type") == "triggerlua" }?.let { CardIO.str(it, "code") }
-                    SummaryCard(f.label, when {
-                        lua != null -> listOf("Lua · ${lua.lines().size}줄") + lua.lines().filter { it.isNotBlank() }.take(3)
-                        list.isNotEmpty() -> listOf("V2 트리거 ${list.size}개")
-                        else -> emptyList()
-                    })
-                }
-                FieldKind.Onboarding -> item(key = f.id) {
-                    SummaryCard(f.label, if (Fields.get(data, f.path).let { it == null || it is kotlinx.serialization.json.JsonNull }) emptyList() else listOf("설정됨"))
-                }
-                FieldKind.Bias -> item(key = f.id) {
-                    val list = (Fields.get(data, f.path) as? JsonArray) ?: JsonArray(emptyList())
-                    SummaryCard(f.label, list.mapNotNull { it as? JsonArray }.map { pair ->
-                        "${(pair.getOrNull(0) as? JsonPrimitive)?.content ?: ""} → ${(pair.getOrNull(1) as? JsonPrimitive)?.content ?: ""}"
-                    })
-                }
+                FieldKind.Regex -> regexItems(id, data, openRoute)
+                FieldKind.Trigger -> item(key = f.id) { TriggerCard(id, data, openField) }
+                FieldKind.Onboarding -> item(key = f.id) { OnboardingCard(id, data, openRoute) }
+                FieldKind.Bias -> item(key = f.id) { BiasCard(id, data, openRoute) }
             }
         }
     }
-}
-
-@Composable
-private fun SummaryCard(label: String, lines: List<String>) {
-    LineCard {
-        Column {
-            Text(label, style = MaterialTheme.typography.bodySmall, color = Sgu.Sub)
-            Spacer(Modifier.height(4.dp))
-            if (lines.isEmpty()) Text("없음", style = MaterialTheme.typography.bodyMedium, color = Sgu.Sub.copy(alpha = 0.7f))
-            lines.take(8).forEach { Text(it, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis) }
-            if (lines.size > 8) Text("외 ${lines.size - 8}개", style = MaterialTheme.typography.bodySmall, color = Sgu.Sub)
-            if (lines.isNotEmpty()) Text("보기 전용 · 편집은 작업실 단계에서 열려요", style = MaterialTheme.typography.bodySmall, color = Sgu.Sub, modifier = Modifier.padding(top = 6.dp))
-        }
     }
 }
 

@@ -90,11 +90,23 @@ fun SguApp() {
         composable("character/{id}") { entry ->
             val id = entry.arguments?.getString("id") ?: ""
             EditorScreen(characterId = id, onBack = { nav.popBackStack() }, openField = { key -> openField(id, key) },
-                openPreset = { pid -> nav.navigate("genpreset/$id/$pid") })
+                openPreset = { pid -> nav.navigate("genpreset/$id/$pid") }, openRoute = go)
         }
         composable("genpreset/{id}/{pid}") { entry ->
             val id = entry.arguments?.getString("id") ?: ""
             GenPresetScreen(id, entry.arguments?.getString("pid") ?: "", openField = { key -> openField(id, key) }, onBack = { nav.popBackStack() })
+        }
+        composable("regex/{id}/{i}/{new}") { e ->
+            RegexScreen(e.arguments?.getString("id") ?: "", e.arguments?.getString("i")?.toIntOrNull() ?: -1, e.arguments?.getString("new") == "1", onBack = back)
+        }
+        composable("lore/{id}/{i}/{new}") { e ->
+            val id = e.arguments?.getString("id") ?: ""
+            LoreScreen(id, e.arguments?.getString("i")?.toIntOrNull() ?: -1, e.arguments?.getString("new") == "1", openField = { key -> openField(id, key) }, onBack = back)
+        }
+        composable("bias/{id}") { e -> BiasScreen(e.arguments?.getString("id") ?: "", onBack = back) }
+        composable("onboarding/{id}") { e ->
+            val id = e.arguments?.getString("id") ?: ""
+            OnboardingScreen(id, openField = { key -> openField(id, key) }, onBack = back)
         }
         composable("field/{id}/{key}") { entry ->
             FieldEditorScreen(
@@ -125,7 +137,7 @@ private fun HomeScreen(openCharacter: (String) -> Unit, openField: (String, Stri
                     Box(Modifier.weight(0.58f)) {
                         if (selectedId.isEmpty()) EmptyPane("왼쪽에서 캐릭터를 고르세요")
                         else EditorScreen(characterId = selectedId, onBack = null, openField = { key -> openField(selectedId, key) },
-                            openPreset = { pid -> openPreset(selectedId, pid) })
+                            openPreset = { pid -> openPreset(selectedId, pid) }, openRoute = openSettings)
                     }
                 }
             } else {

@@ -162,7 +162,7 @@ private fun PickerDialog(title: String, options: List<Pair<String?, String>>, se
 }
 
 @Composable
-private fun ConfirmDialog(title: String, body: String, confirm: String, onConfirm: () -> Unit, onDismiss: () -> Unit) {
+fun ConfirmDialog(title: String, body: String, confirm: String, onConfirm: () -> Unit, onDismiss: () -> Unit) {
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(title) }, text = { Text(body) },
@@ -188,7 +188,7 @@ private fun ResultLine(ok: Boolean?, text: String) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun Page(title: String, subtitle: String?, onBack: () -> Unit, actions: @Composable androidx.compose.foundation.layout.RowScope.() -> Unit = {}, content: @Composable () -> Unit) {
+fun Page(title: String, subtitle: String?, onBack: () -> Unit, actions: @Composable androidx.compose.foundation.layout.RowScope.() -> Unit = {}, content: @Composable () -> Unit) {
     Scaffold(containerColor = Sgu.Bg, topBar = { SguTopBar(title, subtitle, onBack = onBack, actions = actions) }) { pad ->
         androidx.compose.runtime.CompositionLocalProvider(LocalGroupInset provides 0.dp) {
             Column(

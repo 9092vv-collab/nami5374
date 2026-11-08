@@ -191,12 +191,24 @@ object CharacterStore {
             val i = key.removePrefix("alt:").toIntOrNull() ?: return ""
             return ((data?.get("alternate_greetings") as? JsonArray)?.getOrNull(i) as? JsonPrimitive)?.contentOrNull ?: ""
         }
+        scriptKey(key)?.let { (kind, i) ->
+            return when (kind) {
+                "lore" -> Scripts.str(Scripts.lore(data).getOrNull(i), "content")
+                "trig" -> Scripts.trigger(data).code
+                else -> Scripts.str(Scripts.onboarding(data), "html")
+            }
+        }
         val f = Fields.byId[key] ?: return CardIO.str(data, key)
         return Fields.getString(data, f.path)
     }
 
     fun altGreetings(card: JsonObject): List<String> =
         ((card["data"] as? JsonObject)?.get("alternate_greetings") as? JsonArray)?.map { (it as? JsonPrimitive)?.contentOrNull ?: "" } ?: emptyList()
+
+    /** Replaces card.data with transform(card.data). */
+    fun updateData(id: String, transform: (JsonObject) -> JsonObject) = editData(id) { m ->
+        val next = transform(JsonObject(m)); m.clear(); m.putAll(next)
+    }
 
     private fun editData(id: String, change: (MutableMap<String, JsonElement>) -> Unit) {
         val card = readCard(id)
@@ -207,7 +219,25 @@ object CharacterStore {
         refresh(id)
     }
 
+    /** Full-screen editor keys owned by the script editors: lore:N:content, trig:code, onb:html. */
+    private fun scriptKey(key: String): Pair<String, Int>? = when {
+        key.startsWith("lore:") && key.endsWith(":content") -> "lore" to (key.removePrefix("lore:").removeSuffix(":content").toIntOrNull() ?: -1)
+        key == "trig:code" -> "trig" to 0
+        key == "onb:html" -> "onb" to 0
+        else -> null
+    }
+
     fun setField(id: String, key: String, value: String) = editData(id) { data ->
+        scriptKey(key)?.let { (kind, i) ->
+            val d = JsonObject(data)
+            val next = when (kind) {
+                "lore" -> Scripts.lore(d).getOrNull(i)?.let { Scripts.saveLore(d, i, JsonObject(it + ("content" to JsonPrimitive(value)))) } ?: d
+                "trig" -> Scripts.setTrigger(d, Scripts.trigger(d).copy(code = value))
+                else -> Fields.set(d, Scripts.ONBOARDING_PATH, JsonObject(Scripts.onboarding(d) + ("html" to JsonPrimitive(value))))
+            }
+            replaceAll(data, next)
+            return@editData
+        }
         if (key.startsWith("alt:")) {
             val i = key.removePrefix("alt:").toIntOrNull() ?: return@editData
             val list = ((data["alternate_greetings"] as? JsonArray) ?: JsonArray(emptyList())).toMutableList()
@@ -222,7 +252,8 @@ object CharacterStore {
 
     fun setBool(id: String, key: String, value: Boolean) = editData(id) { data ->
         val path = Fields.byId[key]?.path ?: return@editData
-        replaceAll(data, Fields.set(JsonObject(data), path, JsonPrimitive(value)))
+        val next = Fields.set(JsonObject(data), path, JsonPrimitive(value))
+        replaceAll(data, if (key == "lowLevelAccess") Scripts.resyncLowLevel(next) else next)
     }
 
     /** Lorebook settings: null = "use global setting" (same as the original's loreSettings). */
@@ -297,7 +328,7 @@ object CharacterStore {
                 val card: JsonObject = when (CardIO.detect(head.copyOf(maxOf(n, 0)))) {
                     CardIO.Kind.Charx -> {
                         val x = File(d, "x")
-                        val c = CardIO.unzipCharx(input, x)
+                        val c = CardIO.mergeRisum(CardIO.unzipCharx(input, x), x)
                         val icons = CardIO.assets(c).filter { CardIO.str(it, "type") == "icon" }
                         val main = icons.firstOrNull { CardIO.str(it, "name") == "main" } ?: icons.firstOrNull()
                         main?.let { CardIO.assetFile(x, CardIO.str(it, "uri")) }?.copyTo(File(d, "icon.png"), overwrite = true)
