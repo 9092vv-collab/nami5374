@@ -76,6 +76,7 @@ fun SguApp() {
                 openCharacter = { id -> nav.navigate("character/$id") },
                 openField = ::openField,
                 openSettings = { route -> nav.navigate(route) },
+                openPreset = { id, pid -> nav.navigate("genpreset/$id/$pid") },
             )
         }
         val back: () -> Unit = { nav.popBackStack() }
@@ -88,7 +89,12 @@ fun SguApp() {
         composable("backup") { BackupScreen(onBack = back) }
         composable("character/{id}") { entry ->
             val id = entry.arguments?.getString("id") ?: ""
-            EditorScreen(characterId = id, onBack = { nav.popBackStack() }, openField = { key -> openField(id, key) })
+            EditorScreen(characterId = id, onBack = { nav.popBackStack() }, openField = { key -> openField(id, key) },
+                openPreset = { pid -> nav.navigate("genpreset/$id/$pid") })
+        }
+        composable("genpreset/{id}/{pid}") { entry ->
+            val id = entry.arguments?.getString("id") ?: ""
+            GenPresetScreen(id, entry.arguments?.getString("pid") ?: "", openField = { key -> openField(id, key) }, onBack = { nav.popBackStack() })
         }
         composable("field/{id}/{key}") { entry ->
             FieldEditorScreen(
@@ -101,7 +107,7 @@ fun SguApp() {
 }
 
 @Composable
-private fun HomeScreen(openCharacter: (String) -> Unit, openField: (String, String) -> Unit, openSettings: (String) -> Unit) {
+private fun HomeScreen(openCharacter: (String) -> Unit, openField: (String, String) -> Unit, openSettings: (String) -> Unit, openPreset: (String, String) -> Unit) {
     var tab by rememberSaveable { mutableIntStateOf(0) }
     var picked by rememberSaveable { mutableStateOf("") }
     val wide = isWide()
@@ -118,7 +124,8 @@ private fun HomeScreen(openCharacter: (String) -> Unit, openField: (String, Stri
                     VerticalDivider(color = Sgu.Line)
                     Box(Modifier.weight(0.58f)) {
                         if (selectedId.isEmpty()) EmptyPane("왼쪽에서 캐릭터를 고르세요")
-                        else EditorScreen(characterId = selectedId, onBack = null, openField = { key -> openField(selectedId, key) })
+                        else EditorScreen(characterId = selectedId, onBack = null, openField = { key -> openField(selectedId, key) },
+                            openPreset = { pid -> openPreset(selectedId, pid) })
                     }
                 }
             } else {

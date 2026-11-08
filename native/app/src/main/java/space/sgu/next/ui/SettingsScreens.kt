@@ -280,6 +280,24 @@ fun ProviderScreen(id: String, open: (String) -> Unit, onBack: () -> Unit) {
     Page(p.s("name"), preset?.name ?: "커스텀", onBack, actions = {
         IconButton(onClick = { confirmDelete = true }) { Icon(Icons.Outlined.Delete, "프로바이더 삭제") }
     }) {
+        if (p.s("preset") == "novelai" && p.s("format") != "novelai-image") {
+            Spacer(Modifier.height(8.dp))
+            LineCard {
+                Column {
+                    Text("이미지 생성용으로 쓰실 건가요?", style = MaterialTheme.typography.titleMedium)
+                    Text("이 프로바이더는 NovelAI 텍스트(GLM)용이에요. 이미지 생성에는 image.novelai.net 주소와 NovelAI Image 포맷이 필요해요. 키는 그대로 유지돼요.",
+                        style = MaterialTheme.typography.bodySmall, color = Sgu.Sub, modifier = Modifier.padding(top = 4.dp))
+                    Spacer(Modifier.height(12.dp))
+                    InkButton("이미지 생성용으로 바꾸기", onClick = {
+                        SettingsStore.patch("providers", id,
+                            "preset" to JsonPrimitive("novelai-image"), "format" to JsonPrimitive("novelai-image"),
+                            "baseUrl" to JsonPrimitive(Presets.NAI_IMAGE_URL), "auth" to JsonPrimitive("bearer"))
+                        SettingsStore.models.filter { it.s("providerId") == id }.forEach { SettingsStore.removeModel(it.s("id")) }
+                        runCheck()
+                    })
+                }
+            }
+        }
         FieldLabel("이름")
         InputBox(p.s("name"), { set("name", it) })
 
@@ -336,6 +354,18 @@ fun ProviderScreen(id: String, open: (String) -> Unit, onBack: () -> Unit) {
         }
         ResultLine(check.first, check.second)
 
+        if (isImage) {
+            FieldLabel("이미지 모델")
+            LineCard {
+                Column {
+                    space.sgu.next.data.NaiModels.list.forEach { (mid, label) ->
+                        Text("• $label", style = MaterialTheme.typography.bodyMedium)
+                        Text("   $mid", style = MaterialTheme.typography.bodySmall, color = Sgu.Sub)
+                    }
+                    Text("모델 등록은 필요 없어요. 캐릭터 › 이미지 › 그림체 설정에서 고릅니다.", style = MaterialTheme.typography.bodySmall, color = Sgu.Sub, modifier = Modifier.padding(top = 8.dp))
+                }
+            }
+        }
         if (!isImage) {
             FieldLabel("모델 ${myModels.size}개")
             myModels.forEachIndexed { i, m ->
@@ -357,8 +387,8 @@ fun ProviderScreen(id: String, open: (String) -> Unit, onBack: () -> Unit) {
                 loadingModels = true
                 scope.launch {
                     runCatching { Llm.listModels(SettingsStore.provider(id)!!) }
-                        .onSuccess { serverModels = it.ifEmpty { preset?.models ?: emptyList() } }
-                        .onFailure { check = false to (it.message ?: "실패"); serverModels = preset?.models }
+                        .onSuccess { serverModels = it }
+                        .onFailure { check = false to (it.message ?: "실패"); serverModels = null }
                     loadingModels = false
                 }
             }, icon = Icons.Outlined.FileDownload)

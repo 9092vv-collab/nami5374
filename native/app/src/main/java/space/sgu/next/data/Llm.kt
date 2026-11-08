@@ -170,7 +170,14 @@ object Llm {
 
     suspend fun checkConnection(p: JsonObject): Pair<Boolean, String> = try {
         when (p.s("format")) {
-            "novelai-image" -> { resolve(p); true to "키 저장됨 · 실제 확인은 이미지 단계에서 열려요" }
+            "novelai-image" -> {
+                // Same check as the original (module 951 checkNaiConnection): subscription + Anlas.
+                val r = resolve(p)
+                val o = CardIO.json.parseToJsonElement(http("GET", joinUrl(r.baseUrl, "user/subscription"), authHeaders(r), null, 20_000)).jsonObject
+                val steps = o.o("trainingStepsLeft")
+                val anlas = if (steps == null) null else ((steps.d("fixedTrainingStepsLeft") ?: 0.0) + (steps.d("purchasedTrainingSteps") ?: 0.0)).toLong()
+                true to "연결됨 · 구독 등급 ${o.sOrNull("tier") ?: "?"}" + (anlas?.let { " · Anlas $it" } ?: "")
+            }
             "openai-chat", "openai-responses", "anthropic", "gemini", "jev" -> {
                 val n = listModels(p).size
                 true to if (n > 0) "연결됨 · 서버 모델 ${n}개" else "연결됨"

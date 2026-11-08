@@ -40,7 +40,10 @@ import space.sgu.next.data.CharacterStore
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 fun FieldEditorScreen(characterId: String, key: String, onBack: () -> Unit) {
-    val original = remember(characterId, key) { CharacterStore.getField(CharacterStore.readCard(characterId), key) }
+    val isGen = key.startsWith("gen:")
+    val original = remember(characterId, key) {
+        if (isGen) space.sgu.next.data.ImageGenStore.getText(characterId, key) else CharacterStore.getField(CharacterStore.readCard(characterId), key)
+    }
     var text by rememberSaveable(characterId, key) { mutableStateOf(original) }
     var deleted by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
@@ -52,7 +55,8 @@ fun FieldEditorScreen(characterId: String, key: String, onBack: () -> Unit) {
     DisposableEffect(characterId, key) {
         onDispose {
             if (!deleted && latest != original && CharacterStore.items.any { it.id == characterId }) {
-                CharacterStore.setField(characterId, key, latest)
+                if (isGen) space.sgu.next.data.ImageGenStore.setText(characterId, key, latest)
+                else CharacterStore.setField(characterId, key, latest)
             }
         }
     }
@@ -62,7 +66,7 @@ fun FieldEditorScreen(characterId: String, key: String, onBack: () -> Unit) {
         containerColor = Sgu.Bg,
         topBar = {
             SguTopBar(
-                title = fieldLabel(key),
+                title = if (isGen) space.sgu.next.data.ImageGenStore.label(characterId, key) else fieldLabel(key),
                 subtitle = CharacterStore.items.firstOrNull { it.id == characterId }?.name,
                 onBack = onBack,
                 actions = {

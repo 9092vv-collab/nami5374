@@ -84,7 +84,7 @@ fun fieldLabel(key: String): String = Fields.label(key)
 /** Character workspace. onBack == null when shown as the right pane on the unfolded screen. */
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
-fun EditorScreen(characterId: String, onBack: (() -> Unit)?, openField: (String) -> Unit) {
+fun EditorScreen(characterId: String, onBack: (() -> Unit)?, openField: (String) -> Unit, openPreset: (String) -> Unit = {}) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     val meta = CharacterStore.items.firstOrNull { it.id == characterId }
@@ -135,7 +135,7 @@ fun EditorScreen(characterId: String, onBack: (() -> Unit)?, openField: (String)
             HorizontalPager(state = pager, modifier = Modifier.weight(1f), beyondViewportPageCount = 1) { page ->
                 when (page) {
                     0 -> GroupPage("character", characterId, card, openField)
-                    1 -> ImagesPage()
+                    1 -> ImagePage(characterId, openField, openPreset)
                     2 -> WorkshopPage()
                     3 -> GroupPage("script", characterId, card, openField)
                     else -> GroupPage("etc", characterId, card, openField)
@@ -295,25 +295,6 @@ private fun FieldCard(label: String, value: String, maxLines: Int = 4, onClick: 
 }
 
 // ---------- other tabs (skeleton until their steps) ----------
-
-@Composable
-private fun ImagesPage() {
-    val emotions = listOf("neutral", "smiling", "sad", "angry", "surprised", "shy", "sleepy", "serious", "flustered")
-    LazyVerticalGrid(
-        columns = GridCells.Adaptive(104.dp),
-        contentPadding = PaddingValues(16.dp),
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        items(emotions.size) { i ->
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Box(Modifier.fillMaxWidth().aspectRatio(0.72f).clip(RoundedCornerShape(18.dp)).background(Sgu.Card).border(1.dp, Sgu.Line, RoundedCornerShape(18.dp)))
-                Spacer(Modifier.height(6.dp))
-                Text(emotions[i], style = MaterialTheme.typography.bodySmall, color = Sgu.Sub)
-            }
-        }
-    }
-}
 
 @Composable
 private fun WorkshopPage() {
