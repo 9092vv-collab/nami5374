@@ -255,8 +255,10 @@ object ImageGenStore {
     /** Blocks that count for a preset character: block checked and, if it is in a folder, the folder checked too. */
     fun activeBlocks(character: JsonObject, ids: Set<String>?): List<JsonObject> {
         val blocks = character.arr("blocks")
+        val folderIds = blocks.filter { it.s("type") == "folder" }.map { it.s("id") }.toSet()
         return blocks.filter { b ->
-            b.s("type") != "folder" && (ids == null || (b.s("id") in ids && (b.sOrNull("folderId") == null || b.s("folderId") in ids)))
+            val folder = b.sOrNull("folderId")?.takeIf { it in folderIds }
+            b.s("type") != "folder" && (ids == null || (b.s("id") in ids && (folder == null || folder in ids)))
         }
     }
 

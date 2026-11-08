@@ -67,6 +67,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
@@ -279,12 +280,19 @@ private fun GenCharacterTab(cid: String, openField: (String) -> Unit) {
                 TextButton(onClick = { rename = true }) { Text("이름", color = Sgu.Ink) }
                 TextButton(onClick = { confirmDelete = true }) { Text("삭제", color = Sgu.Danger) }
             }
-            Text("블록 (위에서 아래 순서로 NovelAI에 전달됩니다)", style = MaterialTheme.typography.bodySmall, color = Sgu.Sub, modifier = Modifier.padding(start = 4.dp, bottom = 4.dp))
+            Text("블록 (위에서 아래 순서로 NovelAI에 전달됩니다)", style = MaterialTheme.typography.bodySmall, color = Sgu.Sub, modifier = Modifier.padding(start = 4.dp))
+            Text("체크한 블록만 아래 '생성'에 들어가요. 폴더 체크를 끄면 안의 블록이 모두 빠지고, 각 블록 체크는 그대로 기억해요. 템플릿 프리셋은 프리셋마다 따로 체크해요.", style = MaterialTheme.typography.bodySmall, color = Sgu.Sub, modifier = Modifier.padding(start = 4.dp, bottom = 4.dp))
         }
         val blocks = c.arr("blocks")
         val folders = blocks.filter { it.s("type") == "folder" }
         val loose = blocks.filter { it.s("type") != "folder" && (it.sOrNull("folderId") == null || folders.none { f -> f.s("id") == it.s("folderId") }) }
-        items(loose, key = { it.s("id") }) { b -> BlockRow(b, onClick = { openField("gen:block:$charId:${b.s("id")}") }, onMenu = { editBlock = b }) }
+        fun on(b: JsonObject) = b["free"]?.toString() != "false"
+        fun toggle(b: JsonObject) = ImageGenStore.patchBlocks(cid, charId) { l ->
+            val i = l.indexOfFirst { it.s("id") == b.s("id") }; if (i >= 0) l[i] = l[i].with("free" to JsonPrimitive(!on(l[i])))
+        }
+        items(loose, key = { it.s("id") }) { b ->
+            BlockRow(b, checked = on(b), enabled = true, onToggle = { toggle(b) }, onClick = { openField("gen:block:$charId:${b.s("id")}") }, onMenu = { editBlock = b })
+        }
         folders.forEach { f ->
             val open = collapsed[f.s("id")] != true
             val kids = blocks.filter { it.sOrNull("folderId") == f.s("id") }
@@ -295,15 +303,22 @@ private fun GenCharacterTab(cid: String, openField: (String) -> Unit) {
                         .clickable { collapsed[f.s("id")] = open }.padding(horizontal = 14.dp, vertical = 10.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Icon(Icons.Outlined.Folder, null, tint = Sgu.Ink)
-                    Text("  ${f.s("name").ifBlank { "폴더" }}", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+                    val fOn = on(f)
+                    IconButton(onClick = { toggle(f) }, modifier = Modifier.size(32.dp)) {
+                        Icon(if (fOn) Icons.Outlined.CheckBox else Icons.Outlined.CheckBoxOutlineBlank, if (fOn) "폴더 켜짐" else "폴더 꺼짐", tint = Sgu.Ink)
+                    }
+                    Spacer(Modifier.width(4.dp))
+                    Icon(Icons.Outlined.Folder, null, tint = if (fOn) Sgu.Ink else Sgu.Sub)
+                    Text("  ${f.s("name").ifBlank { "폴더" }}", style = MaterialTheme.typography.titleSmall, color = if (fOn) Sgu.Ink else Sgu.Sub, modifier = Modifier.weight(1f))
                     Text("${kids.size}개 ", style = MaterialTheme.typography.bodySmall, color = Sgu.Sub)
                     Icon(Icons.Outlined.KeyboardArrowDown, null, Modifier.rotate(angle), tint = Sgu.Sub)
                     IconButton(onClick = { editBlock = f }, modifier = Modifier.size(32.dp)) { Icon(Icons.Outlined.MoreVert, "폴더 메뉴", tint = Sgu.Sub) }
                 }
             }
             if (open) items(kids, key = { it.s("id") }) { b ->
-                Box(Modifier.padding(start = 18.dp)) { BlockRow(b, onClick = { openField("gen:block:$charId:${b.s("id")}") }, onMenu = { editBlock = b }) }
+                Box(Modifier.padding(start = 18.dp)) {
+                    BlockRow(b, checked = on(b), enabled = on(f), onToggle = { toggle(b) }, onClick = { openField("gen:block:$charId:${b.s("id")}") }, onMenu = { editBlock = b })
+                }
             }
         }
         item(key = "add") {
@@ -357,13 +372,18 @@ private fun GenCharacterTab(cid: String, openField: (String) -> Unit) {
 }
 
 @Composable
-private fun BlockRow(b: JsonObject, onClick: () -> Unit, onMenu: () -> Unit) {
+private fun BlockRow(b: JsonObject, checked: Boolean, enabled: Boolean, onToggle: () -> Unit, onClick: () -> Unit, onMenu: () -> Unit) {
+    val active = checked && enabled
     Row(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(Sgu.Card).border(1.dp, Sgu.Line, RoundedCornerShape(16.dp))
-            .clickable(onClick = onClick).padding(start = 14.dp, top = 10.dp, bottom = 10.dp, end = 4.dp),
+            .clickable(onClick = onClick).padding(start = 2.dp, top = 6.dp, bottom = 6.dp, end = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Column(Modifier.weight(1f)) {
+        IconButton(onClick = onToggle) {
+            Icon(if (checked) Icons.Outlined.CheckBox else Icons.Outlined.CheckBoxOutlineBlank, if (checked) "켜짐" else "꺼짐",
+                tint = if (enabled) Sgu.Ink else Sgu.Sub.copy(alpha = 0.5f))
+        }
+        Column(Modifier.weight(1f).alpha(if (active) 1f else 0.45f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(b.s("name").ifBlank { "(이름 없음)" }, style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.SemiBold), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
                 Spacer(Modifier.width(6.dp))
@@ -407,10 +427,6 @@ private fun BlockDialog(cid: String, charId: String, b: JsonObject, folders: Lis
                             Text("템플릿을 내보낼 때 블록 텍스트도 함께 저장", style = MaterialTheme.typography.bodySmall, color = Sgu.Sub)
                         }
                         SguSwitch(b.b("keep")) { patch("keep" to JsonPrimitive(it)) }
-                    }
-                    Row(Modifier.padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text("자유 프롬프트 생성에 반영", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
-                        SguSwitch(b["free"]?.toString() != "false") { patch("free" to JsonPrimitive(it)) }
                     }
                     if (folders.isNotEmpty()) {
                         FieldLabel("폴더")
