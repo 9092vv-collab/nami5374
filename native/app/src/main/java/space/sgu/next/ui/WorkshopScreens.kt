@@ -338,12 +338,12 @@ fun PromptPreviewScreen(cid: String, openRoute: (String) -> Unit, onBack: () -> 
 
 private const val PRESET_FORMAT = "sgu-prompt-preset"
 
-private fun editPresets(f: (MutableList<JsonObject>) -> Unit) = SettingsStore.update { m ->
+internal fun editPresets(f: (MutableList<JsonObject>) -> Unit) = SettingsStore.update { m ->
     val l = (m["promptPresets"] as? JsonArray)?.mapNotNull { it as? JsonObject }?.toMutableList() ?: mutableListOf()
     f(l); m["promptPresets"] = JsonArray(l)
 }
 
-private fun addPreset(name: String, blocks: List<JsonObject>): String {
+internal fun addPreset(name: String, blocks: List<JsonObject>): String {
     val id = Scripts.newId("preset")
     editPresets { it.add(buildJsonObject { put("id", JsonPrimitive(id)); put("name", JsonPrimitive(name)); put("blocks", JsonArray(blocks)); put("createdAt", JsonPrimitive(System.currentTimeMillis())) }) }
     return id
@@ -376,6 +376,10 @@ fun PromptPresetsScreen(openRoute: (String) -> Unit, onBack: () -> Unit) {
         put("format", JsonPrimitive(PRESET_FORMAT)); put("version", JsonPrimitive(1))
         put("presets", JsonArray(list.map { p -> buildJsonObject { put("name", p["name"] ?: JsonPrimitive("")); put("blocks", p["blocks"] ?: JsonArray(emptyList())) } }))
     }).toByteArray(Charsets.UTF_8)
+    val risuCtx = androidx.compose.ui.platform.LocalContext.current
+    val risuPick = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.OpenDocument()) { u ->
+        if (u != null) msg = runCatching { importRisuToSgu(space.sgu.next.data.RisuPreset.read(risuCtx, u)) }.getOrElse { it.message ?: "가져오지 못했어요" }
+    }
     val pick = rememberJsonPicker { o ->
         val found = parsePresets(o)
         if (found.isEmpty()) msg = "가져올 프리셋을 찾지 못했습니다. 블록 목록(blocks)이 있는 JSON인지 확인하세요."
@@ -410,6 +414,12 @@ fun PromptPresetsScreen(openRoute: (String) -> Unit, onBack: () -> Unit) {
                 if (presets.size > 1) LineButton("삭제", onClick = { removing = true }, icon = Icons.Outlined.Delete)
             }
         }
+        SectionLabel("RisuAI 프리셋")
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            LineButton("RisuAI 프리셋 가져오기", onClick = { risuPick.launch(arrayOf("*/*")) }, icon = Icons.Outlined.Add)
+            LineButton("RisuAI 프리셋 편집기", onClick = { openRoute("risupreset") })
+        }
+        Hint("RisuAI 프롬프트 프리셋(.risup · .risupreset · .json)의 텍스트 블록을 SGU 기본 구조에 넣어 새 작업실 프리셋을 만들어요. 롤플레이 전용 칸은 건너뛰고, 봇 프리필은 꺼진 채로 넣어요.")
         SectionLabel("JSON 가져오기 · 내보내기")
         FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             if (cur != null) LineButton("선택한 프리셋 내보내기", onClick = {

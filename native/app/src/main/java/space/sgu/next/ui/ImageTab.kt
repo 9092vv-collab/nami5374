@@ -328,7 +328,7 @@ private fun StyleTab(cid: String, openField: (String) -> Unit) {
 }
 
 @Composable
-private fun PromptCard(label: String, value: String, placeholder: String = "비어 있음 · 탭하여 편집", onClick: () -> Unit) {
+internal fun PromptCard(label: String, value: String, placeholder: String = "비어 있음 · 탭하여 편집", onClick: () -> Unit) {
     LineCard(onClick = onClick) {
         Column {
             Text(label, style = MaterialTheme.typography.bodySmall, color = Sgu.Sub)

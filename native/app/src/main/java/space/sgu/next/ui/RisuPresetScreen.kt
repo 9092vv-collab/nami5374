@@ -1,0 +1,207 @@
+package space.sgu.next.ui
+
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.FileOpen
+import androidx.compose.material.icons.outlined.KeyboardArrowDown
+import androidx.compose.material.icons.outlined.KeyboardArrowUp
+import androidx.compose.material.icons.outlined.Save
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import space.sgu.next.data.RisuPreset
+import space.sgu.next.data.s
+
+/** The preset open in the RisuAI preset editor (kept while the app runs). */
+object RisuPresetEditor {
+    var preset by mutableStateOf<JsonObject?>(null)
+    var fileName by mutableStateOf("")
+    var dirty by mutableStateOf(false)
+    fun set(p: JsonObject) { preset = p; dirty = true }
+    fun setItems(list: List<JsonObject>) { preset?.let { set(JsonObject(it + ("promptTemplate" to JsonArray(list)))) } }
+}
+
+/** RisuAI 프리셋을 SGU 작업실 프리셋으로 추가. Returns a short result message. */
+fun importRisuToSgu(p: JsonObject): String {
+    val (blocks, skipped) = RisuPreset.toSguBlocks(p)
+    val name = "Risu · " + p.s("name").ifBlank { "가져온 프리셋" }
+    addPreset(name, blocks)
+    val texts = blocks.count { it.s("name").startsWith("Risu · ") || it.s("name") in setOf("메인 프롬프트", "탈옥 프롬프트", "글로벌 노트") }
+    return "'$name' 프리셋을 만들었어요. RisuAI 텍스트 블록 ${texts}개를 넣었어요" + if (skipped > 0) " (롤플레이 전용 칸·빈 칸 ${skipped}개는 건너뜀)." else "."
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun RisuPresetScreen(onBack: () -> Unit) {
+    val ctx = LocalContext.current
+    val p = RisuPresetEditor.preset
+    var editing by remember { mutableStateOf<Int?>(null) }
+    var removing by remember { mutableStateOf<Int?>(null) }
+    var msg by remember { mutableStateOf("") }
+    val saveRisup = rememberSaver("application/octet-stream")
+    val saveJson = rememberSaver("application/json")
+    val opener = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { u ->
+        if (u == null) return@rememberLauncherForActivityResult
+        runCatching { RisuPreset.read(ctx, u) }
+            .onSuccess { RisuPresetEditor.preset = it; RisuPresetEditor.fileName = it.s("name"); RisuPresetEditor.dirty = false; msg = "" }
+            .onFailure { msg = it.message ?: "열지 못했어요" }
+    }
+    val baseName = (p?.s("name") ?: "preset").replace(Regex("[\\\\/:*?\"<>|]+"), "_").ifBlank { "preset" }
+
+    Page("RisuAI 프리셋 편집기", p?.let { it.s("name").ifBlank { "이름 없는 프리셋" } + if (RisuPresetEditor.dirty) " · 수정됨" else "" } ?: ".risup · .risupreset · .json", onBack) {
+        if (p == null) {
+            Spacer(Modifier.height(12.dp))
+            InkButton("RisuAI 프리셋 열기", { opener.launch(arrayOf("*/*")) }, Modifier.fillMaxWidth(), icon = Icons.Outlined.FileOpen)
+            Hint("RisuAI에서 내보낸 프롬프트 프리셋(.risup, .risupreset, .json)을 열어서 보고 고친 뒤, 다시 .risup으로 저장해 RisuAI에 넣을 수 있어요. SGU 작업실 프리셋으로 가져올 수도 있어요.")
+            if (msg.isNotEmpty()) Text(msg, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 8.dp))
+            return@Page
+        }
+        FieldLabel("프리셋 이름")
+        InputBox(p.s("name"), { RisuPresetEditor.set(JsonObject(p + ("name" to JsonPrimitive(it)))) })
+        val models = listOf(p.s("aiModel"), p.s("subModel")).filter { it.isNotBlank() }
+        if (models.isNotEmpty()) Hint("RisuAI 모델 설정: ${models.joinToString(" / ")} (SGU에서는 쓰지 않고 그대로 보관만 해요)")
+
+        // 옛 형식 프리셋의 메인 · 탈옥 · 글로벌 노트
+        listOf("mainPrompt" to "메인 프롬프트 (옛 형식)", "jailbreak" to "탈옥 프롬프트 (옛 형식)", "globalNote" to "글로벌 노트 (옛 형식)").forEach { (k, label) ->
+            if (p.s(k).isNotBlank()) {
+                FieldLabel(label)
+                PromptCard(label, p.s(k)) { editing = -1 - listOf("mainPrompt", "jailbreak", "globalNote").indexOf(k) }
+            }
+        }
+
+        val items = RisuPreset.items(p)
+        SectionLabel("프롬프트 템플릿 ${items.size}개")
+        items.forEachIndexed { i, it ->
+            val key = RisuPreset.textKey(it)
+            val role = when (it.s("type")) { in RisuPreset.TEXT_TYPES -> it.s("role"); "cache" -> it.s("role"); else -> it.s("role2") }
+            LineCard(Modifier.padding(vertical = 4.dp), onClick = if (key != null) ({ editing = i }) else null) {
+                Column {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("${i + 1}. " + it.s("name").ifBlank { RisuPreset.typeLabel(it) }, style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.SemiBold),
+                            modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        IconButton(onClick = { RisuPresetEditor.setItems(items.toMutableList().apply { if (i > 0) add(i - 1, removeAt(i)) }) }, enabled = i > 0) { Icon(Icons.Outlined.KeyboardArrowUp, "위로") }
+                        IconButton(onClick = { RisuPresetEditor.setItems(items.toMutableList().apply { if (i < size - 1) add(i + 1, removeAt(i)) }) }, enabled = i < items.size - 1) { Icon(Icons.Outlined.KeyboardArrowDown, "아래로") }
+                        IconButton(onClick = { removing = i }) { Icon(Icons.Outlined.Delete, "삭제", tint = Sgu.Sub) }
+                    }
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Badge(RisuPreset.typeLabel(it), Sgu.Bubble, Sgu.Ink)
+                        if (role.isNotBlank()) Badge(RisuPreset.roleLabel(role), Sgu.Bubble, Sgu.Sub)
+                        if (it.s("type") == "chat") Badge("${it.s("rangeStart")} ~ ${it.s("rangeEnd")}", Sgu.Bubble, Sgu.Sub)
+                        if (it.s("type") == "cache") Badge("깊이 ${it.s("depth")}", Sgu.Bubble, Sgu.Sub)
+                    }
+                    if (key != null) {
+                        val text = it.s(key)
+                        Text(text.ifBlank { "비어 있음 · 탭하여 편집" }, style = MaterialTheme.typography.bodySmall, color = if (text.isBlank()) Sgu.Sub else Sgu.Ink,
+                            maxLines = 4, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 6.dp))
+                    }
+                    if (it.s("type") in RisuPreset.TEXT_TYPES && it.s("type") != "chatML") {
+                        Row(Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            listOf("system", "user", "bot").forEach { r ->
+                                PillChip(RisuPreset.roleLabel(r), it.s("role").ifBlank { "system" } == r) {
+                                    RisuPresetEditor.setItems(items.toMutableList().apply { this[i] = JsonObject(it + ("role" to JsonPrimitive(r))) })
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        LineButton("텍스트 블록 추가", onClick = { RisuPresetEditor.setItems(items + RisuPreset.newPlain()); editing = items.size }, icon = Icons.Outlined.Add)
+        Hint("텍스트 블록(메인·일반·탈옥·CoT)과 설명·페르소나·로어북 같은 칸의 감싸는 글(inner format)을 고칠 수 있어요. 채팅·캐시 같은 칸은 순서만 바꿀 수 있어요. 나머지 설정(모델·샘플링 등)은 그대로 보관돼요.")
+
+        SectionLabel("저장 · 가져오기")
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            LineButton(".risup으로 저장", onClick = {
+                val bytes = RisuPreset.encodeRisup(p)
+                saveRisup("${baseName}_preset.risup") { it.write(bytes) }; RisuPresetEditor.dirty = false
+            }, icon = Icons.Outlined.Save)
+            LineButton("JSON으로 저장", onClick = {
+                val bytes = RisuPreset.encodeJson(p)
+                saveJson("${baseName}_preset.json") { it.write(bytes) }; RisuPresetEditor.dirty = false
+            })
+            LineButton("SGU 작업실 프리셋으로", onClick = { msg = importRisuToSgu(p) })
+            LineButton("다른 파일 열기", onClick = { opener.launch(arrayOf("*/*")) }, icon = Icons.Outlined.FileOpen)
+        }
+        if (msg.isNotEmpty()) Hint(msg)
+        Hint("RisuAI에서는 설정 › 프롬프트 프리셋 › 가져오기로 저장한 .risup 파일을 불러와요. API 키 같은 칸은 RisuAI 내보내기처럼 비워서 저장해요.")
+    }
+
+    editing?.let { idx ->
+        val legacyKey = if (idx < 0) listOf("mainPrompt", "jailbreak", "globalNote")[-1 - idx] else null
+        val items = RisuPreset.items(p ?: JsonObject(emptyMap()))
+        val item = if (idx >= 0) items.getOrNull(idx) else null
+        val key = legacyKey ?: item?.let { RisuPreset.textKey(it) }
+        if (p == null || key == null) { editing = null; return@let }
+        val title = legacyKey?.let { "옛 형식 · $it" } ?: (item!!.s("name").ifBlank { RisuPreset.typeLabel(item) })
+        TextEditDialog(title, if (legacyKey != null) p.s(legacyKey) else item!!.s(key), onDismiss = { editing = null }) { v ->
+            if (legacyKey != null) RisuPresetEditor.set(JsonObject(p + (legacyKey to JsonPrimitive(v))))
+            else RisuPresetEditor.setItems(items.toMutableList().apply { this[idx] = JsonObject(item!! + (key to JsonPrimitive(v))) })
+            editing = null
+        }
+    }
+    removing?.let { i ->
+        val items = RisuPreset.items(p ?: JsonObject(emptyMap()))
+        val it = items.getOrNull(i)
+        if (it == null) { removing = null; return@let }
+        ConfirmDialog("블록 삭제", "'${it.s("name").ifBlank { RisuPreset.typeLabel(it) }}'을(를) 프리셋에서 지웁니다.", "삭제",
+            onConfirm = { RisuPresetEditor.setItems(items.toMutableList().apply { removeAt(i) }) }, onDismiss = { removing = null })
+    }
+}
+
+/** 전체 화면 텍스트 편집 (긴 프롬프트용). */
+@Composable
+fun TextEditDialog(title: String, initial: String, onDismiss: () -> Unit, onSave: (String) -> Unit) {
+    var text by remember { mutableStateOf(initial) }
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
+        Column(Modifier.fillMaxSize().background(Sgu.Bg).statusBarsPadding().navigationBarsPadding().imePadding()) {
+            Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                TextButton(onClick = onDismiss) { Text("취소", color = Sgu.Sub) }
+                Text(title, style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold), modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text("${text.length}자", style = MaterialTheme.typography.bodySmall, color = Sgu.Sub)
+                Spacer(Modifier.width(4.dp))
+                TextButton(onClick = { onSave(text) }) { Text("저장", color = Sgu.Ink, fontWeight = FontWeight.Bold) }
+            }
+            BasicTextField(text, { text = it }, textStyle = MaterialTheme.typography.bodyMedium.copy(color = Sgu.Ink, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace),
+                modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp))
+        }
+    }
+}

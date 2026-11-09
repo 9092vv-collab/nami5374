@@ -38,6 +38,7 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberTopAppBarState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.material.icons.outlined.EditNote
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Badge
 import kotlinx.serialization.json.JsonPrimitive
@@ -100,10 +101,11 @@ fun SettingsScreen(open: (String) -> Unit) {
                 trailing = { SguSwitch(SettingsStore.root.b("undoUnderTitle")) { v -> SettingsStore.update { it["undoUnderTitle"] = JsonPrimitive(v) } } }) }
             item { GroupRow(2, 3, "저장된 캐릭터", subtitle = "${CharacterStore.items.size}개 · 폴더 ${CharacterStore.folders.size}개", icon = Icons.Outlined.Folder) }
             item { SectionLabel("기타") }
-            item { GroupRow(0, 4, "백업 · 복원", subtitle = "설정 JSON 내보내기/가져오기 (기존 앱 백업 호환)", icon = Icons.Outlined.Backup, onClick = { open("backup") }) }
-            item { GroupRow(1, 4, "백그라운드 작업 · 웹 검색", subtitle = if (SettingsStore.root.o("background").b("foregroundService", true)) "포그라운드 서비스 켜짐" else "포그라운드 서비스 꺼짐", icon = Icons.Outlined.Notifications, onClick = { open("background") }) }
-            item { GroupRow(2, 4, "요청 로그", subtitle = "서브/메인 프로세서 요청과 응답", icon = Icons.Outlined.History, onClick = { open("logs") }) }
-            item { GroupRow(3, 4, "첫 실행 안내 다시 보기", subtitle = "SGU 소개 화면", icon = Icons.Outlined.Info, onClick = { open("welcome") }) }
+            item { GroupRow(0, 5, "백업 · 복원", subtitle = "설정 JSON 내보내기/가져오기 (기존 앱 백업 호환)", icon = Icons.Outlined.Backup, onClick = { open("backup") }) }
+            item { GroupRow(1, 5, "백그라운드 작업 · 웹 검색", subtitle = if (SettingsStore.root.o("background").b("foregroundService", true)) "포그라운드 서비스 켜짐" else "포그라운드 서비스 꺼짐", icon = Icons.Outlined.Notifications, onClick = { open("background") }) }
+            item { GroupRow(2, 5, "요청 로그", subtitle = "서브/메인 프로세서 요청과 응답", icon = Icons.Outlined.History, onClick = { open("logs") }) }
+            item { GroupRow(3, 5, "RisuAI 프리셋 편집기", subtitle = ".risup 열기 · 고치기 · 저장, 작업실 프리셋으로 가져오기", icon = Icons.Outlined.EditNote, onClick = { open("risupreset") }) }
+            item { GroupRow(4, 5, "첫 실행 안내 다시 보기", subtitle = "SGU 소개 화면", icon = Icons.Outlined.Info, onClick = { open("welcome") }) }
             item {
                 Text(
                     "SGU Next 0.7.3 · 캐릭터·스크립트·기타·로어북·설정·이미지·작업실·참고 자료·내보내기 작동",

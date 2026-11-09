@@ -130,6 +130,7 @@ fun SguApp() {
         composable("logs") { LogsScreen(onBack = back) }
         composable("sessionsummary") { SessionSummaryScreen(onBack = back) }
         composable("background") { BackgroundScreen(onBack = back) }
+        composable("risupreset") { RisuPresetScreen(onBack = back) }
         composable("ref/{id}") { e -> ReferenceEditScreen(e.arguments?.getString("id") ?: "", openRoute = go, onBack = back) }
         composable("reftext/{id}") { e -> RefTextScreen(e.arguments?.getString("id") ?: "", onBack = back) }
         composable("bias/{id}") { e -> BiasScreen(e.arguments?.getString("id") ?: "", onBack = back) }
