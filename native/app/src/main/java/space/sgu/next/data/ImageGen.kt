@@ -158,6 +158,11 @@ object ImageGenStore {
 
     fun update(cid: String, change: (JsonObject) -> JsonObject) = save(cid, change(load(cid)))
 
+    /** Import (IO thread, before the character is listed): writes the restored template directly. */
+    fun writeImported(cid: String, o: JsonObject) {
+        file(cid).writeText(CardIO.json.encodeToString(JsonElement.serializer(), o)); cache.remove(cid)
+    }
+
     // ---------- list helpers ----------
 
     private fun JsonObject.mapList(key: String, f: (MutableList<JsonObject>) -> Unit): JsonObject {

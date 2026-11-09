@@ -375,7 +375,10 @@ object CharacterStore {
                         c
                     }
                 }
-                writeCard(id, card)
+                // SGU 이미지 블록 정규식이 있으면 이미지 템플릿으로 복원하고 카드에서는 뺀다
+                val (clean, gen) = GenEmbed.extract(card)
+                writeCard(id, clean)
+                gen?.let { ImageGenStore.writeImported(id, it) }
                 writeMeta(id, null)
             }
             withContext(Dispatchers.Main) { refresh(id) }
@@ -393,7 +396,8 @@ object CharacterStore {
 
     /** Card with a main icon asset guaranteed (PNG/JSON imports keep the icon only as icon.png) + the extra zip entries for it. */
     fun cardWithMainIcon(id: String): Pair<JsonObject, Map<String, File>> {
-        var card = readCard(id)
+        // 이미지 템플릿(블록·프리셋)을 정규식 스크립트 하나에 실어 보낸다 (GenEmbed)
+        var card = GenEmbed.withEmbedded(id, readCard(id))
         val x = File(dir(id), "x").takeIf { it.exists() }
         val extra = mutableMapOf<String, File>()
         val icon = File(dir(id), "icon.png")
