@@ -1,5 +1,9 @@
 package space.sgu.next.ui
 
+import androidx.compose.material.icons.outlined.Check
+
+import androidx.compose.foundation.layout.navigationBarsPadding
+
 import space.sgu.next.data.SettingsStore
 
 import android.net.Uri
@@ -579,7 +583,18 @@ fun ImagePickerScreen(cid: String, openPreset: (String) -> Unit, onBack: () -> U
     DisposableEffect(cid) { onDispose { if (changes.isNotEmpty()) ImageGenStore.setUses(cid, changes.toMap()) } }
     val count = g.arr("presets").sumOf { p -> p.arr("images").count { changes[it.s("id")] ?: it.b("selected") } }
 
-    Page("이미지 선별", "${count}장 선택", { apply(); onBack() }) {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val allIds = g.arr("presets").flatMap { p -> p.arr("images").map { it.s("id") } }
+    val finish = {
+        apply()
+        val n = ImageGenStore.resyncAll(cid)
+        android.widget.Toast.makeText(ctx, "${n}장을 봇에 등록했어요", android.widget.Toast.LENGTH_SHORT).show()
+        onBack()
+    }
+    Box(Modifier.fillMaxSize()) {
+    Page("이미지 선별", "${count}장 선택", { apply(); onBack() }, actions = {
+        TextButton(onClick = { val on = count == 0; allIds.forEach { changes[it] = on } }) { Text(if (count == 0) "전체 선택" else "전체 해제", color = Sgu.Ink) }
+    }) {
         Text("이미지 크기", style = MaterialTheme.typography.bodySmall, color = Sgu.Sub, modifier = Modifier.padding(start = 6.dp))
         Slider(size, { size = it }, valueRange = 70f..240f, colors = SliderDefaults.colors(thumbColor = Sgu.Ink, activeTrackColor = Sgu.Ink, inactiveTrackColor = Sgu.Line),
             onValueChangeFinished = { if (pinned != null) SettingsStore.update { it["imagePickerScale"] = kotlinx.serialization.json.JsonPrimitive(size) } })
@@ -590,7 +605,7 @@ fun ImagePickerScreen(cid: String, openPreset: (String) -> Unit, onBack: () -> U
             }
             SguSwitch(pinned != null) { on -> SettingsStore.update { m -> if (on) { m["imagePickerScale"] = kotlinx.serialization.json.JsonPrimitive(size) } else { m.remove("imagePickerScale") } } }
         }
-        Hint("체크한 이미지가 봇(에셋·감정)에 반영돼요. 나가면 저장돼요. 이미지를 누르면 원본으로 볼 수 있어요.")
+        Hint("체크한 이미지가 봇(에셋·감정)에 등록돼요. 완료를 누르면 바로 등록되고, 그냥 나가도 저장돼요. 오른쪽 아래 그림 아이콘을 누르면 원본으로 볼 수 있어요.")
         presets.forEach { p ->
             val (w, h) = ImageGenStore.sizeDims(p.o("size"))
             Row(Modifier.padding(top = 14.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -614,6 +629,9 @@ fun ImagePickerScreen(cid: String, openPreset: (String) -> Unit, onBack: () -> U
             }
         }
         if (presets.isEmpty()) EmptyPane("생성된 이미지가 없어요")
+        Spacer(Modifier.height(80.dp))
+    }
+    InkButton("완료", { finish() }, Modifier.align(Alignment.BottomEnd).navigationBarsPadding().padding(20.dp), icon = Icons.Outlined.Check)
     }
     zoom?.let { ZoomDialog(it) { zoom = null } }
     genFor?.let { pid -> BatchDialog(1, onDismiss = { genFor = null }) { n -> genFor = null; GenRun.run(cid, listOf(pid), n) } }

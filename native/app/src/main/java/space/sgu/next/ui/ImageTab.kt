@@ -150,7 +150,7 @@ private fun ImageDataTab(cid: String) {
             val list = assets.filter { CardIO.str(it, "type") == type }
             item(key = type) { AssetSection(cid, type, label, list, x) }
         }
-        item { Hint("이미지 템플릿에서 체크한 이미지가 여기(감정·추가 에셋)에 이미지이름.1, .2 … 로 들어가요. 파일을 직접 추가할 수도 있어요(RisuAI 에셋 형식).") }
+        item { Hint("이미지 템플릿에서 체크한 이미지가 여기(감정·추가 에셋)에 이미지 이름(2장째부터 .2, .3 …)으로 들어가요. 파일을 직접 추가할 수도 있어요(RisuAI 에셋 형식).") }
     }
 }
 
@@ -175,6 +175,13 @@ private fun AssetSection(cid: String, type: String, label: String, list: List<Js
         Column {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("$label ${list.size}개", style = MaterialTheme.typography.bodySmall, color = Sgu.Sub, modifier = Modifier.weight(1f))
+                if (list.any { CardIO.str(it, "name").endsWith(".1") }) {
+                    PillChip(".1 떼기", false) {
+                        val n = space.sgu.next.data.Assets.stripDotOne(cid, type)
+                        Toast.makeText(ctx, if (n > 0) "${n}개 이름에서 .1을 뗐어요" else "뗄 수 있는 이름이 없어요(같은 이름이 이미 있어요)", Toast.LENGTH_SHORT).show()
+                    }
+                    Spacer(Modifier.width(6.dp))
+                }
                 PillChip(if (busy) "추가 중…" else "추가", false, Icons.Outlined.Add) {
                     if (!busy) picker.launch(if (type == "emotion") arrayOf("image/*") else arrayOf("image/*", "audio/*", "video/*"))
                 }
@@ -642,7 +649,7 @@ fun GenPresetScreen(cid: String, presetId: String, openField: (String) -> Unit, 
                                 InputBox(p.s("name"), { set("name", JsonPrimitive(it)) })
                                 FieldLabel("이미지 이름 (업로드될 때의 기본 이름)")
                                 InputBox(p.s("imageName"), { set("imageName", JsonPrimitive(it)) }, placeholder = p.s("name"))
-                                Hint("여러 장이 반영되면 뒤에 .1, .2, .3 … 이 순서대로 붙습니다.")
+                                Hint("1장째는 이미지 이름 그대로, 2장째부터 뒤에 .2, .3 … 이 순서대로 붙습니다.")
                                 FieldLabel("이미지 타입")
                                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                     PillChip("추가 에셋", p.s("imageType") != "emotion") { set("imageType", JsonPrimitive("asset")) }

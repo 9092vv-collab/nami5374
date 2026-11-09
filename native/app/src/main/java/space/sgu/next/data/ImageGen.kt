@@ -486,10 +486,14 @@ object ImageGenStore {
     // ---------- 봇에 반영 (modules 967 reflectPreset / 968 syncPresetToBot) ----------
 
     private fun xDir(cid: String) = File(CharacterStore.dir(cid), "x")
-    fun reflectedName(imageName: String, name: String, n: Int) = "${imageName.trim().ifBlank { name.trim() }.ifBlank { "image" }}.$n"
+    /** 1장째는 이름 그대로(neutral), 2장째부터 neutral.2, neutral.3 … (RisuAI 감정 이름이 neutral.1 로 깨지지 않게). */
+    fun reflectedName(imageName: String, name: String, n: Int): String {
+        val base = imageName.trim().ifBlank { name.trim() }.ifBlank { "image" }
+        return if (n <= 1) base else "$base.$n"
+    }
     private fun ext(file: String) = file.substringAfterLast('.', "png").lowercase().let { if (it == "jpeg") "jpg" else it }
 
-    /** Checked images (selected) become card assets named imageName.1, .2 … (emotion or x-risu-asset); unchecked ones are removed. */
+    /** Checked images (selected) become card assets named imageName, imageName.2 … (emotion or x-risu-asset); unchecked ones are removed. */
     fun syncPresetToBot(cid: String, presetId: String) {
         val p = preset(load(cid), presetId) ?: return
         val emotion = p.s("imageType") == "emotion"
@@ -570,6 +574,12 @@ object ImageGenStore {
             patchPreset(cid, pid) { p -> p.with("images" to JsonArray(p.arr("images").map { im -> changes[im.s("id")]?.let { im.with("selected" to JsonPrimitive(it)) } ?: im })) }
             syncPresetToBot(cid, pid)
         }
+    }
+
+    /** Re-reflects every preset that has images in the bot (renames old imageName.1 entries). Returns the number of images in the bot. */
+    fun resyncAll(cid: String): Int {
+        load(cid).arr("presets").filter { p -> p.arr("images").any { it.b("selected") || it.o("reflected") != null } }.forEach { syncPresetToBot(cid, it.s("id")) }
+        return selectedCount(load(cid))
     }
 
     fun deleteImage(cid: String, presetId: String, imageId: String) {

@@ -157,6 +157,26 @@ object Assets {
         }
     }
 
+    /** 원본 SGU가 붙인 "이름.1"에서 .1을 뗀다(같은 종류에 이미 "이름"이 있으면 그대로). Returns how many were renamed. */
+    fun stripDotOne(cid: String, type: String): Int {
+        var n = 0
+        EditHistory.silently {
+            CharacterStore.updateData(cid) { d ->
+                val all = CardIO.assets(JsonObject(mapOf("data" to d)))
+                val names = all.filter { CardIO.str(it, "type") == type }.map { CardIO.str(it, "name") }.toMutableSet()
+                d.with("assets" to JsonArray(all.map { a ->
+                    val name = CardIO.str(a, "name")
+                    if (CardIO.str(a, "type") != type || !name.endsWith(".1")) return@map a
+                    val base = name.removeSuffix(".1")
+                    if (base.isBlank() || base in names) return@map a
+                    names.remove(name); names.add(base); n++
+                    JsonObject(a + ("name" to JsonPrimitive(base)))
+                }))
+            }
+        }
+        return n
+    }
+
     fun remove(cid: String, uri: String) {
         EditHistory.silently {
             CharacterStore.updateData(cid) { d ->
