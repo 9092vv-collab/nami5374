@@ -43,8 +43,9 @@ object Scripts {
     // ---------- 정규식 스크립트 ----------
 
     val REGEX_TYPES = listOf(
-        "editinput" to "입력문 수정", "editoutput" to "출력문 수정", "editprocess" to "요청 수정",
-        "editdisplay" to "표시 수정", "edittrans" to "번역문 수정",
+        // RisuAI RegexData.svelte 순서·이름 그대로 ("disabled" = 비활성화됨)
+        "editinput" to "입력문 수정", "editoutput" to "출력문 수정", "editprocess" to "리퀘스트 데이터 수정",
+        "editdisplay" to "디스플레이 수정", "edittrans" to "번역문 수정", "disabled" to "비활성화됨",
     )
 
     fun regexTypeLabel(t: String) = REGEX_TYPES.firstOrNull { it.first == t }?.second ?: t

@@ -283,7 +283,7 @@ object SguData {
         "lorebook" -> listOf(
             "add" to "{comment, key, secondKey?, content, mode?: normal|folder, folder?: <id of a folder entry, or empty string for none>, insertOrder?, alwaysActive?, selective?, useRegex?}. A folder entry only has comment (its name) and alwaysActive",
             "update" to "partial entry object, with id", "remove" to "none, with id", "set" to "entry[] (entire list)")
-        "regexList" -> listOf("add" to "{comment, in, out, type: editinput|editoutput|editprocess|editdisplay|edittrans, flag?}", "update" to "partial object, with id", "remove" to "none, with id", "set" to "object[] (entire list)")
+        "regexList" -> listOf("add" to "{comment, in, out, type: editinput|editoutput|editprocess|editdisplay|edittrans|disabled, flag?}", "update" to "partial object, with id", "remove" to "none, with id", "set" to "object[] (entire list)")
         "trigger" -> listOf("set" to "{mode: lua|v2, code: string}")
         "biasList" -> listOf("add" to "{text, value:number}", "update" to "partial object, with id", "remove" to "none, with id", "set" to "object[] (entire list)")
         "loreSettings" -> listOf("update" to "partial {tokenBudget?: number|null, scanDepth?: number|null, recursiveScanning?: boolean|null, fullWordMatching?: boolean|null}; null means use the global setting")

@@ -11,7 +11,7 @@ import kotlinx.serialization.json.jsonObject
 /**
  * 이미지 템플릿(캐릭터 설정 태그 블록 + 프리셋 + 그림체, 그림 파일 제외)을 카드의 정규식 스크립트 하나에 실어 나른다 (사용자 아이디어).
  * - 정규식은 AI에게 보내지지 않아 토큰을 안 쓰고, 카드의 정식 칸이라 RisuAI에서 다시 내보내도 남는다.
- * - IN = 빈칸 → RisuAI는 IN이 빈 스크립트를 건너뜀(scripts.ts `if(script.in === '') return`, translator.ts `if (!script.in)`). OUT = JSON.
+ * - Modification Type = "disabled"(비활성화됨) + IN = 빈칸 → RisuAI는 IN이 빈 스크립트를 건너뜀(scripts.ts `if(script.in === '') return`, translator.ts `if (!script.in)`). OUT = JSON.
  * - SGU로 불러올 때 이 정규식을 찾아 이미지 템플릿으로 복원하고 카드에서는 뺀다(스크립트 탭에 안 보임). 내보낼 때 다시 넣는다.
  */
 object GenEmbed {
@@ -40,7 +40,7 @@ object GenEmbed {
         val scripts = Scripts.objects(JsonObject(data), Scripts.REGEX_PATH).filterNot { isOurs(it) }
         val g = runCatching { ImageGenStore.load(cid) }.getOrNull()
         val next = if (g != null && hasContent(g)) {
-            scripts + Scripts.regex(Scripts.newRegex(), NAME, EMPTY_IN, pretty.encodeToString(JsonElement.serializer(), pack(g)), "editdisplay", "g", false, false)
+            scripts + Scripts.regex(Scripts.newRegex(), NAME, EMPTY_IN, pretty.encodeToString(JsonElement.serializer(), pack(g)), "disabled", "g", false, false)
         } else scripts
         return JsonObject(card + ("data" to Fields.set(JsonObject(data), Scripts.REGEX_PATH, JsonArray(next))))
     }
