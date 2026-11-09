@@ -4,11 +4,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 
-/** App-wide UI state. */
-object AppState {
-    var safeMode by mutableStateOf(false)
-    var autoCompress by mutableStateOf(true)
-}
 
 data class Turn(val id: Int, val command: String, val reply: String, val edited: List<String>)
 

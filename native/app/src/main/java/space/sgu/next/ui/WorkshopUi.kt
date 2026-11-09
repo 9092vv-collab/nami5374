@@ -196,7 +196,7 @@ fun WorkshopPage(cid: String, openFieldTab: (String) -> Unit, openRoute: (String
             verticalAlignment = Alignment.Bottom,
         ) {
             val (canUndo, canRedo) = space.sgu.next.data.EditHistory.flags[cid] ?: (false to false)
-            if (canUndo || canRedo) Row(Modifier.height(44.dp), verticalAlignment = Alignment.CenterVertically) {
+            if ((canUndo || canRedo) && !space.sgu.next.data.SettingsStore.root.b("undoUnderTitle")) Row(Modifier.height(44.dp), verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = { Workshop.undoLast(cid) }, enabled = canUndo && !busy, modifier = Modifier.size(36.dp)) {
                     Icon(Icons.AutoMirrored.Outlined.ArrowBack, "되돌리기", tint = if (canUndo && !busy) Sgu.Ink else Sgu.Sub.copy(alpha = 0.4f))
                 }

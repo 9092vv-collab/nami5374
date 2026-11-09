@@ -365,6 +365,31 @@ object GenRun {
         }
     }
 
+    /** 작업실 free-prompt run (module 903 genFreeRun): n images, optionally added as character icons. */
+    fun runFree(cid: String, charId: String, n: Int, addAsIcon: Boolean) {
+        if (running(cid)) return
+        val total = n.coerceIn(1, 2)
+        val start = System.currentTimeMillis()
+        error.remove(cid)
+        progress[cid] = Progress(0, total, start, null)
+        jobs[cid] = scope.launch {
+            try {
+                for (k in 0 until total) {
+                    current[cid] = charId
+                    val name = try { ImageGenStore.generateForCharacter(cid, charId) } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Throwable) {
+                        error[cid] = e.message ?: "생성 실패"; break
+                    }
+                    if (addAsIcon) {
+                        val cname = ImageGenStore.character(ImageGenStore.load(cid), charId)?.s("name") ?: "image"
+                        ImageGenStore.addAsIcon(cid, ImageGenStore.imageFile(cid, name), cname)
+                    }
+                    val el = System.currentTimeMillis() - start
+                    progress[cid] = Progress(k + 1, total, start, if (el > 0) Math.ceil(el / 1000.0 * (total - k - 1) / (k + 1)).toLong() else null)
+                }
+            } finally { progress.remove(cid); current.remove(cid); jobs.remove(cid) }
+        }
+    }
+
     fun stop(cid: String) { jobs[cid]?.cancel() }
 
     fun compress(cid: String, webp: Boolean, quality: Int, onlyHeavy: Boolean) {

@@ -39,6 +39,11 @@ object WFields {
         WField("alternateGreetings", "character", "textList", "추가 첫 메세지", "Alternate greetings", "Additional opening messages the user can pick instead of the first message.", true, 2, 2),
         WField("lorebook", "character", "lorebook", "로어북", "Lorebook", "Keyword-triggered world/character info entries (key, content, insertion order, always-active flag) inserted into the prompt when keys appear in chat. Efficient for organizing a large amount of information systematically: split settings by topic (places, factions, NPCs, rules) so only the relevant parts are loaded.", true, 3, 2),
         WField("loreSettings", "character", "loreSettings", "로어북 설정", "Lorebook settings", "Lorebook scanning options: token budget, scan depth, recursive scanning, full-word matching. Each is a number/boolean, or null to use the global setting (default).", true, 1, 1),
+        WField("genTemplate", "image", "gen", "이미지 템플릿", "Image template (asset presets)", "The whole set of image-generation asset presets (name, image name/type, size, asset prompt/negative, attached characters with block checklist, positions, per-character prompt/negative) and generation. Generated images are listed by id only; the AI cannot see them. One permission covers everything.", true, 1, 1),
+        WField("genCharacters", "image", "gen", "이미지 캐릭터 설정", "Image character setup", "Characters used for image generation: their prompt/negative blocks (name, type, text) and generation size. One permission covers viewing/adding/removing blocks and size. The free prompt has its own permission (see Image character free prompt).", true, 1, 1),
+        WField("genFree", "image", "gen", "캐릭터 자유 프롬프트", "Image character free prompt", "Per-character free prompt and free negative, plus which of the character's blocks take part when the free prompt is run. Memo: the free prompt is used only to test whether a character's prompt produces good images and to make images for the character icon. It is NOT used by asset presets.", true, 1, 1),
+        WField("genFreeRun", "image", "gen", "자유 프롬프트 실행", "Run image character free prompt", "Runs a character's free prompt with the NovelAI provider (costs Anlas) and shows the result in the character setup preview. Optionally adds the result to the character icons. Memo: free-prompt images are for prompt testing and character icons only; request this only when the user asks for it.", true, 1, 1),
+        WField("genCompress", "image", "gen", "이미지 압축", "Image template compression", "Converts and compresses every generated image of the image template (webp or jpeg, quality percent). Its purpose is to reduce the file size of the bot card to be exported efficiently. Unless the user asks for something specific, run it with the defaults (webp, quality 80).", true, 1, 1),
         WField("largePortrait", "image", "toggle", "새로 이미지 체크", "Large portrait toggle", "Toggle that shows the icon as a large portrait in RisuAI.", true, 1, 1),
         WField("backgroundHTML", "script", "longtext", "백그라운드 임베딩", "Background HTML", "Markdown/HTML inserted into the chat background (can use {{bg::asset}}, {{audio::asset}}).", true, 2, 1),
         WField("regexScripts", "script", "regexList", "정규식 스크립트", "Regex scripts", "Regex replace rules applied to input/output/request/display text: IN pattern, OUT replacement, type, flags. Needed when building status windows and interfaces (e.g. a display-type script that turns a tag in the AI output into an HTML status panel). They are also needed for asset output: a display-type script can turn a tag such as <CharacterName|AssetName> into the character's asset image with {{raw::...}} or {{img::...}}", true, 2, 2),
@@ -232,6 +237,7 @@ object SguData {
 
     fun isEmpty(d: JsonObject, id: String): Boolean {
         val f = WFields.map[id] ?: return true
+        if (f.kind == "gen") return d["imageGen"] == null
         val v = d[id] ?: return true
         return when (f.kind) {
             "toggle", "loreSettings" -> false
@@ -265,6 +271,7 @@ object SguData {
                 }))
             }
             "trigger" -> { val o = d["triggerScript"] as? JsonObject; "mode: ${Scripts.str(o, "mode")}\n${Scripts.str(o, "code")}" }
+            "gen" -> GenOps.serialize(d["imageGen"] as? JsonObject, id)
             else -> ""
         }
     }
@@ -290,7 +297,7 @@ object SguData {
         for (id in ids) {
             val f = WFields.map[id] ?: continue
             out.add("- $id — ${f.aiLabel}: ${WFields.description(id)}")
-            for ((op, v) in opsFor(f.kind)) out.add("    op \"$op\": value = $v")
+            for ((op, v) in if (f.kind == "gen") GenOps.ops(id) else opsFor(f.kind)) out.add("    op \"$op\": value = $v")
         }
         return out.joinToString("\n")
     }
@@ -364,7 +371,7 @@ object SguData {
 // =====================================================================================
 
 data class AppliedEdit(val field: String, val op: String, val summary: String)
-data class EditResult(val data: JsonObject, val applied: List<AppliedEdit>, val rejected: List<Pair<JsonObject, String>>, val changed: Set<String>)
+data class EditResult(val data: JsonObject, val applied: List<AppliedEdit>, val rejected: List<Pair<JsonObject, String>>, val changed: Set<String>, val actions: List<GenOps.Action> = emptyList())
 
 object Edits {
     private fun o(v: JsonElement?): String = when (v) { null, is JsonNull -> ""; is JsonPrimitive -> v.contentOrNull ?: ""; else -> CardIO.json.encodeToString(JsonElement.serializer(), v) }
@@ -374,11 +381,22 @@ object Edits {
     fun apply(data0: JsonObject, edits: List<JsonObject>, editFields: List<String>): EditResult {
         val allowed = editFields.toSet()
         var d = data0
-        val applied = mutableListOf<AppliedEdit>(); val rejected = mutableListOf<Pair<JsonObject, String>>(); val changed = linkedSetOf<String>()
+        val applied = mutableListOf<AppliedEdit>(); val rejected = mutableListOf<Pair<JsonObject, String>>(); val changed = linkedSetOf<String>(); val actions = mutableListOf<GenOps.Action>()
         for (e in edits) {
             val f = WFields.map[Scripts.str(e, "field")]
             if (f == null) { rejected.add(e to "알 수 없는 필드"); continue }
             if (f.id !in allowed) { rejected.add(e to "편집 권한 없음"); continue }
+            if (f.kind == "gen") {
+                try {
+                    val g = d["imageGen"] as? JsonObject ?: throw IllegalStateException("이미지 데이터 없음")
+                    val r = GenOps.apply(g, f.id, Scripts.str(e, "op"), Scripts.str(e, "id"), e["value"])
+                    if (r == null) { rejected.add(e to "허용되지 않는 연산"); continue }
+                    if (r.g != g) { d = JsonObject(d + ("imageGen" to r.g)); changed.add("imageGen") }
+                    r.action?.let { actions.add(it) }
+                    applied.add(AppliedEdit(f.id, Scripts.str(e, "op"), r.summary))
+                } catch (x: Exception) { rejected.add(e to (x.message ?: x.toString())) }
+                continue
+            }
             try {
                 val r = one(d, f, e)
                 if (r == null) { rejected.add(e to "허용되지 않는 연산"); continue }
@@ -388,7 +406,7 @@ object Edits {
                 rejected.add(e to (x.message ?: x.toString()))
             }
         }
-        return EditResult(d, applied, rejected, changed)
+        return EditResult(d, applied, rejected, changed, actions)
     }
 
     private fun folderKeyFor(list: List<JsonObject>, ref: String): String? =

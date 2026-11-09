@@ -216,7 +216,7 @@ fun ProvidersScreen(open: (String) -> Unit, onBack: () -> Unit) {
             LineCard {
                 Column {
                     Text("프로바이더가 없어요", style = MaterialTheme.typography.titleMedium)
-                    Text("OpenAI, Anthropic, Gemini, OpenRouter, Jev 또는 OpenAI 호환 커스텀 엔드포인트를 추가하세요. 기존 앱의 설정 백업을 가져와도 돼요.",
+                    Text("OpenAI(GPT), Anthropic(Claude), Google AI Studio, Vertex AI 중에서 추가하세요. 기존 앱의 설정 백업을 가져와도 돼요.",
                         style = MaterialTheme.typography.bodyMedium, color = Sgu.Sub)
                     Spacer(Modifier.height(14.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -612,10 +612,10 @@ fun ProcessorsScreen(open: (String) -> Unit, onBack: () -> Unit) {
         GroupRow(0, 1, "서브 프로세서 비활성화", subtitle = "서브 단계를 건너뛰고 메인 프로세서가 바로 작업합니다.",
             trailing = { SguSwitch(sub.b("disabled")) { SettingsStore.setProcessor("sub", "disabled", JsonPrimitive(it)) } })
         if (!sub.b("disabled")) {
-            Hint("빠른 경량 모델 또는 Jev. 명령을 읽고 어떤 필드를 열람·편집해야 하는지 판단합니다.")
+            Hint("빠른 경량 모델이 명령을 읽고 어떤 필드를 열람·편집해야 하는지 판단합니다.")
             Spacer(Modifier.height(8.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                listOf("llm" to "경량 LLM", "jev" to "Jev").forEach { (k, label) ->
+                (listOf("llm" to "경량 LLM") + if (sub.s("strategy") == "jev" || SettingsStore.providers.any { it.s("format") == "jev" }) listOf("jev" to "Jev") else emptyList()).forEach { (k, label) ->
                     PillChip(label, (sub.sOrNull("strategy") ?: "llm") == k) { SettingsStore.setProcessor("sub", "strategy", JsonPrimitive(k)) }
                 }
             }

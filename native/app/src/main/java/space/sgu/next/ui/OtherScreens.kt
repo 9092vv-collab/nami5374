@@ -21,7 +21,6 @@ import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.Key
 import androidx.compose.material.icons.outlined.KeyboardArrowDown
-import androidx.compose.material.icons.outlined.Language
 import androidx.compose.material.icons.outlined.Memory
 import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.Shield
@@ -39,6 +38,11 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberTopAppBarState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.outlined.Badge
+import kotlinx.serialization.json.JsonPrimitive
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -49,7 +53,6 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.unit.dp
 import space.sgu.next.data.Activation
-import space.sgu.next.data.AppState
 import space.sgu.next.data.CharacterStore
 import space.sgu.next.data.FakeData
 import space.sgu.next.data.RefKind
@@ -64,6 +67,7 @@ import space.sgu.next.data.sOrNull
 @Composable
 fun SettingsScreen(open: (String) -> Unit) {
     val scroll = TopAppBarDefaults.enterAlwaysScrollBehavior(rememberTopAppBarState())
+    var editingCreator by remember { mutableStateOf(false) }
     val procs = SettingsStore.root.o("processors")
     val mainModel = SettingsStore.model(procs.o("main").sOrNull("modelId"))
     val subLabel = when {
@@ -90,22 +94,25 @@ fun SettingsScreen(open: (String) -> Unit) {
                 GroupRow(2, 4, "프롬프트 프리셋", subtitle = "${presets.size}개 프리셋 · 기본값: $active", icon = Icons.Outlined.SmartToy, onClick = { open("promptpresets") })
             }
             item { GroupRow(3, 4, "세션 요약", subtitle = if (space.sgu.next.data.Workshop.summaryEnabled()) "자동 요약 켜짐 · 최근 ${space.sgu.next.data.Workshop.summaryKeep()}턴 원문" else "자동 요약 꺼짐", icon = Icons.Outlined.Summarize, onClick = { open("sessionsummary") }) }
-            item { SectionLabel("화면 · 저장") }
-            item { GroupRow(0, 3, "세이프 모드", subtitle = "모든 이미지를 썸네일로 표시", trailing = { SguSwitch(AppState.safeMode) { AppState.safeMode = it } }) }
-            item { GroupRow(1, 3, "자동 압축", subtitle = "내보낼 때 이미지를 WebP 80%로 압축", trailing = { SguSwitch(AppState.autoCompress) { AppState.autoCompress = it } }) }
+            item { SectionLabel("프로젝트 · 저장") }
+            item { GroupRow(0, 3, "제작자 이름", subtitle = SettingsStore.root.s("creatorName").trim().ifEmpty { "비워 두면 새 프로젝트의 제작자도 비어 있습니다" }, icon = Icons.Outlined.Badge, onClick = { editingCreator = true }) }
+            item { GroupRow(1, 3, "되돌리기 버튼을 프로젝트명 아래에 표시", subtitle = "켜면 채팅 입력창 옆 대신 상단 프로젝트명 아래로 이동합니다.",
+                trailing = { SguSwitch(SettingsStore.root.b("undoUnderTitle")) { v -> SettingsStore.update { it["undoUnderTitle"] = JsonPrimitive(v) } } }) }
             item { GroupRow(2, 3, "저장된 캐릭터", subtitle = "${CharacterStore.items.size}개 · 폴더 ${CharacterStore.folders.size}개", icon = Icons.Outlined.Folder) }
             item { SectionLabel("기타") }
             item { GroupRow(0, 4, "백업 · 복원", subtitle = "설정 JSON 내보내기/가져오기 (기존 앱 백업 호환)", icon = Icons.Outlined.Backup, onClick = { open("backup") }) }
             item { GroupRow(1, 4, "백그라운드 작업 · 웹 검색", subtitle = if (SettingsStore.root.o("background").b("foregroundService", true)) "포그라운드 서비스 켜짐" else "포그라운드 서비스 꺼짐", icon = Icons.Outlined.Notifications, onClick = { open("background") }) }
             item { GroupRow(2, 4, "요청 로그", subtitle = "서브/메인 프로세서 요청과 응답", icon = Icons.Outlined.History, onClick = { open("logs") }) }
-            item { GroupRow(3, 4, "언어", subtitle = "한국어", icon = Icons.Outlined.Language) }
+            item { GroupRow(3, 4, "첫 실행 안내 다시 보기", subtitle = "SGU 소개 화면", icon = Icons.Outlined.Info, onClick = { open("welcome") }) }
             item {
                 Text(
-                    "SGU Next 0.6.0 · 캐릭터·스크립트·기타·로어북·설정·이미지·작업실·참고 자료 작동",
+                    "SGU Next 0.7.0 · 캐릭터·스크립트·기타·로어북·설정·이미지·작업실·참고 자료·내보내기 작동",
                     modifier = Modifier.fillMaxWidth().padding(24.dp),
                     style = MaterialTheme.typography.bodySmall, color = Sgu.Sub,
                 )
             }
         }
+        if (editingCreator) NameDialog("제작자 이름", SettingsStore.root.s("creatorName"), "비워 두면 새 프로젝트의 제작자도 비어 있습니다",
+            onDismiss = { editingCreator = false }) { v -> SettingsStore.update { it["creatorName"] = JsonPrimitive(v.trim()) } }
     }
 }

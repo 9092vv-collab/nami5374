@@ -1,6 +1,8 @@
 package space.sgu.next.ui
 
 import android.net.Uri
+import space.sgu.next.data.b
+import space.sgu.next.data.SettingsStore
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -62,9 +64,13 @@ fun SguApp() {
     val nav = rememberNavController()
     val dur = 280
     fun openField(id: String, key: String) = nav.navigate("field/$id/${Uri.encode(key)}")
+    // 첫 실행 안내: only before the user has finished it and has no provider yet
+    val start = androidx.compose.runtime.saveable.rememberSaveable {
+        if (!SettingsStore.root.b("onboardingDone") && SettingsStore.providers.isEmpty()) "welcome" else "home"
+    }
     NavHost(
         navController = nav,
-        startDestination = "home",
+        startDestination = start,
         modifier = Modifier.background(Sgu.Bg),
         enterTransition = { slideInHorizontally(tween(dur)) { it / 4 } + fadeIn(tween(dur)) },
         exitTransition = { slideOutHorizontally(tween(dur)) { -it / 8 } + fadeOut(tween(dur / 2)) },
@@ -87,6 +93,13 @@ fun SguApp() {
         composable("model/{id}") { e -> ModelScreen(e.arguments?.getString("id") ?: "", onBack = back) }
         composable("processors") { ProcessorsScreen(open = go, onBack = back) }
         composable("backup") { BackupScreen(onBack = back) }
+        composable("welcome") {
+            WelcomeScreen { goProviders ->
+                if (nav.previousBackStackEntry == null) nav.navigate("home") { popUpTo("welcome") { inclusive = true } } else nav.popBackStack()
+                if (goProviders) nav.navigate("providers")
+            }
+        }
+        composable("export/{id}") { e -> ExportScreen(e.arguments?.getString("id") ?: "", onBack = back) }
         composable("character/{id}") { entry ->
             val id = entry.arguments?.getString("id") ?: ""
             EditorScreen(characterId = id, onBack = { nav.popBackStack() }, openField = { key -> openField(id, key) },

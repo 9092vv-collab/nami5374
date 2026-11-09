@@ -34,6 +34,8 @@ import java.net.URLEncoder
 
 private fun js(s: String) = JsonPrimitive(s)
 private fun cardData(cid: String): JsonObject = (CharacterStore.readCard(cid)["data"] as? JsonObject) ?: JsonObject(emptyMap())
+/** SGU data for the workshop: card fields + the image template (gen* fields, module 903). */
+private fun sguData(cid: String, card: JsonObject = cardData(cid)): JsonObject = JsonObject(SguData.from(card) + ("imageGen" to ImageGenStore.load(cid)))
 
 // =====================================================================================
 // 되돌리기 · 다시 실행 (module 901), over the stored card data, direct edits included
@@ -585,7 +587,7 @@ object Workshop {
         running[cid] = scope.launch {
             try {
                 if (subOff && !SettingsStore.root.o("processors").o("sub").b("disabled") && !toldSubOff) { toldSubOff = true; toast("서브 프로세서 없이 세션을 진행합니다") }
-                val data0 = SguData.from(cardData(cid))
+                val data0 = sguData(cid)
                 val r = if (subOff) Decision(command, emptyList(), emptyList(), emptyList(), true, "서브 프로세서 비활성화")
                     else Processors.runSub(doc(cid), data0, command)
                 val rawSub = decisionJson(r)
@@ -614,14 +616,17 @@ object Workshop {
                 }
                 access = Perms.finalize(access, approved)
                 setJob(cid) { it.copy(access = access, phase = "generating", stream = "", reasoning = "") }
-                val out = Processors.runMain(doc(cid), SguData.from(cardData(cid)), command, access, r.instruction,
+                val out = Processors.runMain(doc(cid), sguData(cid), command, access, r.instruction,
                     Stream(onDelta = { d -> setJob(cid) { it.copy(stream = it.stream + d) } }, onReasoning = { d -> setJob(cid) { it.copy(reasoning = it.reasoning + d) } }),
                     onRestart = { setJob(cid) { it.copy(stream = "", reasoning = "") } })
                 setJob(cid) { it.copy(phase = "applying") }
                 val before = cardData(cid)
-                val res = Edits.apply(SguData.from(before), out.edits, access.editFields)
-                val snapshot = SguData.snapshotOf(before, res.changed)
-                if (res.changed.isNotEmpty()) EditHistory.tagged(cid, turnId) { applyData(cid, SguData.apply(before, res.data, res.changed)) }
+                val res = Edits.apply(sguData(cid, before), out.edits, access.editFields)
+                val cardChanged = res.changed - "imageGen"
+                val snapshot = SguData.snapshotOf(before, cardChanged)
+                if (cardChanged.isNotEmpty()) EditHistory.tagged(cid, turnId) { applyData(cid, SguData.apply(before, res.data, cardChanged)) }
+                if ("imageGen" in res.changed) (res.data["imageGen"] as? JsonObject)?.let { g -> withContext(Dispatchers.Main) { ImageGenStore.save(cid, g) } }
+                if (res.actions.isNotEmpty()) withContext(Dispatchers.Main) { GenOps.runActions(cid, res.actions) }
                 updateTurn(cid, turnId, mapOf(
                     "status" to js("done"), "response" to js(out.message),
                     "edits" to JsonArray(res.applied.map { buildJsonObject { put("field", it.field); put("op", it.op); put("summary", it.summary) } }),

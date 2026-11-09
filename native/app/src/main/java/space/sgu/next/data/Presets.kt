@@ -20,6 +20,7 @@ data class Preset(
 )
 
 object Presets {
+    /** Only GPT · Claude · AI Studio · Vertex (+ NovelAI image) are offered for new providers; the rest stay hidden so existing providers keep working. */
     val all = listOf(
         Preset("novelai-image", "NovelAI", "novelai-image", "https://image.novelai.net", "bearer",
             "NovelAI 이미지 생성 (Persistent API Token). 이미지 탭 › 이미지 생성에서 사용합니다.", emptyList(), false, "pst-...",
@@ -63,7 +64,7 @@ object Presets {
                 "'GitHub 로그인'으로 받은 OAuth 토큰만 기기 보안 저장소에 저장됩니다.",
                 "SGU Next에서는 GitHub 로그인이 아직 준비 중이에요. 기존 앱 설정 백업(키 포함)을 가져오면 토큰이 함께 옮겨져요.",
             ),
-            "Copilot은 캐싱 파라미터를 공개하지 않으므로 앱은 캐싱 설정을 보내지 않습니다.", "off"),
+            "Copilot은 캐싱 파라미터를 공개하지 않으므로 앱은 캐싱 설정을 보내지 않습니다.", "off", hidden = true),
         Preset("vertex-express", "Vertex AI (Express)", "gemini", "https://aiplatform.googleapis.com/v1/publishers/google", "query-key",
             "Vertex AI Express 모드 API 키.", listOf("gemini-2.5-pro", "gemini-2.5-flash"), true, "Express API key",
             listOf("Express 모드 API 키는 일반 generateContent 경로에서 거부될 수 있습니다. 'Vertex AI' 프리셋(서비스 계정)을 권장합니다."),
@@ -72,20 +73,20 @@ object Presets {
             "OpenRouter를 통해 여러 모델 사용. 모델 목록 불러오기 지원.",
             listOf("anthropic/claude-sonnet-4.5", "openai/gpt-5", "google/gemini-2.5-pro", "deepseek/deepseek-chat-v3.1"), false, "sk-or-...",
             listOf("모델 ID는 'vendor/model' 형식입니다.", "추가 바디 필드에 provider 라우팅({\"provider\":{\"order\":[...]}})을 넣을 수 있습니다."),
-            "모델에 따라 다릅니다. Anthropic·Gemini 계열은 cache_control 지점이 필요하고, OpenAI·DeepSeek·Grok 계열은 자동 캐싱입니다.", "auto"),
+            "모델에 따라 다릅니다. Anthropic·Gemini 계열은 cache_control 지점이 필요하고, OpenAI·DeepSeek·Grok 계열은 자동 캐싱입니다.", "auto", hidden = true),
         Preset("novelai", "NovelAI (텍스트 GLM)", "openai-chat", "https://text.novelai.net/oa/v1", "bearer",
             "NovelAI OpenAI 호환 엔드포인트 (Persistent API token).", listOf("glm-4-6", "glm-4-5"), true, "pst-...",
             listOf("GLM 계열 텍스트 모델을 OpenAI 호환 엔드포인트로 사용합니다. Persistent API Token(pst-…)이 필요합니다."),
-            "캐싱을 지원하지 않습니다(설정 무시).", "off"),
+            "캐싱을 지원하지 않습니다(설정 무시).", "off", hidden = true),
         Preset("bedrock-mantle", "AWS Bedrock (Mantle)", "openai-chat", "https://bedrock-mantle.us-east-1.api.aws/v1", "bearer",
             "Bedrock OpenAI 호환 엔드포인트. Bedrock API 키를 Bearer로 사용합니다. 리전에 맞게 URL을 수정하세요.",
             listOf("anthropic.claude-sonnet-4-5", "amazon.nova-pro-v1:0"), true, "Bedrock API key",
             listOf("Bedrock OpenAI 호환(Mantle) 엔드포인트입니다. 리전에 맞게 Base URL을 수정하세요."),
-            "OpenAI 계열 모델은 자동 캐싱입니다.", "off"),
+            "OpenAI 계열 모델은 자동 캐싱입니다.", "off", hidden = true),
         Preset("jev", "Jev (TypeSafe AI)", "jev", "https://api.typesafe.ai/v1", "bearer",
             "System One 모델. 서브 프로세서 전용(열람/편집 필요 여부 판정).", listOf("jev-latest"), false, "TypeSafe API key",
             listOf("서브 프로세서 전용입니다. 예/아니오 판정만 수행합니다.", "설정 › 프로세서에서 '서브 = Jev'를 선택하고 이 프로바이더를 지정하세요."),
-            "서브 프로세서 요청은 항상 캐싱을 쓰지 않습니다.", "off", jev = true),
+            "서브 프로세서 요청은 항상 캐싱을 쓰지 않습니다.", "off", jev = true, hidden = true),
         Preset("custom", "커스텀 (OpenAI 호환)", "openai-chat", "https://example.com/v1", "bearer",
             "Groq, DeepSeek, xAI, Mistral, 로컬 서버 등 OpenAI 호환 엔드포인트. 포맷·인증 방식을 바꿀 수 있습니다.",
             emptyList(), true, "API key",
@@ -94,7 +95,7 @@ object Presets {
                 "호환 서버가 max_completion_tokens를 모르면 토글을 max_tokens로 두세요(기본값).",
                 "서버별 추가 파라미터는 '추가 바디 필드'에 JSON으로 넣습니다.",
             ),
-            "서버마다 다릅니다. 모르면 '끔'으로 두세요.", "off"),
+            "서버마다 다릅니다. 모르면 '끔'으로 두세요.", "off", hidden = true),
     )
 
     val byId = all.associateBy { it.id }

@@ -110,8 +110,12 @@ fun ReferencesScreen(open: (String) -> Unit) {
     var newFolder by remember { mutableStateOf(false) }
     var renaming by remember { mutableStateOf<JsonObject?>(null) }
     var removing by remember { mutableStateOf<JsonObject?>(null) }
+    var persona by remember { mutableStateOf<Pair<android.net.Uri, References.Persona>?>(null) }
     val pickFile = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { u ->
-        if (u != null) References.addFile(ctx, u)?.let { open("ref/${it.s("id")}") }
+        if (u == null) return@rememberLauncherForActivityResult
+        val p = References.peekPersona(ctx, u)
+        if (p != null) persona = u to p
+        else References.addFile(ctx, u)?.let { open("ref/${it.s("id")}") }
     }
     val scroll = TopAppBarDefaults.enterAlwaysScrollBehavior(rememberTopAppBarState())
     val items = remember(v) { References.items.filter { it.sOrNull("sessionOf") == null } }
@@ -183,13 +187,22 @@ fun ReferencesScreen(open: (String) -> Unit) {
         confirmButton = { TextButton(onClick = { addOpen = false }) { Text("닫기", color = Sgu.Sub) } },
     )
     if (newFolder) NameDialog("폴더 추가", "", "폴더 이름", onDismiss = { newFolder = false }) { References.addFolder(it) }
+    persona?.let { (u, p) -> PersonaImportDialog(p,
+        onPersona = {
+            persona = null
+            val r = References.addPersona(p.name, p.prompt, p.note)
+            if (p.png) References.setPersonaImage(ctx, r.s("id"), u)
+            open("ref/${r.s("id")}")
+        },
+        onPlain = { persona = null; References.addFile(ctx, u)?.let { open("ref/${it.s("id")}") } },
+        onDismiss = { persona = null }) }
     renaming?.let { f -> NameDialog("폴더 이름", f.s("name"), "폴더 이름", onDismiss = { renaming = null }) { References.renameFolder(f.s("id"), it) } }
     removing?.let { f -> ConfirmDialog("폴더 삭제", "'${f.s("name")}' 폴더를 지울까요? 안의 자료는 '폴더 없음'으로 옮겨집니다.", "삭제",
         onConfirm = { References.removeFolder(f.s("id")) }, onDismiss = { removing = null }) }
 }
 
 @Composable
-private fun NameDialog(title: String, initial: String, placeholder: String, onDismiss: () -> Unit, onSave: (String) -> Unit) {
+internal fun NameDialog(title: String, initial: String, placeholder: String, onDismiss: () -> Unit, onSave: (String) -> Unit) {
     var name by remember { mutableStateOf(initial) }
     AlertDialog(
         onDismissRequest = onDismiss, title = { Text(title) }, containerColor = Sgu.Card,
@@ -344,4 +357,28 @@ fun RefTextScreen(id: String, onBack: () -> Unit) {
             BasicTextField(text, { text = it }, textStyle = MaterialTheme.typography.bodyLarge.copy(color = Sgu.Ink), modifier = Modifier.fillMaxWidth())
         }
     }
+}
+
+/** 페르소나 감지 시트 (original 1071 usePersonaImport). */
+@Composable
+private fun PersonaImportDialog(p: References.Persona, onPersona: () -> Unit, onPlain: () -> Unit, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss, containerColor = Sgu.Card,
+        title = { Text(if (p.png) "페르소나 양식이 감지되었습니다" else "페르소나 데이터 감지") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("RisuAI 페르소나 형식의 파일입니다. 페르소나 유형으로 등록할까요? 등록하면 내용이 {{user}}의 정보로 참고됩니다.", style = MaterialTheme.typography.bodyMedium)
+                LineCard {
+                    Column {
+                        Text(p.name, style = MaterialTheme.typography.bodyMedium.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold))
+                        Text(p.prompt.ifBlank { "(내용 없음)" }, style = MaterialTheme.typography.bodySmall, color = Sgu.Sub, maxLines = 5, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                    }
+                }
+                InkButton(if (p.png) "페르소나로 가져오기" else "페르소나로 등록", onPersona, Modifier.fillMaxWidth())
+                LineButton(if (p.png) "이미지로 가져오기" else "일반 자료로 등록", onPlain, Modifier.fillMaxWidth())
+                Text("페르소나 자료는 참고 자료 목록에서 일반 자료와 같이 활성화 방식(상시 / 서브 판단 / 비활성화)을 정할 수 있습니다.", style = MaterialTheme.typography.bodySmall, color = Sgu.Sub)
+            }
+        },
+        confirmButton = {},
+    )
 }

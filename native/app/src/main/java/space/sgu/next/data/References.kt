@@ -156,6 +156,51 @@ object References {
         "txt", "lua", "yaml", "yml" -> "text/plain"; "pdf" -> "application/pdf"; else -> "application/octet-stream"
     }
 
+    // ---------- RisuAI 페르소나 자동 감지 (original 1072 / 1071) ----------
+
+    data class Persona(val name: String, val prompt: String, val note: String, val png: Boolean)
+
+    fun detectPersona(text: String): Persona? {
+        val root = runCatching { CardIO.json.parseToJsonElement(text) }.getOrNull() ?: return null
+        fun one(e: kotlinx.serialization.json.JsonElement?): Persona? {
+            val o = e as? JsonObject ?: return null
+            val p = (o["personaPrompt"] as? kotlinx.serialization.json.JsonPrimitive)?.takeIf { it.isString }?.content ?: return null
+            return Persona(o.s("name").ifEmpty { "페르소나" }, p, o.s("note"), false)
+        }
+        if (root is kotlinx.serialization.json.JsonArray) return one(root.firstOrNull())
+        val o = root as? JsonObject ?: return null
+        return one(o) ?: one(o["data"]) ?: one(o["persona"]) ?: (o["personas"] as? kotlinx.serialization.json.JsonArray)?.let { one(it.firstOrNull()) }
+    }
+
+    fun detectPersonaPng(b: ByteArray): Persona? {
+        val sig = byteArrayOf(-119, 80, 78, 71, 13, 10, 26, 10)
+        if (b.size < 16 || (0 until 8).any { b[it] != sig[it] }) return null
+        var pos = 8
+        while (pos + 12 <= b.size) {
+            val len = ((b[pos].toInt() and 0xFF) shl 24) or ((b[pos + 1].toInt() and 0xFF) shl 16) or ((b[pos + 2].toInt() and 0xFF) shl 8) or (b[pos + 3].toInt() and 0xFF)
+            val type = String(b, pos + 4, 4, Charsets.ISO_8859_1)
+            if (len < 0 || pos + 12 + len > b.size) break
+            if (type == "tEXt") {
+                val body = b.copyOfRange(pos + 8, pos + 8 + len)
+                val z = body.indexOf(0.toByte())
+                if (z > 0 && String(body, 0, z, Charsets.ISO_8859_1) == "persona") return runCatching {
+                    detectPersona(String(android.util.Base64.decode(String(body, z + 1, body.size - z - 1, Charsets.ISO_8859_1), android.util.Base64.DEFAULT), Charsets.UTF_8))?.copy(png = true)
+                }.getOrNull()
+            }
+            if (type == "IEND") break
+            pos += 12 + len
+        }
+        return null
+    }
+
+    /** Looks for a RisuAI persona in a picked .png / .json / .txt file. */
+    fun peekPersona(c: Context, u: Uri): Persona? = runCatching {
+        val ext = displayName(c, u).substringAfterLast('.', "bin").lowercase()
+        if (ext != "png" && ext != "json" && ext != "txt") return@runCatching null
+        val bytes = c.contentResolver.openInputStream(u)?.use { it.readBytes() } ?: return@runCatching null
+        if (ext == "png") detectPersonaPng(bytes) else detectPersona(bytes.toString(Charsets.UTF_8))
+    }.getOrNull()
+
     /** Images are re-saved (max 2048px) like the original normalizeImage; text files keep their body; other files only name + memo. */
     fun addFile(c: Context, u: Uri, folderId: String? = null, sessionOf: String? = null): JsonObject? = runCatching {
         val name = displayName(c, u)

@@ -1,5 +1,7 @@
 package space.sgu.next.ui
 
+import space.sgu.next.data.SettingsStore
+
 import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -569,7 +571,8 @@ fun ImagePickerScreen(cid: String, openPreset: (String) -> Unit, onBack: () -> U
     val g = remember(cid, ImageGenStore.version) { ImageGenStore.load(cid) }
     val presets = g.arr("presets").filter { it.arr("images").isNotEmpty() }
     val changes = remember(cid) { mutableStateMapOf<String, Boolean>() }
-    var size by rememberSaveable { mutableFloatStateOf(110f) }
+    val pinned = (SettingsStore.root["imagePickerScale"] as? kotlinx.serialization.json.JsonPrimitive)?.content?.toFloatOrNull()
+    var size by rememberSaveable { mutableFloatStateOf(pinned ?: 110f) }
     var zoom by remember { mutableStateOf<File?>(null) }
     var genFor by remember { mutableStateOf<String?>(null) }
     val apply = { if (changes.isNotEmpty()) { ImageGenStore.setUses(cid, changes.toMap()); changes.clear() } }
@@ -578,7 +581,15 @@ fun ImagePickerScreen(cid: String, openPreset: (String) -> Unit, onBack: () -> U
 
     Page("이미지 선별", "${count}장 선택", { apply(); onBack() }) {
         Text("이미지 크기", style = MaterialTheme.typography.bodySmall, color = Sgu.Sub, modifier = Modifier.padding(start = 6.dp))
-        Slider(size, { size = it }, valueRange = 70f..240f, colors = SliderDefaults.colors(thumbColor = Sgu.Ink, activeTrackColor = Sgu.Ink, inactiveTrackColor = Sgu.Line))
+        Slider(size, { size = it }, valueRange = 70f..240f, colors = SliderDefaults.colors(thumbColor = Sgu.Ink, activeTrackColor = Sgu.Ink, inactiveTrackColor = Sgu.Line),
+            onValueChangeFinished = { if (pinned != null) SettingsStore.update { it["imagePickerScale"] = kotlinx.serialization.json.JsonPrimitive(size) } })
+        Row(Modifier.fillMaxWidth().padding(horizontal = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("지금 값 기본으로 고정", style = MaterialTheme.typography.bodyMedium)
+                Text("켜면 다른 프로젝트에서도 같은 크기로 시작합니다. 끄면 새 프로젝트는 기본 크기로 시작합니다.", style = MaterialTheme.typography.bodySmall, color = Sgu.Sub)
+            }
+            SguSwitch(pinned != null) { on -> SettingsStore.update { m -> if (on) { m["imagePickerScale"] = kotlinx.serialization.json.JsonPrimitive(size) } else { m.remove("imagePickerScale") } } }
+        }
         Hint("체크한 이미지가 봇(에셋·감정)에 반영돼요. 나가면 저장돼요. 이미지를 누르면 원본으로 볼 수 있어요.")
         presets.forEach { p ->
             val (w, h) = ImageGenStore.sizeDims(p.o("size"))

@@ -135,7 +135,9 @@ object CharacterStore {
         val data = buildJsonObject {
             put("name", JsonPrimitive("프로젝트 $n"))
             for (k in listOf("description", "personality", "scenario", "first_mes", "mes_example", "creator_notes",
-                "system_prompt", "post_history_instructions", "creator", "nickname")) put(k, JsonPrimitive(""))
+                "system_prompt", "post_history_instructions", "nickname")) put(k, JsonPrimitive(""))
+            // 설정 › 제작자 이름 (module 1073 creatorName) is the default creator of a new project
+            put("creator", JsonPrimitive(SettingsStore.root.s("creatorName").trim()))
             put("character_version", JsonPrimitive("1.0"))
             put("alternate_greetings", JsonArray(emptyList()))
             put("tags", JsonArray(emptyList()))
@@ -365,6 +367,12 @@ object CharacterStore {
     }
 
     suspend fun exportCharx(ctx: Context, id: String, uri: Uri) = withContext(Dispatchers.IO) {
+        val out = ctx.contentResolver.openOutputStream(uri) ?: error("저장할 곳을 열 수 없어요")
+        out.use { writeCharxTo(id, it) }
+    }
+
+    /** Card with a main icon asset guaranteed (PNG/JSON imports keep the icon only as icon.png) + the extra zip entries for it. */
+    fun cardWithMainIcon(id: String): Pair<JsonObject, Map<String, File>> {
         var card = readCard(id)
         val x = File(dir(id), "x").takeIf { it.exists() }
         val extra = mutableMapOf<String, File>()
@@ -387,8 +395,12 @@ object CharacterStore {
             data["assets"] = JsonArray(assets)
             card = JsonObject(card + ("data" to JsonObject(data)))
         }
-        val out = ctx.contentResolver.openOutputStream(uri) ?: error("저장할 곳을 열 수 없어요")
-        out.use { CardIO.writeCharx(it, card, x, extra) }
+        return card to extra
+    }
+
+    fun writeCharxTo(id: String, out: java.io.OutputStream) {
+        val (card, extra) = cardWithMainIcon(id)
+        CardIO.writeCharx(out, card, File(dir(id), "x").takeIf { it.exists() }, extra)
     }
 }
 

@@ -79,6 +79,12 @@ import space.sgu.next.data.FieldKind
 import space.sgu.next.data.Fields
 import kotlinx.serialization.json.JsonPrimitive
 import space.sgu.next.data.Workshop
+import space.sgu.next.data.b
+import space.sgu.next.data.SettingsStore
+import space.sgu.next.data.SguData
+import androidx.compose.material.icons.automirrored.outlined.ArrowForward
+import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.runtime.DisposableEffect
 import space.sgu.next.data.arr
 import space.sgu.next.data.o
 import space.sgu.next.data.WFields
@@ -109,13 +115,10 @@ fun EditorScreen(characterId: String, onBack: (() -> Unit)?, openField: (String)
     val wdoc = remember(characterId, Workshop.version) { Workshop.doc(characterId) }
     val busy = Workshop.isActive(characterId)
 
-    val exporter = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
-        if (uri != null) scope.launch {
-            runCatching { CharacterStore.exportCharx(ctx, characterId, uri) }
-                .onSuccess { Toast.makeText(ctx, "CHARX로 내보냈어요", Toast.LENGTH_SHORT).show() }
-                .onFailure { Toast.makeText(ctx, "내보내지 못했어요: ${it.message}", Toast.LENGTH_LONG).show() }
-        }
-    }
+    DisposableEffect(characterId) { onDispose { BotSearch.close() } }
+    val sguData = remember(card) { SguData.from(card["data"] as? JsonObject) }
+    val hits = remember(sguData, BotSearch.query) { BotSearch.searchAll(sguData, BotSearch.query.trim()) }
+    val hitGroups = remember(hits) { hits.keys.map { BotSearch.groupOf(it) }.toSet() }
     val name = meta?.name ?: "(삭제된 캐릭터)"
 
     Scaffold(
@@ -128,7 +131,8 @@ fun EditorScreen(characterId: String, onBack: (() -> Unit)?, openField: (String)
                 actions = {
                     IconButton(onClick = { openRoute("perms/$characterId") }) { Icon(Icons.Outlined.CheckCircleOutline, "권한") }
                     IconButton(onClick = { openRoute("prompt/$characterId") }) { Icon(Icons.AutoMirrored.Outlined.Assignment, "프롬프트 설정") }
-                    IconButton(onClick = { exporter.launch("${name.replace(Regex("[\\\\/:*?\"<>|]"), "_")}.charx") }) { Icon(Icons.Outlined.IosShare, "CHARX로 내보내기") }
+                    IconButton(onClick = { if (BotSearch.open) BotSearch.close() else BotSearch.open = true }) { Icon(Icons.Outlined.Search, "봇 전체 검색") }
+                    IconButton(onClick = { openRoute("export/$characterId") }) { Icon(Icons.Outlined.IosShare, "내보내기") }
                     Box {
                         IconButton(onClick = { menu = true }) { Icon(Icons.Outlined.MoreVert, "더보기") }
                         DropdownMenu(expanded = menu, onDismissRequest = { menu = false }, containerColor = Sgu.Card, shape = RoundedCornerShape(16.dp)) {
@@ -149,8 +153,11 @@ fun EditorScreen(characterId: String, onBack: (() -> Unit)?, openField: (String)
         },
     ) { pad ->
         Column(Modifier.fillMaxSize().padding(pad).consumeWindowInsets(pad).imePadding()) {
+            if (BotSearch.open) SearchBarRow(hits.values.sum(), hits.size)
+            if (SettingsStore.root.b("undoUnderTitle")) UndoUnderTitle(characterId, busy)
+            val groupKeys = listOf("character", "image", "chat", "script", "etc")
             PillTabs(
-                options = editorTabs,
+                options = if (BotSearch.query.isBlank()) editorTabs else editorTabs.mapIndexed { i, l -> if (groupKeys[i] in hitGroups) "$l ●" else l },
                 selected = bigOf(pager.currentPage),
                 onSelect = { scope.launch { pager.animateScrollToPage(pageOfBig(it)) } },
             )
@@ -175,6 +182,22 @@ fun EditorScreen(characterId: String, onBack: (() -> Unit)?, openField: (String)
         onConfirm = { CharacterStore.delete(characterId); onBack?.invoke() }, onDismiss = { deleting = false })
 }
 
+/** 설정 › 되돌리기 버튼을 프로젝트명 아래에 표시 (original 1655). */
+@Composable
+private fun UndoUnderTitle(cid: String, busy: Boolean) {
+    val (canUndo, canRedo) = space.sgu.next.data.EditHistory.flags[cid] ?: (false to false)
+    Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        IconButton(onClick = { Workshop.undoLast(cid) }, enabled = canUndo && !busy, modifier = Modifier.size(36.dp)) {
+            Icon(Icons.AutoMirrored.Outlined.ArrowBack, "되돌리기", tint = if (canUndo && !busy) Sgu.Ink else Sgu.Sub.copy(alpha = 0.4f))
+        }
+        IconButton(onClick = { Workshop.redoNext(cid) }, enabled = canRedo && !busy, modifier = Modifier.size(36.dp)) {
+            Icon(Icons.AutoMirrored.Outlined.ArrowForward, "다시 실행", tint = if (canRedo && !busy) Sgu.Ink else Sgu.Sub.copy(alpha = 0.4f))
+        }
+        Text("되돌리기 · 다시 실행 (직접 편집 포함)", style = MaterialTheme.typography.labelSmall, color = Sgu.Sub, modifier = Modifier.padding(start = 4.dp))
+    }
+    androidx.compose.material3.HorizontalDivider(color = Sgu.Line)
+}
+
 // ---------- 캐릭터 / 스크립트 / 기타 tabs: the original's field groups ----------
 
 @Composable
@@ -183,7 +206,10 @@ private fun GroupPage(group: String, id: String, card: JsonObject, openField: (S
     val fields = Fields.inGroup(group)
     val expanded = remember(id) { mutableStateOf(setOf<String>()) }
     androidx.compose.runtime.CompositionLocalProvider(LocalGroupInset provides 0.dp) {
+    val searching = BotSearch.query.isNotBlank()
+    val sgu = remember(card, searching) { if (searching) SguData.from(data) else null }
     LazyColumn(contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 40.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        if (sgu != null) searchResults(group, sgu, openField)
         fields.forEach { f ->
             when (f.kind) {
                 FieldKind.Text, FieldKind.LongText -> item(key = f.id) {
