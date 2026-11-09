@@ -19,6 +19,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         CharacterStore.init(applicationContext)
         SettingsStore.init(applicationContext)
+        space.sgu.next.data.Workshop.init(applicationContext)
         setContent { SguTheme { SguApp() } }
     }
 }

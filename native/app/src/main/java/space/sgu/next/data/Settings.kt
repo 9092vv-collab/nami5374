@@ -68,6 +68,17 @@ object SettingsStore {
         put("logging", buildJsonObject { put("enabled", JsonPrimitive(true)); put("maxEntries", JsonPrimitive(50)) })
         put("requestTimeoutMs", JsonPrimitive(180000))
         put("retries", JsonPrimitive(2))
+        put("permissionDefaults", Perms.builtinDefaults())
+        put("permissionDefaultsVersion", JsonPrimitive(2))
+        put("promptPresetsVersion", JsonPrimitive(3))
+        put("promptPresets", buildJsonArray { add(defaultPreset()) })
+        put("activePromptPresetId", JsonPrimitive("preset_default"))
+        put("fieldDescriptions", JsonObject(emptyMap()))
+    }
+
+    fun defaultPreset(): JsonObject = buildJsonObject {
+        put("id", JsonPrimitive("preset_default")); put("name", JsonPrimitive("기본"))
+        put("blocks", JsonArray(PromptBlocks.defaults())); put("createdAt", JsonPrimitive(System.currentTimeMillis()))
     }
 
     /** Fills missing keys from defaults (shallow, plus processors.main/sub) — like migrateSettings. */
@@ -82,6 +93,13 @@ object SettingsStore {
         merged["background"] = JsonObject(d.o("background").orEmpty() + t.o("background").orEmpty())
         merged["logging"] = JsonObject(d.o("logging").orEmpty() + t.o("logging").orEmpty())
         merged.remove("_secrets")
+        if (t.arr("promptPresets").isEmpty()) {
+            merged["promptPresets"] = JsonArray(listOf(defaultPreset()))
+            merged["activePromptPresetId"] = JsonPrimitive("preset_default")
+        }
+        if ((t.d("permissionDefaultsVersion") ?: 0.0) < 2) merged["permissionDefaults"] = d["permissionDefaults"]!!
+        else merged["permissionDefaults"] = JsonObject(d.o("permissionDefaults").orEmpty() + t.o("permissionDefaults").orEmpty())
+        merged["permissionDefaultsVersion"] = JsonPrimitive(2)
         // NovelAI image providers must call image.novelai.net (the text endpoint answers 401).
         (merged["providers"] as? JsonArray)?.let { list ->
             merged["providers"] = JsonArray(list.map { e ->
