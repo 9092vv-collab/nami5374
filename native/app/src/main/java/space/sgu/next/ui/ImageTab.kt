@@ -1,5 +1,11 @@
 package space.sgu.next.ui
 
+import androidx.compose.material.icons.outlined.PersonAdd
+
+import androidx.compose.material.icons.outlined.Check
+
+import androidx.compose.material.icons.outlined.Close
+
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.outlined.AddPhotoAlternate
 import androidx.activity.result.contract.ActivityResultContracts
@@ -663,59 +669,52 @@ fun GenPresetScreen(cid: String, presetId: String, openField: (String) -> Unit, 
                 }
             }
             item(key = "images") { PresetImages(cid, p) }
-            // Characters in this preset with block checklists (folders switch their blocks).
-            p.arr("chars").forEach { pc ->
-                val c = ImageGenStore.character(g, pc.s("characterId")) ?: return@forEach
+            // 원본처럼: 캐릭터마다 접히는 카드 + 블록은 알약(칩)으로 켜고 끄기. 블록 내용은 캐릭터 설정 탭에서 만든 태그 블록.
+            p.arr("chars").forEachIndexed { idx, pc ->
+                val c = ImageGenStore.character(g, pc.s("characterId")) ?: return@forEachIndexed
                 val ids = ImageGenStore.blockIds(pc)
                 val blocks = c.arr("blocks")
                 val folders = blocks.filter { it.s("type") == "folder" }
+                val open = collapsed[pc.s("id")] != true
                 item(key = "pc-" + pc.s("id")) {
-                    Row(Modifier.padding(top = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text(c.s("name"), style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-                        TextButton(onClick = { ImageGenStore.patchPreset(cid, presetId) { pr -> pr.with("chars" to kotlinx.serialization.json.JsonArray(pr.arr("chars").filter { it.s("id") != pc.s("id") })) } }) {
-                            Text("빼기", color = Sgu.Sub)
-                        }
-                    }
-                    Text("블록 (위에서 아래 순서로 NovelAI에 전달됩니다)", style = MaterialTheme.typography.bodySmall, color = Sgu.Sub, modifier = Modifier.padding(start = 4.dp))
-                }
-                val loose = blocks.filter { it.s("type") != "folder" && (it.sOrNull("folderId") == null || folders.none { f -> f.s("id") == it.s("folderId") }) }
-                items(loose, key = { "pcb-" + pc.s("id") + it.s("id") }) { b ->
-                    CheckRow(b, b.s("id") in ids, enabled = true) { ImageGenStore.toggleBlock(cid, presetId, pc.s("id"), b.s("id")) }
-                }
-                folders.forEach { f ->
-                    val fOn = f.s("id") in ids
-                    val open = collapsed[pc.s("id") + f.s("id")] != true
-                    val kids = blocks.filter { it.sOrNull("folderId") == f.s("id") }
-                    item(key = "pcf-" + pc.s("id") + f.s("id")) {
-                        Row(
-                            Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(Sgu.Bubble).padding(start = 4.dp, end = 10.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            IconButton(onClick = { ImageGenStore.toggleBlock(cid, presetId, pc.s("id"), f.s("id")) }) {
-                                Icon(if (fOn) Icons.Outlined.CheckBox else Icons.Outlined.CheckBoxOutlineBlank, if (fOn) "폴더 켜짐" else "폴더 꺼짐", tint = Sgu.Ink)
+                    LineCard {
+                        Column {
+                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().clickable { collapsed[pc.s("id")] = open }) {
+                                Icon(Icons.Outlined.KeyboardArrowDown, if (open) "접기" else "펼치기", Modifier.rotate(if (open) 0f else -90f), tint = Sgu.Sub)
+                                Text("  캐릭터${idx + 1} · ${c.s("name")}", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                IconButton(onClick = { ImageGenStore.patchPreset(cid, presetId) { pr -> pr.with("chars" to kotlinx.serialization.json.JsonArray(pr.arr("chars").filter { it.s("id") != pc.s("id") })) } }) {
+                                    Icon(Icons.Outlined.Close, "이 프리셋에서 빼기", tint = Sgu.Ink)
+                                }
                             }
-                            Icon(Icons.Outlined.Folder, null, tint = Sgu.Ink, modifier = Modifier.size(20.dp))
-                            Text("  ${f.s("name").ifBlank { "폴더" }}", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f).clickable { collapsed[pc.s("id") + f.s("id")] = open }.padding(vertical = 12.dp))
-                            Text(if (fOn) "${kids.count { it.s("id") in ids }}/${kids.size}" else "꺼짐", style = MaterialTheme.typography.bodySmall, color = Sgu.Sub)
+                            AnimatedVisibility(open) {
+                                Column {
+                                    FieldLabel("블록 지정")
+                                    if (blocks.isEmpty()) Hint("캐릭터 설정 탭에서 태그 블록을 먼저 만들어 주세요.")
+                                    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        val loose = blocks.filter { it.s("type") != "folder" && (it.sOrNull("folderId") == null || folders.none { f -> f.s("id") == it.s("folderId") }) }
+                                        loose.forEach { b -> BlockChip(b, b.s("id") in ids, true) { ImageGenStore.toggleBlock(cid, presetId, pc.s("id"), b.s("id")) } }
+                                        folders.forEach { f ->
+                                            val fOn = f.s("id") in ids
+                                            BlockChip(f, fOn, true, folder = true) { ImageGenStore.toggleBlock(cid, presetId, pc.s("id"), f.s("id")) }
+                                            blocks.filter { it.sOrNull("folderId") == f.s("id") }.forEach { b ->
+                                                BlockChip(b, b.s("id") in ids, fOn) { ImageGenStore.toggleBlock(cid, presetId, pc.s("id"), b.s("id")) }
+                                            }
+                                        }
+                                    }
+                                    PositionPicker(cid, p, pc)
+                                    FieldLabel("캐릭터 프롬프트 (Character Prompt 맨 아래)")
+                                    PromptCard("${c.s("name")} 추가 프롬프트 (이 프리셋에서만)", pc.s("prompt")) { openField("gen:pchar:$presetId:${pc.s("id")}:prompt") }
+                                    FieldLabel("캐릭터 네거티브 (Undesired Content 맨 아래)")
+                                    PromptCard("${c.s("name")} 추가 네거티브", pc.s("negative")) { openField("gen:pchar:$presetId:${pc.s("id")}:negative") }
+                                }
+                            }
                         }
                     }
-                    if (open) items(kids, key = { "pcfk-" + pc.s("id") + it.s("id") }) { b ->
-                        Box(Modifier.padding(start = 18.dp)) {
-                            CheckRow(b, b.s("id") in ids, enabled = fOn) { ImageGenStore.toggleBlock(cid, presetId, pc.s("id"), b.s("id")) }
-                        }
-                    }
-                }
-                item(key = "pcp-" + pc.s("id")) {
-                    Spacer(Modifier.height(4.dp))
-                    PromptCard("${c.s("name")} 추가 프롬프트 (이 프리셋에서만)", pc.s("prompt")) { openField("gen:pchar:$presetId:${pc.s("id")}:prompt") }
-                    Spacer(Modifier.height(6.dp))
-                    PromptCard("${c.s("name")} 추가 네거티브", pc.s("negative")) { openField("gen:pchar:$presetId:${pc.s("id")}:negative") }
-                    if (p.arr("chars").size > 1) PositionPicker(cid, p, pc)
                 }
             }
             item(key = "addchar") {
                 val missing = g.arr("characters").filter { c -> p.arr("chars").none { it.s("characterId") == c.s("id") } }
-                if (missing.isNotEmpty()) LineButton("캐릭터 넣기", onClick = { addChar = true }, icon = Icons.Outlined.Add)
+                if (missing.isNotEmpty()) LineButton("캐릭터 추가", onClick = { addChar = true }, icon = Icons.Outlined.PersonAdd)
             }
             item(key = "asset") {
                 FieldLabel("에셋 프롬프트 (모든 캐릭터 공통, 그림체 프롬프트 뒤에 붙음)")
@@ -747,7 +746,7 @@ fun GenPresetScreen(cid: String, presetId: String, openField: (String) -> Unit, 
     if (addChar) {
         val missing = g.arr("characters").filter { c -> p.arr("chars").none { it.s("characterId") == c.s("id") } }
         AlertDialog(
-            onDismissRequest = { addChar = false }, title = { Text("캐릭터 넣기") },
+            onDismissRequest = { addChar = false }, title = { Text("캐릭터 추가") },
             text = {
                 Column {
                     missing.forEach { c ->
@@ -797,5 +796,23 @@ private fun CheckRow(b: JsonObject, checked: Boolean, enabled: Boolean, onToggle
             }
             Text(b.s("text").ifBlank { "비어 있음" }, style = MaterialTheme.typography.bodySmall, color = Sgu.Sub, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
+    }
+}
+
+/** 프리셋의 블록 알약: 켜짐 = 먹색 ✓ (네거티브 블록은 빨강 + "−"), 꺼짐 = 테두리만. 폴더가 꺼지면 안의 블록은 흐리게. */
+@Composable
+private fun BlockChip(b: JsonObject, on: Boolean, enabled: Boolean, folder: Boolean = false, onClick: () -> Unit) {
+    val neg = b.s("type") == "negative"
+    val fill = when { !on -> Color.Transparent; neg -> Sgu.Danger; else -> Sgu.Ink }
+    val fg = if (on) Color.White else Sgu.Ink
+    Row(
+        Modifier.alpha(if (enabled) 1f else 0.4f).clip(CircleShape).background(fill)
+            .border(1.dp, if (on) fill else Sgu.Line, CircleShape)
+            .clickable(enabled = enabled, onClick = onClick).padding(horizontal = 14.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (on) { Icon(Icons.Outlined.Check, null, tint = fg, modifier = Modifier.size(16.dp)); Spacer(Modifier.width(4.dp)) }
+        if (folder) { Icon(Icons.Outlined.Folder, null, tint = fg, modifier = Modifier.size(16.dp)); Spacer(Modifier.width(4.dp)) }
+        Text(b.s("name").ifBlank { if (folder) "폴더" else "블록" } + if (neg) " −" else "", color = fg, style = MaterialTheme.typography.labelLarge, maxLines = 1)
     }
 }
