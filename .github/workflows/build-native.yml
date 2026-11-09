@@ -24,7 +24,8 @@ jobs:
           F=gradle-8.14.3-bin.zip
           for i in 1 2 3; do
             curl -fL --retry 3 -o "$HOME/$F" "https://github.com/gradle/gradle-distributions/releases/download/v8.14.3/$F" && break
-            sleep 10
+            curl -fL --retry 3 -o "$HOME/$F" "https://services.gradle.org/distributions/$F" && break
+            sleep 15
           done
           unzip -q "$HOME/$F" -d "$HOME"
           echo "$HOME/gradle-8.14.3/bin" >> "$GITHUB_PATH"
