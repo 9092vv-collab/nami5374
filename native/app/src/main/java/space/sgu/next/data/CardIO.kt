@@ -21,11 +21,12 @@ import java.util.zip.ZipOutputStream
 object CardIO {
     val json = Json { ignoreUnknownKeys = true; isLenient = true }
 
-    enum class Kind { Charx, Png, Json }
+    enum class Kind { Charx, Png, Json, JpegCharx }
 
     fun detect(head: ByteArray): Kind = when {
         head.size >= 2 && head[0] == 'P'.code.toByte() && head[1] == 'K'.code.toByte() -> Kind.Charx
         head.size >= 8 && head[0] == 0x89.toByte() && head[1] == 'P'.code.toByte() && head[2] == 'N'.code.toByte() -> Kind.Png
+        head.size >= 3 && head[0] == 0xFF.toByte() && head[1] == 0xD8.toByte() -> Kind.JpegCharx
         else -> Kind.Json
     }
 

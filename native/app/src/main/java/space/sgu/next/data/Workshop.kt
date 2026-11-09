@@ -787,11 +787,15 @@ object Workshop {
         updateTurn(cid, turnId, mapOf("undone" to JsonPrimitive(true), "redoSnapshot" to redo))
     }
 
+    /** Assets (icons · emotions · extra assets) live in files, so ←/→ keep the current asset list. */
+    private fun keepAssets(target: JsonObject, current: JsonObject): JsonObject =
+        current["assets"]?.let { JsonObject(target + ("assets" to it)) } ?: JsonObject(target - "assets")
+
     /** Top-bar ← (direct edits included). */
     fun undoLast(cid: String) {
         val before = cardData(cid)
         val step = EditHistory.undo(cid) ?: return
-        EditHistory.silently { applyData(cid, step.data) }
+        EditHistory.silently { applyData(cid, keepAssets(step.data, before)) }
         val tid = step.turnId ?: return
         val t = turns(cid).firstOrNull { it.s("id") == tid }
         val redo = t?.o("snapshot")?.let { SguData.snapshotOf(before, it.keys) }
@@ -800,7 +804,7 @@ object Workshop {
 
     fun redoNext(cid: String) {
         val step = EditHistory.redo(cid) ?: return
-        EditHistory.silently { applyData(cid, step.data) }
+        EditHistory.silently { applyData(cid, keepAssets(step.data, cardData(cid))) }
         step.turnId?.let { updateTurn(cid, it, mapOf("undone" to JsonPrimitive(false))) }
     }
 

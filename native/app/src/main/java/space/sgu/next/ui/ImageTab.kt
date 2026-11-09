@@ -148,24 +148,61 @@ private fun ImageDataTab(cid: String) {
         item(key = "icons") { IconSection(cid) }
         groups.forEach { (type, label) ->
             val list = assets.filter { CardIO.str(it, "type") == type }
-            item(key = type) {
-                LineCard {
-                    Column {
-                        Text("$label ${list.size}개", style = MaterialTheme.typography.bodySmall, color = Sgu.Sub)
-                        if (list.isEmpty()) Text("없음", style = MaterialTheme.typography.bodyMedium, color = Sgu.Sub.copy(alpha = 0.7f))
-                        else LazyRow(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            items(list.take(60)) { a ->
-                                Column(Modifier.width(76.dp)) {
-                                    FileImage(CardIO.assetFile(x, CardIO.str(a, "uri")), Modifier.size(76.dp).clip(RoundedCornerShape(14.dp)), 256)
-                                    Text(CardIO.str(a, "name"), style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                }
-                            }
-                        }
+            item(key = type) { AssetSection(cid, type, label, list, x) }
+        }
+        item { Hint("이미지 템플릿에서 체크한 이미지가 여기(감정·추가 에셋)에 이미지이름.1, .2 … 로 들어가요. 파일을 직접 추가할 수도 있어요(RisuAI 에셋 형식).") }
+    }
+}
+
+/** 감정 이미지 / 추가 에셋: 보기 + 직접 추가 · 이름 바꾸기 · 삭제 (원본에 없던 기능, 사용자 요청). */
+@Composable
+private fun AssetSection(cid: String, type: String, label: String, list: List<JsonObject>, x: File) {
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var busy by remember { mutableStateOf(false) }
+    var chosen by remember { mutableStateOf<JsonObject?>(null) }
+    var renaming by remember { mutableStateOf<JsonObject?>(null) }
+    var removing by remember { mutableStateOf<JsonObject?>(null) }
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        if (uris.isNotEmpty()) { busy = true; scope.launch {
+            val added = withContext(Dispatchers.IO) { space.sgu.next.data.Assets.place(ctx, cid, type, uris) }
+            space.sgu.next.data.Assets.append(cid, added)
+            busy = false
+            Toast.makeText(ctx, "${added.size}개 추가했어요", Toast.LENGTH_SHORT).show()
+        } }
+    }
+    LineCard {
+        Column {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("$label ${list.size}개", style = MaterialTheme.typography.bodySmall, color = Sgu.Sub, modifier = Modifier.weight(1f))
+                PillChip(if (busy) "추가 중…" else "추가", false, Icons.Outlined.Add) {
+                    if (!busy) picker.launch(if (type == "emotion") arrayOf("image/*") else arrayOf("image/*", "audio/*", "video/*"))
+                }
+            }
+            if (list.isEmpty()) Text("없음", style = MaterialTheme.typography.bodyMedium, color = Sgu.Sub.copy(alpha = 0.7f))
+            else LazyRow(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(list.take(200)) { a ->
+                    Column(Modifier.width(76.dp).clip(RoundedCornerShape(14.dp)).clickable { chosen = a }) {
+                        FileImage(CardIO.assetFile(x, CardIO.str(a, "uri")), Modifier.size(76.dp).clip(RoundedCornerShape(14.dp)), 256)
+                        Text(CardIO.str(a, "name"), style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                 }
             }
         }
-        item { Hint("이미지 템플릿에서 체크한 이미지가 여기(감정·추가 에셋)에 이미지이름.1, .2 … 로 들어가요.") }
+    }
+    chosen?.let { a ->
+        AlertDialog(onDismissRequest = { chosen = null }, containerColor = Sgu.Card,
+            title = { Text(CardIO.str(a, "name").ifBlank { "에셋" }) },
+            text = { Text("${CardIO.str(a, "ext").uppercase()} · ${CardIO.str(a, "uri").removePrefix("embeded://")}", style = MaterialTheme.typography.bodySmall, color = Sgu.Sub) },
+            confirmButton = { TextButton(onClick = { chosen = null; renaming = a }) { Text("이름 바꾸기", color = Sgu.Ink) } },
+            dismissButton = { TextButton(onClick = { chosen = null; removing = a }) { Text("삭제", color = Sgu.Danger) } })
+    }
+    renaming?.let { a ->
+        NameDialog("이름 바꾸기", CardIO.str(a, "name"), "에셋 이름", onDismiss = { renaming = null }) { space.sgu.next.data.Assets.rename(cid, CardIO.str(a, "uri"), it) }
+    }
+    removing?.let { a ->
+        ConfirmDialog("에셋 삭제", "'${CardIO.str(a, "name")}'을(를) 봇에서 지웁니다.", "삭제",
+            onConfirm = { space.sgu.next.data.Assets.remove(cid, CardIO.str(a, "uri")) }, onDismiss = { removing = null })
     }
 }
 

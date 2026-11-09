@@ -347,13 +347,33 @@ object CharacterStore {
                         main?.let { CardIO.assetFile(x, CardIO.str(it, "uri")) }?.copyTo(File(d, "icon.png"), overwrite = true)
                         c
                     }
+                    CardIO.Kind.JpegCharx -> {
+                        // CHARX (JPEG 임베디드): 아이콘 JPEG 뒤에 붙은 ZIP부터 읽는다
+                        val bytes = input.readBytes()
+                        var at = -1
+                        for (i in 0 until bytes.size - 3) if (bytes[i] == 'P'.code.toByte() && bytes[i + 1] == 'K'.code.toByte() && bytes[i + 2] == 3.toByte() && bytes[i + 3] == 4.toByte()) { at = i; break }
+                        if (at < 0) error("이 JPEG에는 캐릭터 정보가 없어요")
+                        val x = File(d, "x")
+                        val c = CardIO.mergeRisum(CardIO.unzipCharx(java.io.ByteArrayInputStream(bytes, at, bytes.size - at), x), x)
+                        val icons = CardIO.assets(c).filter { CardIO.str(it, "type") == "icon" }
+                        val main = icons.firstOrNull { CardIO.str(it, "name") == "main" } ?: icons.firstOrNull()
+                        val mf = main?.let { CardIO.assetFile(x, CardIO.str(it, "uri")) }
+                        if (mf != null) mf.copyTo(File(d, "icon.png"), overwrite = true) else File(d, "icon.png").writeBytes(bytes.copyOfRange(0, at))
+                        c
+                    }
                     CardIO.Kind.Png -> {
                         val bytes = input.readBytes()
-                        val c = CardIO.cardFromPng(bytes)
+                        // 추가 에셋·감정 이미지(chara-ext-asset_:N 청크)도 x/ 로 풀어 둔다
+                        val (c, _) = Assets.unpackImported(CardIO.cardFromPng(bytes), Assets.pngTextChunks(bytes), File(d, "x"))
                         File(d, "icon.png").writeBytes(bytes)
                         c
                     }
-                    CardIO.Kind.Json -> CardIO.parseJson(input.readBytes().toString(Charsets.UTF_8))
+                    CardIO.Kind.Json -> {
+                        // JSON은 에셋이 data:…;base64 로 들어 있음
+                        val (c, main) = Assets.unpackImported(CardIO.parseJson(input.readBytes().toString(Charsets.UTF_8)), emptyMap(), File(d, "x"))
+                        main?.let { File(d, "icon.png").writeBytes(it) }
+                        c
+                    }
                 }
                 writeCard(id, card)
                 writeMeta(id, null)
