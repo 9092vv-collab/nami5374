@@ -39,6 +39,8 @@ import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.IosShare
 import androidx.compose.material.icons.outlined.MoreVert
+import androidx.compose.material.icons.outlined.CheckCircleOutline
+import androidx.compose.material.icons.automirrored.outlined.Assignment
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material3.DropdownMenu
@@ -75,8 +77,8 @@ import space.sgu.next.data.CharacterStore
 import space.sgu.next.data.FieldKind
 import space.sgu.next.data.Fields
 import kotlinx.serialization.json.JsonPrimitive
-import space.sgu.next.data.FakeData
-import space.sgu.next.data.Turn
+import space.sgu.next.data.Workshop
+import space.sgu.next.data.WFields
 
 private val editorTabs = listOf("캐릭터", "이미지", "작업실", "스크립트", "기타")
 
@@ -92,6 +94,11 @@ fun EditorScreen(characterId: String, onBack: (() -> Unit)?, openField: (String)
     val card = remember(characterId, CharacterStore.version) { CharacterStore.readCard(characterId) }
     val pager = rememberPagerState(initialPage = 0) { editorTabs.size }
     var menu by remember { mutableStateOf(false) }
+    var newSession by remember { mutableStateOf(false) }
+    var sessions by remember { mutableStateOf(false) }
+    var deleting by remember { mutableStateOf(false) }
+    val wdoc = remember(characterId, Workshop.version) { Workshop.doc(characterId) }
+    val busy = Workshop.isActive(characterId)
 
     val exporter = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
         if (uri != null) scope.launch {
@@ -107,20 +114,24 @@ fun EditorScreen(characterId: String, onBack: (() -> Unit)?, openField: (String)
         topBar = {
             SguTopBar(
                 title = name,
-                subtitle = listOfNotNull(meta?.creator?.ifBlank { "제작자 미지정" }, "세션 1").joinToString(" · "),
+                subtitle = "${Workshop.currentSessionName(wdoc)} · ${wdoc.o("session").arr("turns").size}턴",
                 onBack = onBack,
                 actions = {
-                    IconButton(onClick = {}) { Icon(Icons.Outlined.Search, "검색") }
+                    IconButton(onClick = { openRoute("perms/$characterId") }) { Icon(Icons.Outlined.CheckCircleOutline, "권한") }
+                    IconButton(onClick = { openRoute("prompt/$characterId") }) { Icon(Icons.AutoMirrored.Outlined.Assignment, "프롬프트 설정") }
+                    IconButton(onClick = { exporter.launch("${name.replace(Regex("[\\\\/:*?\"<>|]"), "_")}.charx") }) { Icon(Icons.Outlined.IosShare, "CHARX로 내보내기") }
                     Box {
                         IconButton(onClick = { menu = true }) { Icon(Icons.Outlined.MoreVert, "더보기") }
                         DropdownMenu(expanded = menu, onDismissRequest = { menu = false }, containerColor = Sgu.Card, shape = RoundedCornerShape(16.dp)) {
-                            DropdownMenuItem(
-                                text = { Text("CHARX로 내보내기") }, leadingIcon = { Icon(Icons.Outlined.IosShare, null) },
-                                onClick = { menu = false; exporter.launch("${name.replace(Regex("[\\\\/:*?\"<>|]"), "_")}.charx") },
-                            )
-                            DropdownMenuItem(text = { Text("권한") }, onClick = { menu = false })
-                            DropdownMenuItem(text = { Text("프롬프트 미리보기") }, onClick = { menu = false })
-                            DropdownMenuItem(text = { Text("세션 이동") }, onClick = { menu = false })
+                            DropdownMenuItem(text = { Text("새로운 세션 추가") }, enabled = !busy, onClick = { menu = false; newSession = true })
+                            DropdownMenuItem(text = { Text("세션 이동") }, onClick = { menu = false; sessions = true })
+                            DropdownMenuItem(text = { Text("복제") }, onClick = {
+                                menu = false
+                                val nid = CharacterStore.duplicate(characterId)
+                                Toast.makeText(ctx, "복제했어요", Toast.LENGTH_SHORT).show()
+                                openRoute("character/$nid")
+                            })
+                            DropdownMenuItem(text = { Text("삭제", color = Sgu.Danger) }, enabled = !busy, onClick = { menu = false; deleting = true })
                         }
                     }
                 },
@@ -137,13 +148,21 @@ fun EditorScreen(characterId: String, onBack: (() -> Unit)?, openField: (String)
                 when (page) {
                     0 -> GroupPage("character", characterId, card, openField, openRoute)
                     1 -> ImagePage(characterId, openField, openPreset, openRoute)
-                    2 -> WorkshopPage()
+                    2 -> WorkshopPage(characterId, openFieldTab = { fid ->
+                        val target = when (WFields.map[fid]?.group ?: Fields.byId[fid]?.group) { "image" -> 1; "script" -> 3; "etc" -> 4; else -> 0 }
+                        scope.launch { pager.animateScrollToPage(target) }
+                    }, openRoute = openRoute)
                     3 -> GroupPage("script", characterId, card, openField, openRoute)
                     else -> GroupPage("etc", characterId, card, openField, openRoute)
                 }
             }
         }
     }
+    if (newSession) ConfirmDialog("새로운 세션 추가", "턴 기록이 없고 권한이 초기화된 새 세션을 만들어 이동합니다. 기존 세션은 그대로 보관되며, 봇 데이터는 모든 세션이 공유합니다.", "추가",
+        onConfirm = { Workshop.addSession(characterId) }, onDismiss = { newSession = false })
+    if (sessions) SessionDialog(characterId, busy) { sessions = false }
+    if (deleting) ConfirmDialog("캐릭터 삭제", "'$name'과(와) 작업실 기록이 모두 삭제됩니다.", "삭제",
+        onConfirm = { CharacterStore.delete(characterId); onBack?.invoke() }, onDismiss = { deleting = false })
 }
 
 // ---------- 캐릭터 / 스크립트 / 기타 tabs: the original's field groups ----------
@@ -248,96 +267,6 @@ private fun FieldCard(label: String, value: String, maxLines: Int = 4, onClick: 
 }
 
 // ---------- other tabs (skeleton until their steps) ----------
-
-@Composable
-private fun WorkshopPage() {
-    val turns = remember { mutableStateListOf<Turn>().apply { addAll(FakeData.turns) } }
-    // Chat-style: newest turn sits right above the input and stays there when the keyboard opens.
-    val listState = rememberLazyListState()
-    val scope = rememberCoroutineScope()
-    var input by rememberSaveable { mutableStateOf("") }
-
-    Column(Modifier.fillMaxSize()) {
-        LazyColumn(
-            state = listState,
-            modifier = Modifier.weight(1f),
-            reverseLayout = true,
-            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(18.dp, Alignment.Bottom),
-        ) {
-            items(turns.asReversed(), key = { it.id }) { t -> TurnCard(t) }
-        }
-        // Claude-style input pill: white, soft shadow, grey round +, ink round send.
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .padding(start = 12.dp, end = 12.dp, top = 6.dp, bottom = 10.dp)
-                .shadow(8.dp, RoundedCornerShape(30.dp), ambientColor = Sgu.Ink.copy(alpha = 0.12f), spotColor = Sgu.Ink.copy(alpha = 0.18f))
-                .clip(RoundedCornerShape(30.dp))
-                .background(Sgu.Card)
-                .border(1.dp, Sgu.Line, RoundedCornerShape(30.dp))
-                .padding(8.dp),
-            verticalAlignment = Alignment.Bottom,
-        ) {
-            Box(Modifier.size(44.dp).clip(CircleShape).background(Sgu.Bubble).clickable {}, contentAlignment = Alignment.Center) {
-                Icon(Icons.Outlined.Add, "첨부", tint = Sgu.Ink)
-            }
-            Box(Modifier.weight(1f).padding(horizontal = 12.dp, vertical = 11.dp)) {
-                if (input.isEmpty()) Text("캐릭터에게 적용할 명령", color = Sgu.Sub, style = MaterialTheme.typography.bodyLarge, maxLines = 1)
-                BasicTextField(
-                    value = input, onValueChange = { input = it }, maxLines = 6,
-                    textStyle = MaterialTheme.typography.bodyLarge.copy(color = Sgu.Ink),
-                    cursorBrush = SolidColor(Sgu.Ink),
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            }
-            Box(
-                Modifier.size(44.dp).clip(CircleShape).background(if (input.isBlank()) Sgu.Bubble else Sgu.Ink).clickable {
-                    if (input.isNotBlank()) {
-                        val id = (turns.maxOfOrNull { it.id } ?: 0) + 1
-                        turns.add(Turn(id, input.trim(), "(아직 AI 연결 전이라 가짜 응답이에요)", emptyList()))
-                        input = ""
-                        scope.launch { listState.animateScrollToItem(0) }
-                    }
-                },
-                contentAlignment = Alignment.Center,
-            ) { Icon(Icons.Filled.ArrowUpward, "보내기", tint = if (input.isBlank()) Sgu.Sub else Color.White) }
-        }
-    }
-}
-
-@Composable
-private fun TurnCard(t: Turn) {
-    Column(Modifier.fillMaxWidth()) {
-        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
-            Text(
-                t.command,
-                modifier = Modifier.fillMaxWidth(0.85f).clip(RoundedCornerShape(22.dp)).background(Sgu.Bubble)
-                    .border(1.dp, Sgu.Line, RoundedCornerShape(22.dp)).padding(horizontal = 16.dp, vertical = 12.dp),
-                style = MaterialTheme.typography.bodyMedium,
-            )
-        }
-        Spacer(Modifier.height(12.dp))
-        Row(verticalAlignment = Alignment.Top) {
-            Icon(Icons.Filled.AutoAwesome, null, tint = Sgu.Accent, modifier = Modifier.padding(top = 3.dp).size(18.dp))
-            Spacer(Modifier.width(10.dp))
-            Column(Modifier.weight(1f)) {
-                Text(t.reply, style = MaterialTheme.typography.bodyLarge)
-                if (t.edited.isNotEmpty()) {
-                    Spacer(Modifier.height(8.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        t.edited.forEach { Badge("편집 · $it", Sgu.AccentSoft, Color(0xFF8A3B22)) }
-                    }
-                }
-                Row {
-                    IconButton(onClick = {}, modifier = Modifier.size(38.dp)) { Icon(Icons.Outlined.ContentCopy, "복사", Modifier.size(18.dp), tint = Sgu.Sub) }
-                    IconButton(onClick = {}, modifier = Modifier.size(38.dp)) { Icon(Icons.Outlined.Refresh, "리롤", Modifier.size(18.dp), tint = Sgu.Sub) }
-                    IconButton(onClick = {}, modifier = Modifier.size(38.dp)) { Icon(Icons.AutoMirrored.Outlined.Undo, "되돌림", Modifier.size(18.dp), tint = Sgu.Sub) }
-                }
-            }
-        }
-    }
-}
 
 @Composable
 fun SguSwitch(checked: Boolean, onChange: (Boolean) -> Unit) {

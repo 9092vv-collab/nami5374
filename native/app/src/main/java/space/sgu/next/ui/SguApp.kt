@@ -108,6 +108,14 @@ fun SguApp() {
             val id = e.arguments?.getString("id") ?: ""
             ImagePickerScreen(id, openPreset = { pid -> nav.navigate("genpreset/$id/$pid") }, onBack = back)
         }
+        composable("perms/{id}") { e -> PermissionsScreen(e.arguments?.getString("id") ?: "", onBack = back) }
+        composable("prompt/{id}") { e -> PromptPreviewScreen(e.arguments?.getString("id") ?: "", openRoute = go, onBack = back) }
+        composable("promptpresets") { PromptPresetsScreen(openRoute = go, onBack = back) }
+        composable("promptpreset/{pid}") { e -> PromptPresetScreen(e.arguments?.getString("pid") ?: "", onBack = back) }
+        composable("permdefaults") { PermissionDefaultsScreen(onBack = back) }
+        composable("fielddescs") { FieldDescriptionsScreen(onBack = back) }
+        composable("logs") { LogsScreen(onBack = back) }
+        composable("background") { BackgroundScreen(onBack = back) }
         composable("bias/{id}") { e -> BiasScreen(e.arguments?.getString("id") ?: "", onBack = back) }
         composable("onboarding/{id}") { e ->
             val id = e.arguments?.getString("id") ?: ""

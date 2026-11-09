@@ -159,6 +159,7 @@ object CharacterStore {
     }
 
     fun delete(id: String) {
+        Workshop.forget(id)
         dir(id).deleteRecursively()
         items.removeAll { it.id == id }
         Thumbs.forget(id)
@@ -205,6 +206,9 @@ object CharacterStore {
     fun altGreetings(card: JsonObject): List<String> =
         ((card["data"] as? JsonObject)?.get("alternate_greetings") as? JsonArray)?.map { (it as? JsonPrimitive)?.contentOrNull ?: "" } ?: emptyList()
 
+    /** Replaces card.data without adding an undo step (used by 되돌리기/다시 실행). */
+    fun replaceDataSilently(id: String, data: JsonObject) = EditHistory.silently { updateData(id) { data } }
+
     /** Replaces card.data with transform(card.data). */
     fun updateData(id: String, transform: (JsonObject) -> JsonObject) = editData(id) { m ->
         val next = transform(JsonObject(m)); m.clear(); m.putAll(next)
@@ -212,9 +216,13 @@ object CharacterStore {
 
     private fun editData(id: String, change: (MutableMap<String, JsonElement>) -> Unit) {
         val card = readCard(id)
-        val data = (card["data"] as? JsonObject).orEmpty().toMutableMap()
+        val before = (card["data"] as? JsonObject) ?: JsonObject(emptyMap())
+        val data = before.toMutableMap()
         change(data)
-        writeCard(id, JsonObject(card + ("data" to JsonObject(data))))
+        val after = JsonObject(data)
+        if (after == before) return
+        EditHistory.record(id, before, after)
+        writeCard(id, JsonObject(card + ("data" to after)))
         writeMeta(id, items.firstOrNull { it.id == id }?.folder)
         refresh(id)
     }
@@ -261,8 +269,9 @@ object CharacterStore {
         val usesGlobal get() = scanDepth == null && tokenBudget == null && recursiveScanning == null && fullWordMatching == null
     }
 
-    fun loreSettings(card: JsonObject): LoreSettings {
-        val data = card["data"] as? JsonObject
+    fun loreSettings(card: JsonObject): LoreSettings = loreSettingsOf(card["data"] as? JsonObject)
+
+    fun loreSettingsOf(data: JsonObject?): LoreSettings {
         val ls = Fields.get(data, listOf("extensions", "risuai", "loreSettings")) as? JsonObject
         val book = data?.get("character_book") as? JsonObject
         fun int(o: JsonObject?, k: String) = (o?.get(k) as? JsonPrimitive)?.contentOrNull?.toDoubleOrNull()?.toInt()
@@ -275,8 +284,8 @@ object CharacterStore {
         )
     }
 
-    fun setLoreSettings(id: String, s: LoreSettings) = editData(id) { data ->
-        var d = JsonObject(data)
+    fun withLoreSettings(data: JsonObject, s: LoreSettings): JsonObject {
+        var d = data
         fun putPath(path: List<String>, v: JsonElement?) { d = if (v == null) Fields.remove(d, path) else Fields.set(d, path, v) }
         putPath(listOf("character_book", "scan_depth"), s.scanDepth?.let { JsonPrimitive(it) })
         putPath(listOf("character_book", "token_budget"), s.tokenBudget?.let { JsonPrimitive(it) })
@@ -288,8 +297,10 @@ object CharacterStore {
             put("recursiveScanning", s.recursiveScanning?.let { JsonPrimitive(it) } ?: kotlinx.serialization.json.JsonNull)
             put("fullWordMatching", s.fullWordMatching?.let { JsonPrimitive(it) } ?: kotlinx.serialization.json.JsonNull)
         })
-        replaceAll(data, d)
+        return d
     }
+
+    fun setLoreSettings(id: String, s: LoreSettings) = editData(id) { data -> replaceAll(data, withLoreSettings(JsonObject(data), s)) }
 
     private fun replaceAll(target: MutableMap<String, JsonElement>, with: Map<String, JsonElement>) {
         target.clear(); target.putAll(with)

@@ -25,6 +25,7 @@ import androidx.compose.material.icons.outlined.Language
 import androidx.compose.material.icons.outlined.Memory
 import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.Shield
+import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.SmartToy
 import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -52,6 +53,7 @@ import space.sgu.next.data.CharacterStore
 import space.sgu.next.data.FakeData
 import space.sgu.next.data.RefKind
 import space.sgu.next.data.SettingsStore
+import space.sgu.next.data.arr
 import space.sgu.next.data.b
 import space.sgu.next.data.o
 import space.sgu.next.data.s
@@ -148,20 +150,25 @@ fun SettingsScreen(open: (String) -> Unit) {
             item { GroupRow(1, 3, "프로바이더", subtitle = SettingsStore.providers.size.let { if (it == 0) "없음 · 눌러서 추가" else "${it}개 · " + SettingsStore.providers.joinToString(", ") { p -> p.s("name") } }, icon = Icons.Outlined.Key, onClick = { open("providers") }) }
             item { GroupRow(2, 3, "모델", subtitle = "등록된 모델 ${SettingsStore.models.size}개", icon = Icons.Outlined.Memory, onClick = { open("models") }) }
             item { SectionLabel("권한 · 프롬프트") }
-            item { GroupRow(0, 2, "새 캐릭터 기본 권한", subtitle = "필드별 열람/편집 기본 등급 · 작업실 단계에서 열려요", icon = Icons.Outlined.Shield) }
-            item { GroupRow(1, 2, "프롬프트 프리셋", subtitle = "백업에서 가져온 프리셋은 보관돼요 · 작업실 단계에서 열려요", icon = Icons.Outlined.SmartToy) }
+            item { GroupRow(0, 3, "새 캐릭터 기본 권한", subtitle = "필드별 열람/편집 기본 등급", icon = Icons.Outlined.Shield, onClick = { open("permdefaults") }) }
+            item { GroupRow(1, 3, "항목 설명", subtitle = "서브 프로세서가 판단할 때 보는 항목별 설명", icon = Icons.Outlined.Description, onClick = { open("fielddescs") }) }
+            item {
+                val presets = SettingsStore.root.arr("promptPresets")
+                val active = presets.firstOrNull { it.s("id") == SettingsStore.root.s("activePromptPresetId") }?.s("name") ?: "-"
+                GroupRow(2, 3, "프롬프트 프리셋", subtitle = "${presets.size}개 프리셋 · 기본값: $active", icon = Icons.Outlined.SmartToy, onClick = { open("promptpresets") })
+            }
             item { SectionLabel("화면 · 저장") }
             item { GroupRow(0, 3, "세이프 모드", subtitle = "모든 이미지를 썸네일로 표시", trailing = { SguSwitch(AppState.safeMode) { AppState.safeMode = it } }) }
             item { GroupRow(1, 3, "자동 압축", subtitle = "내보낼 때 이미지를 WebP 80%로 압축", trailing = { SguSwitch(AppState.autoCompress) { AppState.autoCompress = it } }) }
             item { GroupRow(2, 3, "저장된 캐릭터", subtitle = "${CharacterStore.items.size}개 · 폴더 ${CharacterStore.folders.size}개", icon = Icons.Outlined.Folder) }
             item { SectionLabel("기타") }
             item { GroupRow(0, 4, "백업 · 복원", subtitle = "설정 JSON 내보내기/가져오기 (기존 앱 백업 호환)", icon = Icons.Outlined.Backup, onClick = { open("backup") }) }
-            item { GroupRow(1, 4, "백그라운드 작업", subtitle = "앱이 뒤로 가도 작업을 이어갑니다 · 작업실 단계에서 열려요", icon = Icons.Outlined.Notifications) }
-            item { GroupRow(2, 4, "요청 로그", subtitle = "서브/메인 프로세서 요청과 응답 · 작업실 단계에서 열려요", icon = Icons.Outlined.History) }
+            item { GroupRow(1, 4, "백그라운드 작업 · 웹 검색", subtitle = if (SettingsStore.root.o("background").b("foregroundService", true)) "포그라운드 서비스 켜짐" else "포그라운드 서비스 꺼짐", icon = Icons.Outlined.Notifications, onClick = { open("background") }) }
+            item { GroupRow(2, 4, "요청 로그", subtitle = "서브/메인 프로세서 요청과 응답", icon = Icons.Outlined.History, onClick = { open("logs") }) }
             item { GroupRow(3, 4, "언어", subtitle = "한국어", icon = Icons.Outlined.Language) }
             item {
                 Text(
-                    "SGU Next 0.4.3 · 캐릭터·스크립트·기타·로어북·설정·이미지(템플릿·반영·압축) 작동. 작업실·참고 자료는 다음 단계",
+                    "SGU Next 0.5.0 · 캐릭터·스크립트·기타·로어북·설정·이미지·작업실 작동. 참고 자료는 다음 단계",
                     modifier = Modifier.fillMaxWidth().padding(24.dp),
                     style = MaterialTheme.typography.bodySmall, color = Sgu.Sub,
                 )
