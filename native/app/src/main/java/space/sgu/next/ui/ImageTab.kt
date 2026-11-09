@@ -108,16 +108,13 @@ import java.io.File
 private val imageTabs = listOf("이미지 데이터", "그림체 설정", "캐릭터 설정", "이미지 템플릿")
 
 /** Image tab: one row of four tabs (no nested "이미지 생성" level). No inner swiping — the editor pager swipes. */
+/** One image sub tab as a page of the editor's flat pager; the sub tab row slides along with its page. */
 @Composable
-fun ImagePage(cid: String, openField: (String) -> Unit, openPreset: (String) -> Unit, openRoute: (String) -> Unit = {}) {
-    // Swiping moves between these sub tabs; past the first/last one the drag goes on to the editor's big tabs
-    // (the outer pager gets what this pager can't use, through nested scrolling).
-    val pager = androidx.compose.foundation.pager.rememberPagerState(initialPage = 3) { imageTabs.size }
-    val scope = rememberCoroutineScope()
+fun ImageSubPage(cid: String, sub: Int, onSelect: (Int) -> Unit, openField: (String) -> Unit, openPreset: (String) -> Unit, openRoute: (String) -> Unit = {}) {
     Column(Modifier.fillMaxSize()) {
-        PillTabs(imageTabs, pager.currentPage, { scope.launch { pager.animateScrollToPage(it) } })
-        androidx.compose.foundation.pager.HorizontalPager(state = pager, modifier = Modifier.weight(1f), key = { it }) { page ->
-            when (page) {
+        PillTabs(imageTabs, sub, onSelect)
+        Box(Modifier.weight(1f)) {
+            when (sub) {
                 0 -> ImageDataTab(cid)
                 1 -> StyleTab(cid, openField)
                 2 -> GenCharacterTab(cid, openField)

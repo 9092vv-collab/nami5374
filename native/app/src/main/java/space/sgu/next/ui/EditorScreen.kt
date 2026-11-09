@@ -1,5 +1,6 @@
 package space.sgu.next.ui
 
+import androidx.compose.runtime.LaunchedEffect
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -94,7 +95,13 @@ fun EditorScreen(characterId: String, onBack: (() -> Unit)?, openField: (String)
     val scope = rememberCoroutineScope()
     val meta = CharacterStore.items.firstOrNull { it.id == characterId }
     val card = remember(characterId, CharacterStore.version) { CharacterStore.readCard(characterId) }
-    val pager = rememberPagerState(initialPage = 0) { editorTabs.size }
+    // One flat pager: 캐릭터 | 이미지 데이터 · 그림체 · 캐릭터 설정 · 템플릿 | 작업실 | 스크립트 | 기타,
+    // so swiping from an image sub tab on to the next big tab is one smooth swipe (no pager inside a pager).
+    val pager = rememberPagerState(initialPage = 0) { 8 }
+    var lastImage by rememberSaveable(characterId) { mutableStateOf(4) }
+    LaunchedEffect(pager.currentPage) { if (pager.currentPage in 1..4) lastImage = pager.currentPage }
+    val bigOf = { p: Int -> when (p) { 0 -> 0; in 1..4 -> 1; 5 -> 2; 6 -> 3; else -> 4 } }
+    val pageOfBig = { b: Int -> when (b) { 0 -> 0; 1 -> lastImage; 2 -> 5; 3 -> 6; else -> 7 } }
     var menu by remember { mutableStateOf(false) }
     var newSession by remember { mutableStateOf(false) }
     var sessions by remember { mutableStateOf(false) }
@@ -143,18 +150,18 @@ fun EditorScreen(characterId: String, onBack: (() -> Unit)?, openField: (String)
         Column(Modifier.fillMaxSize().padding(pad).consumeWindowInsets(pad).imePadding()) {
             PillTabs(
                 options = editorTabs,
-                selected = pager.currentPage,
-                onSelect = { scope.launch { pager.animateScrollToPage(it) } },
+                selected = bigOf(pager.currentPage),
+                onSelect = { scope.launch { pager.animateScrollToPage(pageOfBig(it)) } },
             )
             HorizontalPager(state = pager, modifier = Modifier.weight(1f), beyondViewportPageCount = 1) { page ->
                 when (page) {
                     0 -> GroupPage("character", characterId, card, openField, openRoute)
-                    1 -> ImagePage(characterId, openField, openPreset, openRoute)
-                    2 -> WorkshopPage(characterId, openFieldTab = { fid ->
-                        val target = when (WFields.map[fid]?.group ?: Fields.byId[fid]?.group) { "image" -> 1; "script" -> 3; "etc" -> 4; else -> 0 }
+                    in 1..4 -> ImageSubPage(characterId, page - 1, { sub -> scope.launch { pager.animateScrollToPage(sub + 1) } }, openField, openPreset, openRoute)
+                    5 -> WorkshopPage(characterId, openFieldTab = { fid ->
+                        val target = when (WFields.map[fid]?.group ?: Fields.byId[fid]?.group) { "image" -> 1; "script" -> 6; "etc" -> 7; else -> 0 }
                         scope.launch { pager.animateScrollToPage(target) }
                     }, openRoute = openRoute)
-                    3 -> GroupPage("script", characterId, card, openField, openRoute)
+                    6 -> GroupPage("script", characterId, card, openField, openRoute)
                     else -> GroupPage("etc", characterId, card, openField, openRoute)
                 }
             }

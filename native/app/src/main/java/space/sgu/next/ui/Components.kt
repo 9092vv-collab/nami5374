@@ -1,5 +1,9 @@
 package space.sgu.next.ui
 
+import androidx.compose.ui.layout.positionInParent
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
@@ -103,12 +107,20 @@ fun PillTabs(
     modifier: Modifier = Modifier,
     contentPadding: PaddingValues = PaddingValues(horizontal = 16.dp),
 ) {
+    val scroll = rememberScrollState()
+    val lefts = remember { androidx.compose.runtime.mutableStateMapOf<Int, Int>() }
+    // Keep the selected pill on screen when the row is wider than the screen (only this row scrolls).
+    LaunchedEffect(selected, lefts[selected]) {
+        lefts[selected]?.let { x -> scroll.animateScrollTo((x - 40).coerceAtLeast(0)) }
+    }
     Row(
-        modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(contentPadding).padding(vertical = 6.dp),
+        modifier.fillMaxWidth().horizontalScroll(scroll).padding(contentPadding).padding(vertical = 6.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        options.forEachIndexed { i, label -> PillChip(label, i == selected) { onSelect(i) } }
+        options.forEachIndexed { i, label ->
+            Box(Modifier.onGloballyPositioned { lefts[i] = it.positionInParent().x.toInt() }) { PillChip(label, i == selected) { onSelect(i) } }
+        }
     }
 }
 
