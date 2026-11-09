@@ -58,7 +58,8 @@ object WFields {
         WField("escapeOutput", "etc", "toggle", "출력 이스케이프", "Escape output", "Toggle that escapes HTML in model output.", true, 0, 0),
     )
     val map = all.associateBy { it.id }
-    fun label(id: String) = map[id]?.label ?: Fields.label(id)
+    fun label(id: String) = map[id]?.label ?: if (id.startsWith("ref:")) "참고 자료: " + (References.get(id.removePrefix("ref:"))?.s("name")
+        ?: id.removePrefix("ref:").let { x -> if (x.startsWith(References.XC)) References.nameOf(JsonObject(mapOf("id" to JsonPrimitive(""), "refChars" to JsonArray(listOf(JsonPrimitive(x.removePrefix(References.XC).substringBefore(':')))))), x) else x }) else Fields.label(id)
     fun description(id: String): String =
         SettingsStore.root.o("fieldDescriptions").s(id).trim().ifEmpty { map[id]?.aiDescription ?: "" }
 

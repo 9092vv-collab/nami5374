@@ -323,12 +323,15 @@ object Processors {
         val p = SettingsStore.provider(o.sOrNull("jevProviderId")) ?: SettingsStore.providers.firstOrNull { it.s("format") == "jev" }
             ?: throw ProviderError("Jev 프로바이더가 설정되지 않았습니다. 설정 › 프로세서에서 Jev를 지정하세요.")
         val (view, edit) = Perms.candidates(doc.o("permissions").orEmptyObj())
+        val refCands = References.subCandidates(doc)
         val state = (listOf("The user is editing a RisuAI character card with an AI assistant.",
             "User command (the last message is the one to act on; earlier lines are context only): \"\"\"${subInput(doc, command)}\"\"\"", "", "Character fields:") +
-            WFields.all.filter { it.viewable }.map { "- " + describe(data, it.id) }).joinToString("\n")
+            WFields.all.filter { it.viewable }.map { "- " + describe(data, it.id) } +
+            refCands.let { c -> if (c.isEmpty()) emptyList() else listOf("", "Reference materials:") + c.map { "- " + References.describe(it) } }).joinToString("\n")
         val q = mutableMapOf<String, JsonElement>()
         q["intent:instruction"] = buildJsonObject { put("type", "noul"); put("instructions", "Is the user's intent an instruction or command to create, change or look up the character (not just ordinary conversation, a greeting, a question about the assistant, or small talk)? Answer yes only if the user wants the assistant to do work on the character.") }
         for (e in view) q["view:$e"] = buildJsonObject { put("type", "noul"); put("instructions", "To carry out the user command well, does the assistant need to READ the current content of the field \"$e\"? Answer yes only if the command depends on or should stay consistent with that field.") }
+        for (r in refCands) q["view:ref:${r.s("id")}"] = buildJsonObject { put("type", "noul"); put("instructions", "Does the assistant need to READ the reference material \"${r.s("name")}\" to carry out the user command well? Answer yes only if the command clearly benefits from it.") }
         for (e in edit) q["edit:$e"] = buildJsonObject { put("type", "noul"); put("instructions", "To carry out the user command, should the assistant MODIFY the field \"$e\" (write, change, add to or delete from it)? Answer yes only if the command explicitly or clearly implies changing this field.") }
         val t0 = System.currentTimeMillis()
         val timeout = minOf(SettingsStore.root.d("requestTimeoutMs")?.toInt() ?: 180000, 90000)
@@ -345,7 +348,7 @@ object Processors {
             if (kind == "intent") instruction = score >= th
             else if (score >= th) { if (kind == "view") v.add(f) else if (kind == "edit") ed.add(f) }
         }
-        return Decision(command, v, if (instruction) ed else emptyList(), emptyList(), instruction, null, reasons)
+        return Decision(command, v.filter { !it.startsWith("ref:") }, if (instruction) ed else emptyList(), v.filter { it.startsWith("ref:") }.map { it.removePrefix("ref:") }, instruction, null, reasons)
     }
 
     private suspend fun llmSub(doc: JsonObject, data: JsonObject, command: String): Decision {
@@ -353,13 +356,16 @@ object Processors {
         val model = SettingsStore.model(o.sOrNull("modelId")) ?: throw ProviderError("서브 프로세서 모델이 설정되지 않았습니다. 설정 › 프로세서에서 모델을 지정하세요.")
         val fallback = SettingsStore.model(o.sOrNull("fallbackModelId"))
         val (view, edit) = Perms.candidates(doc.o("permissions").orEmptyObj())
+        val refCands = References.subCandidates(doc)
         val system = (listOf(
             "You are the planning stage of a RisuAI character-card editing assistant.",
             "First judge the user's intent: is it an instruction/command to work on the character (instruction=true), or ordinary conversation rather than a command (instruction=false)? For ordinary conversation, return empty view and edit lists.",
             "Given the user's command and the list of character fields, decide which fields the writing stage must READ and which it must MODIFY.",
             "Be minimal: request reading only fields the command depends on, and modifying only fields the command asks to change.",
             "Fields that are always visible or never allowed are omitted from the lists below; do not invent field ids.",
-            "", "Fields available to READ:") + view.map { "- " + describe(data, it) } + listOf("", "Fields available to MODIFY:") + edit.map { "- $it" } +
+            "", "Fields available to READ:") + view.map { "- " + describe(data, it) } +
+            (if (refCands.isEmpty()) emptyList() else listOf("", "Reference materials available to READ (use the ref:<id> value in the 'view' array):") + refCands.map { "- " + References.describe(it) }) +
+            listOf("", "Fields available to MODIFY:") + edit.map { "- $it" } +
             listOf("", "Respond with JSON: {\"instruction\": boolean, \"task\": string, \"view\": string[], \"edit\": string[], \"reasons\": {fieldId: string}}")).joinToString("\n")
         val user = "User command (the last message is the one to act on; earlier lines are context only): \"\"\"${subInput(doc, command)}\"\"\""
 
@@ -383,7 +389,7 @@ object Processors {
         val reasons = mutableMapOf<String, String>()
         d.o("reasons")?.forEach { (k, v) -> val t = (v as? JsonPrimitive)?.content ?: return@forEach; reasons["view:$k"] = t; reasons["edit:$k"] = t }
         val instruction = (d["instruction"] as? JsonPrimitive)?.booleanOrNull != false
-        val v = list("view", view)
+        val v = list("view", view + refCands.map { "ref:" + it.s("id") })
         return Decision(d.sOrNull("task") ?: command, v.filter { !it.startsWith("ref:") }, if (instruction) list("edit", edit) else emptyList(),
             v.filter { it.startsWith("ref:") }.map { it.removePrefix("ref:") }, instruction, null, reasons)
     }
@@ -396,7 +402,7 @@ object Processors {
         suspend fun run(m: JsonObject, appSearch: Boolean): MainOut {
             val web = doc.b("webSearch")
             val native = web && !appSearch && WebSearch.hasNative(SettingsStore.provider(m.s("providerId")), m.s("modelId"))
-            val refs = mutableListOf<RefText>()
+            val refs = References.loadForPrompt(doc, access.viewRefs, Chat.effectiveVision(m)).toMutableList()
             if (web && !native) refs.add(RefText("Web search results", null, "text", WebSearch.context(command)))
             val prompt = Prompt.assemble(Prompt.Input(data, PromptBlocks.blocksFor(doc), access.viewFields, access.editFields, command, refs,
                 doc.o("session").arr("turns"), instruction, m.o("params").d("maxContext")?.toInt() ?: 150000))
@@ -557,6 +563,9 @@ object Workshop {
                 val rawSub = decisionJson(r)
                 if (!subOff) updateTurn(cid, turnId, mapOf("raw" to buildJsonObject { put("sub", rawSub) }))
                 var access = Perms.resolve(doc(cid).o("permissions").orEmptyObj(), r, subOff)
+                References.resolveAccess(doc(cid), r.refs, r.fieldReasons, subOff, command, turnId).let { ra ->
+                    access = access.copy(viewRefs = ra.on, elevation = access.elevation + ra.elevation)
+                }
                 if (!subOff) updateTurn(cid, turnId, mapOf("analysis" to buildJsonObject {
                     put("task", r.task); put("view", JsonArray((r.view + r.refs.map { "ref:$it" }).map { js(it) })); put("edit", JsonArray(r.edit.map { js(it) })); r.reason?.let { put("reason", it) }
                 }))

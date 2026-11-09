@@ -1,5 +1,15 @@
 package space.sgu.next.ui
 
+import kotlinx.serialization.json.JsonArray
+import space.sgu.next.data.orEmptyObj
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.material.icons.automirrored.outlined.LibraryBooks
+import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.AttachFile
+import androidx.compose.material.icons.outlined.Image
+import androidx.compose.material.icons.outlined.Group
+import space.sgu.next.data.CharacterStore
+import space.sgu.next.data.References
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -175,6 +185,8 @@ fun WorkshopPage(cid: String, openFieldTab: (String) -> Unit, openRoute: (String
             }
         }
 
+        // Attached uploads and other characters used as references in this session (original 1655 chips).
+        AttachedChips(cid, doc)
         // Claude-style input pill: white, soft shadow, grey round +, ink round send (■ while working).
         Row(
             Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 6.dp, bottom = 4.dp)
@@ -266,29 +278,148 @@ private fun ModelListDialog(cid: String, doc: JsonObject, onDismiss: () -> Unit)
     )
 }
 
-/** + sheet: web search toggle (참고 자료·업로드 come with the 참고 자료 step; module 1688). */
+@Composable
+private fun AttachedChips(cid: String, doc: JsonObject) {
+    val ups = (doc["attachedUploads"] as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.content }?.mapNotNull { References.get(it) } ?: emptyList()
+    val chars = (doc["refChars"] as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.content } ?: emptyList()
+    if (ups.isEmpty() && chars.isEmpty()) return
+    androidx.compose.foundation.lazy.LazyRow(Modifier.fillMaxWidth().padding(top = 4.dp), contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 14.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        items(ups.size) { i ->
+            val r = ups[i]
+            Chip(refKindIcon(r.s("kind")), r.s("name")) {
+                Workshop.updateDoc(cid) { d ->
+                    val list = (d["attachedUploads"] as? JsonArray)?.filter { (it as? JsonPrimitive)?.content != r.s("id") } ?: emptyList()
+                    JsonObject(d + mapOf("attachedUploads" to JsonArray(list), "refOverrides" to JsonObject(d.o("refOverrides").orEmptyObj() + (r.s("id") to JsonPrimitive("off")))))
+                }
+                References.remove(r.s("id"))
+            }
+        }
+        items(chars.size) { i ->
+            val id = chars[i]
+            Chip(Icons.Outlined.Group, CharacterStore.items.firstOrNull { it.id == id }?.name ?: "(삭제된 캐릭터)") {
+                Workshop.set(cid, "refChars", JsonArray(chars.filter { it != id }.map { JsonPrimitive(it) }))
+            }
+        }
+    }
+}
+
+@Composable
+private fun Chip(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, onRemove: () -> Unit) {
+    Row(Modifier.clip(RoundedCornerShape(50)).background(Sgu.Card).border(1.dp, Sgu.Line, RoundedCornerShape(50)).padding(start = 10.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
+        verticalAlignment = Alignment.CenterVertically) {
+        Icon(icon, null, tint = Sgu.Sub, modifier = Modifier.size(14.dp))
+        Text(" " + label, style = MaterialTheme.typography.labelMedium, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 200.dp))
+        Icon(Icons.Outlined.Close, "빼기", tint = Sgu.Sub, modifier = Modifier.size(22.dp).clip(CircleShape).clickable(onClick = onRemove).padding(4.dp))
+    }
+}
+
+/** + sheet (module 1688): web search, 참고 자료 활성화 (this session), 타 캐릭터 참고, 기기에서 업로드. */
 @Composable
 private fun AttachDialog(cid: String, doc: JsonObject, onDismiss: () -> Unit) {
+    val ctx = LocalContext.current
+    var page by remember { mutableStateOf("menu") }
+    val v = References.version
+    fun attachUploads(uris: List<android.net.Uri>) {
+        val ids = uris.mapNotNull { References.addFile(ctx, it, null, cid)?.s("id") }
+        if (ids.isEmpty()) return
+        Workshop.updateDoc(cid) { d ->
+            val ups = ((d["attachedUploads"] as? JsonArray)?.toList() ?: emptyList()) + ids.map { JsonPrimitive(it) }
+            JsonObject(d + mapOf("attachedUploads" to JsonArray(ups), "refOverrides" to JsonObject(d.o("refOverrides").orEmptyObj() + ids.associateWith { JsonPrimitive("on") })))
+        }
+        if (ids.any { References.get(it)?.s("kind") == "image" } && !space.sgu.next.data.Chat.effectiveVision(Processors.mainModels(Workshop.doc(cid)).first))
+            android.widget.Toast.makeText(ctx, "현재 메인 모델은 비전(이미지 입력)이 꺼져 있어 이미지를 볼 수 없습니다. 모델 설정에서 비전을 켜세요", android.widget.Toast.LENGTH_LONG).show()
+        onDismiss()
+    }
+    val pickFiles = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.OpenMultipleDocuments()) { attachUploads(it) }
+    val pickImages = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.GetMultipleContents()) { attachUploads(it) }
+    @Composable
+    fun MenuRow(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, trailing: String, highlight: Boolean = false, onClick: () -> Unit) {
+        Row(
+            Modifier.fillMaxWidth().padding(vertical = 4.dp).clip(RoundedCornerShape(16.dp)).border(1.dp, Sgu.Line, RoundedCornerShape(16.dp))
+                .clickable(onClick = onClick).padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(icon, null, tint = if (highlight) Sgu.Accent else Sgu.Sub)
+            Text("  $label", modifier = Modifier.weight(1f))
+            Text(trailing, fontWeight = FontWeight.SemiBold, color = if (highlight) Sgu.Ink else Sgu.Sub)
+        }
+    }
     AlertDialog(
-        onDismissRequest = onDismiss, title = { Text("첨부") }, containerColor = Sgu.Card,
+        onDismissRequest = onDismiss, containerColor = Sgu.Card,
+        title = { Text(when (page) { "refs" -> "참고 자료 활성화"; "chars" -> "타 캐릭터 참고"; else -> "첨부" }) },
         text = {
-            Column {
-                Row(
-                    Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).border(1.dp, Sgu.Line, RoundedCornerShape(16.dp))
-                        .clickable { Workshop.set(cid, "webSearch", JsonPrimitive(!doc.b("webSearch"))) }.padding(horizontal = 14.dp, vertical = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Icon(Icons.Outlined.TravelExplore, null, tint = if (doc.b("webSearch")) Sgu.Accent else Sgu.Sub)
-                    Text("  검색 기능 (웹 검색)", modifier = Modifier.weight(1f))
-                    Text(if (doc.b("webSearch")) "켜짐" else "꺼짐", fontWeight = FontWeight.SemiBold, color = if (doc.b("webSearch")) Sgu.Ink else Sgu.Sub)
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                when (page) {
+                    "refs" -> {
+                        if (Processors.isSubOff()) Text("서브 프로세서 비활성화 중: '서브 프로세서의 판단'으로 설정된 참고 자료는 현재 상시로 취급됩니다.", style = MaterialTheme.typography.bodySmall, color = Sgu.Danger)
+                        Hint("이 세션에서만 바꿉니다. '기본'은 참고 자료 탭의 설정을 따릅니다.")
+                        val list = remember(v, Workshop.version) { References.items.filter { it.sOrNull("sessionOf") == null || it.s("sessionOf") == cid } }
+                        if (list.isEmpty()) Hint("참고 자료가 없습니다.")
+                        list.forEach { r -> RefSessionRow(cid, doc, r) }
+                    }
+                    "chars" -> {
+                        Hint("선택한 캐릭터의 데이터는 읽기 전용 참고로만 쓰입니다(열람 Lv1, 편집 Lv0). 서브 프로세서가 필요한 항목을 고르고, 승인하면 메인 프로세서에 전달됩니다.")
+                        val chosen = (doc["refChars"] as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.content } ?: emptyList()
+                        val others = CharacterStore.items.filter { it.id != cid }
+                        if (others.isEmpty()) Hint("참고할 다른 캐릭터가 없습니다.")
+                        others.forEach { c ->
+                            val on = c.id in chosen
+                            Row(Modifier.fillMaxWidth().clickable {
+                                Workshop.set(cid, "refChars", JsonArray((if (on) chosen - c.id else chosen + c.id).map { JsonPrimitive(it) }))
+                            }.padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Icon(if (on) Icons.Outlined.CheckBox else Icons.Outlined.CheckBoxOutlineBlank, null, tint = if (on) Sgu.Ink else Sgu.Sub)
+                                Text("  " + c.name, modifier = Modifier.weight(1f))
+                            }
+                        }
+                    }
+                    else -> {
+                        MenuRow(Icons.Outlined.TravelExplore, "검색 기능 (웹 검색)", if (doc.b("webSearch")) "켜짐" else "꺼짐", doc.b("webSearch")) {
+                            Workshop.set(cid, "webSearch", JsonPrimitive(!doc.b("webSearch")))
+                        }
+                        Hint("검색 기능을 켜면 메인 프로세서가 제공자 내장 웹 검색(Anthropic·Gemini·OpenAI Responses·OpenRouter)을 쓸 수 있습니다. 지원하지 않는 모델에서는 앱이 직접 검색해 결과를 넣어 줍니다. 서브 프로세서에는 적용되지 않습니다.")
+                        Spacer(Modifier.height(6.dp))
+                        val onCount = remember(v, Workshop.version) { References.items.count { References.state(doc, it) == "on" } }
+                        MenuRow(Icons.AutoMirrored.Outlined.LibraryBooks, "참고 자료 활성화", "사용 $onCount") { page = "refs" }
+                        val rc = (doc["refChars"] as? JsonArray)?.size ?: 0
+                        MenuRow(Icons.Outlined.Group, "타 캐릭터 참고", if (rc > 0) "${rc}명" else "") { page = "chars" }
+                        MenuRow(Icons.Outlined.Image, "기기에서 업로드 (이미지)", "") { pickImages.launch("image/*") }
+                        MenuRow(Icons.Outlined.AttachFile, "기기에서 업로드 (파일)", "") { pickFiles.launch(arrayOf("*/*")) }
+                        Hint("기기에서 올린 파일은 참고 자료에 저장되고 이 세션에서 바로 사용됩니다.")
+                    }
                 }
-                Hint("검색 기능을 켜면 메인 프로세서가 제공자 내장 웹 검색(Anthropic·Gemini·OpenAI Responses·OpenRouter)을 쓸 수 있습니다. 지원하지 않는 모델에서는 앱이 직접 검색해 결과를 넣어 줍니다. 서브 프로세서에는 적용되지 않습니다.")
-                Spacer(Modifier.height(10.dp))
-                Hint("참고 자료 활성화 · 타 캐릭터 참고 · 파일 업로드는 참고 자료 단계에서 열려요.")
             }
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text("닫기", color = Sgu.Ink) } },
+        dismissButton = { if (page != "menu") TextButton(onClick = { page = "menu" }) { Text("뒤로", color = Sgu.Sub) } },
     )
+}
+
+/** One reference in the session sheet (module 1689): 기본 / 사용 / 서브 판단 / 사용 안 함 for this session. */
+@Composable
+private fun RefSessionRow(cid: String, doc: JsonObject, r: JsonObject) {
+    val id = r.s("id")
+    val ov = doc.o("refOverrides")?.sOrNull(id) ?: "default"
+    val st = References.state(doc, r)
+    Column(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(refKindIcon(r.s("kind")), null, tint = Sgu.Sub, modifier = Modifier.size(18.dp))
+            Text("  " + r.s("name"), modifier = Modifier.weight(1f), maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+            Text(when (st) { "on" -> "사용 중"; "sub" -> "서브 판단"; else -> "사용 안 함" }, style = MaterialTheme.typography.labelMedium,
+                color = when (st) { "on" -> Sgu.Ink; "sub" -> Color(0xFF2563EB); else -> Sgu.Sub })
+        }
+        Row(Modifier.padding(top = 6.dp).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            listOf("default" to "기본 (${References.MODE_LABELS[r.s("mode").ifBlank { "sub" }]})", "on" to "사용", "sub" to "서브 판단", "off" to "사용 안 함").forEach { (k, label) ->
+                PillChip(label, ov == k) {
+                    Workshop.updateDoc(cid) { d ->
+                        val o = d.o("refOverrides").orEmptyObj()
+                        val next = if (k == "default") JsonObject(o - id) else JsonObject(o + (id to JsonPrimitive(k)))
+                        val active = (d["activeReferences"] as? JsonArray)?.filter { (it as? JsonPrimitive)?.content != id } ?: emptyList()
+                        JsonObject(d + mapOf("refOverrides" to next, "activeReferences" to JsonArray(active)))
+                    }
+                }
+            }
+        }
+    }
 }
 
 /** 권한 확인 요청 (module 1667). */

@@ -116,6 +116,8 @@ fun SguApp() {
         composable("fielddescs") { FieldDescriptionsScreen(onBack = back) }
         composable("logs") { LogsScreen(onBack = back) }
         composable("background") { BackgroundScreen(onBack = back) }
+        composable("ref/{id}") { e -> ReferenceEditScreen(e.arguments?.getString("id") ?: "", openRoute = go, onBack = back) }
+        composable("reftext/{id}") { e -> RefTextScreen(e.arguments?.getString("id") ?: "", onBack = back) }
         composable("bias/{id}") { e -> BiasScreen(e.arguments?.getString("id") ?: "", onBack = back) }
         composable("onboarding/{id}") { e ->
             val id = e.arguments?.getString("id") ?: ""
@@ -156,7 +158,7 @@ private fun HomeScreen(openCharacter: (String) -> Unit, openField: (String, Stri
             } else {
                 CharactersScreen(selectedId = "", onOpen = openCharacter, inPane = false)
             }
-            1 -> ReferencesScreen()
+            1 -> ReferencesScreen(open = openSettings)
             else -> SettingsScreen(open = openSettings)
         }
     }

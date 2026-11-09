@@ -61,75 +61,6 @@ import space.sgu.next.data.sOrNull
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ReferencesScreen() {
-    val collapsed = remember { mutableStateMapOf<String, Boolean>() }
-    val groups = FakeData.references.groupBy { it.folder }
-    val scroll = TopAppBarDefaults.enterAlwaysScrollBehavior(rememberTopAppBarState())
-    Scaffold(
-        containerColor = Sgu.Bg,
-        modifier = Modifier.nestedScroll(scroll.nestedScrollConnection),
-        topBar = {
-            SguTopBar(
-                title = "참고 자료",
-                subtitle = "미리보기 (6단계에서 실제 기능)",
-                scrollBehavior = scroll,
-                actions = { IconButton(onClick = {}) { Icon(Icons.Outlined.Add, "참고 자료 추가") } },
-            )
-        },
-    ) { pad ->
-        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(top = pad.calculateTopPadding(), bottom = 40.dp)) {
-            groups.forEach { (folder, refs) ->
-                val open = collapsed[folder] != true
-                item(key = "f-$folder") {
-                    val angle by animateFloatAsState(if (open) 0f else -90f, label = "arrow")
-                    Row(
-                        Modifier.fillMaxWidth().clickable { collapsed[folder] = open }
-                            .padding(start = 24.dp, end = 20.dp, top = 18.dp, bottom = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Icon(Icons.Outlined.Folder, null, tint = Sgu.Sub)
-                        Text("  $folder", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
-                        Text("${refs.size}개  ", style = MaterialTheme.typography.bodySmall, color = Sgu.Sub)
-                        Icon(Icons.Outlined.KeyboardArrowDown, null, Modifier.rotate(angle), tint = Sgu.Sub)
-                    }
-                }
-                item(key = "l-$folder") {
-                    AnimatedVisibility(visible = open) {
-                        Column {
-                            refs.forEachIndexed { i, r ->
-                                GroupRow(
-                                    i, refs.size, r.name,
-                                    subtitle = r.kind.label + " · " + r.memo,
-                                    icon = kindIcon(r.kind),
-                                    onClick = {},
-                                    trailing = { ActivationBadge(r.activation) },
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-private fun kindIcon(k: RefKind): ImageVector = when (k) {
-    RefKind.Text -> Icons.Outlined.Description
-    RefKind.Image -> Icons.Outlined.Image
-    RefKind.Persona -> Icons.Outlined.Face
-    RefKind.File -> Icons.Outlined.AttachFile
-}
-
-@Composable
-private fun ActivationBadge(a: Activation) = when (a) {
-    Activation.Always -> Badge(a.label)
-    Activation.Sub -> Badge(a.label, Sgu.AccentSoft, Color(0xFF8A3B22))
-    Activation.Keyword -> Badge(a.label, Sgu.Bubble, Sgu.Ink)
-    Activation.Off -> Badge(a.label, Color.Transparent, Sgu.Sub)
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
 fun SettingsScreen(open: (String) -> Unit) {
     val scroll = TopAppBarDefaults.enterAlwaysScrollBehavior(rememberTopAppBarState())
     val procs = SettingsStore.root.o("processors")
@@ -168,7 +99,7 @@ fun SettingsScreen(open: (String) -> Unit) {
             item { GroupRow(3, 4, "언어", subtitle = "한국어", icon = Icons.Outlined.Language) }
             item {
                 Text(
-                    "SGU Next 0.5.0 · 캐릭터·스크립트·기타·로어북·설정·이미지·작업실 작동. 참고 자료는 다음 단계",
+                    "SGU Next 0.6.0 · 캐릭터·스크립트·기타·로어북·설정·이미지·작업실·참고 자료 작동",
                     modifier = Modifier.fillMaxWidth().padding(24.dp),
                     style = MaterialTheme.typography.bodySmall, color = Sgu.Sub,
                 )
