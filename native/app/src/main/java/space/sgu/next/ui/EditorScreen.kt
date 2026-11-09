@@ -78,6 +78,8 @@ import space.sgu.next.data.FieldKind
 import space.sgu.next.data.Fields
 import kotlinx.serialization.json.JsonPrimitive
 import space.sgu.next.data.Workshop
+import space.sgu.next.data.arr
+import space.sgu.next.data.o
 import space.sgu.next.data.WFields
 
 private val editorTabs = listOf("캐릭터", "이미지", "작업실", "스크립트", "기타")
