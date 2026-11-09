@@ -671,27 +671,7 @@ object ImageGenStore {
     // ---------- 아이콘으로 추가 (module 1681) ----------
 
     /** No icon yet → becomes the main icon; otherwise added as an extra icon asset named after the image character. */
-    fun addAsIcon(cid: String, file: File, name: String): Boolean {
-        if (!file.exists()) return false
-        val dir = CharacterStore.dir(cid)
-        val main = File(dir, "icon.png")
-        val x = xDir(cid)
-        if (!main.exists()) {
-            writePng(file, main)
-            val card = CharacterStore.readCard(cid)
-            CardIO.assets(card).firstOrNull { CardIO.str(it, "type") == "icon" && CardIO.str(it, "name") == "main" }
-                ?.let { CardIO.assetFile(x, CardIO.str(it, "uri")) }?.let { writePng(file, it) }
-            CharacterStore.updateData(cid) { it }
-            return true
-        }
-        val rid = newId("icon")
-        val path = "assets/icon/image/$rid.${ext(file.name)}"
-        File(x, path).parentFile?.mkdirs(); file.copyTo(File(x, path), overwrite = true)
-        CharacterStore.updateData(cid) { d -> withAssets(d, emptySet(), listOf(buildJsonObject {
-            put("type", JsonPrimitive("icon")); put("uri", JsonPrimitive("embeded://$path")); put("name", JsonPrimitive(name.ifBlank { "generated" })); put("ext", JsonPrimitive(ext(path)))
-        })) }
-        return false
-    }
+    fun addAsIcon(cid: String, file: File, name: String): Boolean = CharIcons.add(cid, file, name)
 
     private fun writePng(src: File, dst: File) {
         if (ext(src.name) == "png") { src.copyTo(dst, overwrite = true); return }

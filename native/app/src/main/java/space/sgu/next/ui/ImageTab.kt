@@ -1,5 +1,10 @@
 package space.sgu.next.ui
 
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.outlined.AddPhotoAlternate
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.compose.rememberLauncherForActivityResult
+import space.sgu.next.data.CharIcons
 import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.Image
@@ -105,11 +110,14 @@ private val imageTabs = listOf("이미지 데이터", "그림체 설정", "캐�
 /** Image tab: one row of four tabs (no nested "이미지 생성" level). No inner swiping — the editor pager swipes. */
 @Composable
 fun ImagePage(cid: String, openField: (String) -> Unit, openPreset: (String) -> Unit, openRoute: (String) -> Unit = {}) {
-    var tab by rememberSaveable(cid) { mutableStateOf(3) }
+    // Swiping moves between these sub tabs; past the first/last one the drag goes on to the editor's big tabs
+    // (the outer pager gets what this pager can't use, through nested scrolling).
+    val pager = androidx.compose.foundation.pager.rememberPagerState(initialPage = 3) { imageTabs.size }
+    val scope = rememberCoroutineScope()
     Column(Modifier.fillMaxSize()) {
-        PillTabs(imageTabs, tab, { tab = it })
-        Box(Modifier.weight(1f)) {
-            when (tab) {
+        PillTabs(imageTabs, pager.currentPage, { scope.launch { pager.animateScrollToPage(it) } })
+        androidx.compose.foundation.pager.HorizontalPager(state = pager, modifier = Modifier.weight(1f), key = { it }) { page ->
+            when (page) {
                 0 -> ImageDataTab(cid)
                 1 -> StyleTab(cid, openField)
                 2 -> GenCharacterTab(cid, openField)
@@ -122,7 +130,7 @@ fun ImagePage(cid: String, openField: (String) -> Unit, openPreset: (String) -> 
 /** Generated/asset image, downsampled + cached. */
 @Composable
 fun FileImage(file: File?, modifier: Modifier = Modifier, maxPx: Int = 512) {
-    val key = file?.let { it.path + ":" + it.lastModified() }
+    val key = file?.let { it.path + ":" + it.lastModified() + ":" + it.length() }
     val bmp by produceState<ImageBitmap?>(null, key) {
         value = if (file == null) null else withContext(Dispatchers.IO) { Thumbs.load(file, key!!, maxPx) }
     }
@@ -138,21 +146,9 @@ private fun ImageDataTab(cid: String) {
     val card = remember(cid, CharacterStore.version) { CharacterStore.readCard(cid) }
     val assets = CardIO.assets(card)
     val x = File(CharacterStore.dir(cid), "x")
-    val icon = File(CharacterStore.dir(cid), "icon.png").takeIf { it.exists() }
     val groups = listOf("emotion" to "감정 이미지", "x-risu-asset" to "추가 에셋")
     LazyColumn(contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 40.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        item {
-            LineCard {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    FileImage(icon, Modifier.size(84.dp).clip(RoundedCornerShape(18.dp)))
-                    Spacer(Modifier.width(14.dp))
-                    Column {
-                        Text("캐릭터 아이콘", style = MaterialTheme.typography.titleMedium)
-                        Text(if (icon != null) "대표 이미지 (main)" else "아이콘이 없어요", style = MaterialTheme.typography.bodySmall, color = Sgu.Sub)
-                    }
-                }
-            }
-        }
+        item(key = "icons") { IconSection(cid) }
         groups.forEach { (type, label) ->
             val list = assets.filter { CardIO.str(it, "type") == type }
             item(key = type) {
@@ -174,6 +170,60 @@ private fun ImageDataTab(cid: String) {
         }
         item { Hint("이미지 템플릿에서 체크한 이미지가 여기(감정·추가 에셋)에 이미지이름.1, .2 … 로 들어가요.") }
     }
+}
+
+/** 캐릭터 아이콘 (original 1670 Q): main + extra icons, 대표 지정 / 저장 / 삭제, 이미지 첨부. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun IconSection(cid: String) {
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val icons = remember(cid, CharacterStore.version) { CharIcons.list(cid) }
+    var sel by remember(cid) { mutableStateOf<String?>(null) }
+    var busy by remember { mutableStateOf(false) }
+    var removing by remember { mutableStateOf(false) }
+    val save = rememberSaver("image/png")
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetMultipleContents()) { uris ->
+        if (uris.isNotEmpty()) { busy = true; scope.launch {
+            val n = withContext(Dispatchers.IO) { CharIcons.attach(ctx, cid, uris) }
+            busy = false
+            Toast.makeText(ctx, "${n}장 첨부했어요", Toast.LENGTH_SHORT).show()
+        } }
+    }
+    val chosen = icons.firstOrNull { it.id == sel }
+    LineCard {
+        Column {
+            Text("캐릭터 아이콘", style = MaterialTheme.typography.titleMedium)
+            if (icons.isEmpty()) Text("아이콘이 없어요", style = MaterialTheme.typography.bodySmall, color = Sgu.Sub, modifier = Modifier.padding(top = 4.dp))
+            FlowRow(Modifier.padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                icons.forEach { ic ->
+                    val on = ic.id == sel
+                    Box(Modifier.width(92.dp).aspectRatio(0.75f).clip(RoundedCornerShape(14.dp))
+                        .border(if (on || ic.main) 2.dp else 1.dp, if (on) Sgu.Accent else if (ic.main) Sgu.Ink else Sgu.Line, RoundedCornerShape(14.dp))
+                        .clickable { sel = if (on) null else ic.id }) {
+                        FileImage(ic.file, Modifier.fillMaxSize(), 384)
+                        if (ic.main) Text("대표", color = Color.White, style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                            modifier = Modifier.align(Alignment.TopStart).padding(5.dp).clip(RoundedCornerShape(6.dp)).background(Sgu.Ink).padding(horizontal = 6.dp, vertical = 1.dp))
+                    }
+                }
+            }
+            if (chosen != null) FlowRow(Modifier.padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                if (!chosen.main) PillChip("대표 이미지로 지정", false, icon = Icons.Filled.Star) { CharIcons.setMain(cid, chosen.id); sel = null }
+                else Text("현재 대표 이미지입니다", style = MaterialTheme.typography.bodySmall, color = Sgu.Sub, modifier = Modifier.align(Alignment.CenterVertically).padding(end = 4.dp))
+                PillChip("저장", false) {
+                    val name = (CharacterStore.items.firstOrNull { it.id == cid }?.name ?: "icon").replace(Regex("[\\\\/:*?\"<>|]"), "_")
+                    save("${name}_icon.${chosen.file.extension.ifBlank { "png" }}") { o -> chosen.file.inputStream().use { it.copyTo(o) } }
+                }
+                PillChip("삭제", false) { removing = true }
+                PillChip("닫기", false) { sel = null }
+            }
+            Spacer(Modifier.height(10.dp))
+            LineButton(if (busy) "첨부하는 중…" else "이미지 첨부", onClick = { if (!busy) picker.launch("image/*") }, icon = Icons.Outlined.AddPhotoAlternate)
+            Hint("여러 장을 첨부할 수 있고, 그중 하나를 대표 이미지로 지정합니다(RisuAI 방식). 최대 2048px로 자동 축소됩니다.")
+        }
+    }
+    if (removing && chosen != null) ConfirmDialog("아이콘 삭제", if (chosen.main) "대표 이미지를 지울까요? 다른 아이콘이 있으면 첫 번째가 대표가 돼요." else "이 아이콘을 지울까요?", "삭제",
+        onConfirm = { CharIcons.remove(cid, chosen.id); sel = null }, onDismiss = { removing = false })
 }
 
 // ---------- 그림체 설정 ----------
