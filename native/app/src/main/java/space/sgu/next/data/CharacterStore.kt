@@ -358,9 +358,14 @@ object CharacterStore {
         val x = File(dir(id), "x").takeIf { it.exists() }
         val extra = mutableMapOf<String, File>()
         val icon = File(dir(id), "icon.png")
-        if (x == null && icon.exists()) {
-            // PNG/JSON imports: put the icon in as the main icon asset.
-            val path = "assets/icon/image/main.png"
+        val hasMain = x != null && CardIO.assets(card).any {
+            CardIO.str(it, "type") == "icon" && CardIO.str(it, "name") == "main" && CardIO.assetFile(x, CardIO.str(it, "uri")) != null
+        }
+        if (!hasMain && icon.exists()) {
+            // PNG/JSON imports (or an icon added later): put the icon in as the main icon asset.
+            var path = "assets/icon/image/main.png"
+            var k = 1
+            while (x != null && File(x, path).exists()) { path = "assets/icon/image/main_$k.png"; k++ }
             extra[path] = icon
             val data = (card["data"] as? JsonObject).orEmpty().toMutableMap()
             val assets = CardIO.assets(card).filterNot { CardIO.str(it, "type") == "icon" && CardIO.str(it, "name") == "main" } +

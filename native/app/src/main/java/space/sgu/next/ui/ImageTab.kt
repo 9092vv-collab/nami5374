@@ -85,6 +85,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import space.sgu.next.data.CardIO
 import space.sgu.next.data.CharacterStore
+import space.sgu.next.data.GenRun
 import space.sgu.next.data.ImageGenStore
 import space.sgu.next.data.NaiModels
 import space.sgu.next.data.SettingsStore
@@ -103,7 +104,7 @@ private val imageTabs = listOf("이미지 데이터", "그림체 설정", "캐�
 
 /** Image tab: one row of four tabs (no nested "이미지 생성" level). No inner swiping — the editor pager swipes. */
 @Composable
-fun ImagePage(cid: String, openField: (String) -> Unit, openPreset: (String) -> Unit) {
+fun ImagePage(cid: String, openField: (String) -> Unit, openPreset: (String) -> Unit, openRoute: (String) -> Unit = {}) {
     var tab by rememberSaveable(cid) { mutableStateOf(3) }
     Column(Modifier.fillMaxSize()) {
         PillTabs(imageTabs, tab, { tab = it })
@@ -112,7 +113,7 @@ fun ImagePage(cid: String, openField: (String) -> Unit, openPreset: (String) -> 
                 0 -> ImageDataTab(cid)
                 1 -> StyleTab(cid, openField)
                 2 -> GenCharacterTab(cid, openField)
-                else -> TemplateTab(cid, openPreset)
+                else -> TemplateTab(cid, openPreset, openRoute)
             }
         }
     }
@@ -171,7 +172,7 @@ private fun ImageDataTab(cid: String) {
                 }
             }
         }
-        item { Hint("생성한 이미지를 에셋·감정으로 반영하는 기능은 다음 업데이트에서 열려요.") }
+        item { Hint("이미지 템플릿에서 체크한 이미지가 여기(감정·추가 에셋)에 이미지이름.1, .2 … 로 들어가요.") }
     }
 }
 
@@ -225,7 +226,7 @@ private fun StyleTab(cid: String, openField: (String) -> Unit) {
         PromptCard("Art style prompt (그림체 프롬프트)", style.s("prompt"), "예: best quality, masterpiece, soft lighting") { openField("gen:style:prompt") }
         Spacer(Modifier.height(8.dp))
         PromptCard("Art style negative (그림체 네거티브)", style.s("negative"), "예: lowres, bad anatomy, text, watermark") { openField("gen:style:negative") }
-        Hint("그림체 라이브러리(모든 캐릭터 공용)는 다음 업데이트에서 열려요.")
+        StyleLibrarySection(cid)
     }
 }
 
@@ -257,6 +258,8 @@ private fun GenCharacterTab(cid: String, openField: (String) -> Unit) {
     var confirmDelete by remember { mutableStateOf(false) }
     val collapsed = remember { mutableStateMapOf<String, Boolean>() }
     var generating by remember { mutableStateOf<Job?>(null) }
+    var addedIcon by remember { mutableStateOf<String?>(null) }
+    var zoomPreview by remember { mutableStateOf(false) }
 
     LazyColumn(contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 40.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         item(key = "chars") {
@@ -278,6 +281,7 @@ private fun GenCharacterTab(cid: String, openField: (String) -> Unit) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(c.s("name"), style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
                 TextButton(onClick = { rename = true }) { Text("이름", color = Sgu.Ink) }
+                TextButton(onClick = { ImageGenStore.duplicateCharacter(cid, charId) }) { Text("복사", color = Sgu.Ink) }
                 TextButton(onClick = { confirmDelete = true }) { Text("삭제", color = Sgu.Danger) }
             }
             Text("블록 (위에서 아래 순서로 NovelAI에 전달됩니다)", style = MaterialTheme.typography.bodySmall, color = Sgu.Sub, modifier = Modifier.padding(start = 4.dp))
@@ -338,7 +342,20 @@ private fun GenCharacterTab(cid: String, openField: (String) -> Unit) {
             PromptCard("자유 네거티브 (Undesired Content 맨 뒤에 추가)", c.s("freeNegative")) { openField("gen:free:$charId:freeNegative") }
             Spacer(Modifier.height(10.dp))
             val preview = g.sOrNull("preview")?.let { ImageGenStore.imageFile(cid, it) }?.takeIf { it.exists() }
-            if (preview != null) FileImage(preview, Modifier.fillMaxWidth().aspectRatio(0.7f).clip(RoundedCornerShape(20.dp)), 1024)
+            if (preview != null) {
+                FileImage(preview, Modifier.fillMaxWidth().aspectRatio(0.7f).clip(RoundedCornerShape(20.dp)).clickable { zoomPreview = true }, 1024)
+                Spacer(Modifier.height(8.dp))
+                val added = addedIcon == preview.name
+                LineButton(if (added) "추가됨 ✓" else "아이콘으로 추가", onClick = {
+                    if (!added) {
+                        val main = ImageGenStore.addAsIcon(cid, preview, c.s("name"))
+                        addedIcon = preview.name
+                        Toast.makeText(ctx, if (main) "캐릭터 아이콘(대표 이미지)으로 지정했어요" else "아이콘 에셋으로 추가했어요", Toast.LENGTH_SHORT).show()
+                    }
+                }, icon = Icons.Outlined.Image)
+                Hint("아이콘이 없으면 대표 이미지로 지정됩니다.")
+                if (zoomPreview) ZoomDialog(preview) { zoomPreview = false }
+            }
             Spacer(Modifier.height(10.dp))
             InkButton(if (generating != null) "생성 중… (탭하면 중지)" else "생성", icon = Icons.Filled.AutoAwesome, onClick = {
                 generating?.let { it.cancel(); generating = null; return@InkButton }
@@ -483,71 +500,6 @@ fun SizePicker(size: JsonObject?, onChange: (JsonObject) -> Unit) {
 
 // ---------- 이미지 템플릿: preset grid ----------
 
-@Composable
-private fun TemplateTab(cid: String, openPreset: (String) -> Unit) {
-    val ctx = LocalContext.current
-    val scope = rememberCoroutineScope()
-    val g = remember(cid, ImageGenStore.version) { ImageGenStore.load(cid) }
-    val presets = g.arr("presets")
-    var adding by remember { mutableStateOf(false) }
-    var batch by remember { mutableStateOf<Job?>(null) }
-    var progress by remember { mutableStateOf("") }
-    Column(Modifier.fillMaxSize()) {
-        Row(Modifier.padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(g.sOrNull("templateName") ?: "기본 템플릿", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-            PillChip(if (batch != null) "중지" else "일괄 생성", selected = batch != null) {
-                batch?.let { it.cancel(); batch = null; progress = ""; return@PillChip }
-                batch = scope.launch {
-                    val ids = ImageGenStore.load(cid).arr("presets").map { it.s("id") }
-                    for ((i, pid) in ids.withIndex()) {
-                        progress = "생성 중 ${i + 1}/${ids.size}"
-                        val ok = runCatching { ImageGenStore.generateForPreset(cid, pid) }
-                        ok.exceptionOrNull()?.let { if (it !is kotlinx.coroutines.CancellationException) { Toast.makeText(ctx, it.message ?: "실패", Toast.LENGTH_LONG).show(); return@launch } }
-                    }
-                    progress = ""; batch = null
-                }
-            }
-        }
-        Text(if (progress.isNotEmpty()) progress else "프리셋마다 에셋/감정 이미지를 생성해 둡니다. 템플릿 관리·선별·압축·반영은 다음 업데이트에서 열려요.",
-            style = MaterialTheme.typography.bodySmall, color = Sgu.Sub, modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp))
-        LazyVerticalGrid(
-            columns = GridCells.Adaptive(104.dp),
-            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 40.dp),
-            horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(12.dp),
-            modifier = Modifier.weight(1f),
-        ) {
-            items(presets.size, key = { presets[it].s("id") }) { i ->
-                val p = presets[i]
-                Column(Modifier.clickable { openPreset(p.s("id")) }) {
-                    FileImage(ImageGenStore.thumb(p)?.let { ImageGenStore.imageFile(cid, it.s("file")) },
-                        Modifier.fillMaxWidth().aspectRatio(0.72f).clip(RoundedCornerShape(18.dp)).border(1.dp, Sgu.Line, RoundedCornerShape(18.dp)), 384)
-                    Text(p.s("name"), style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 4.dp, start = 2.dp))
-                }
-            }
-            item(key = "add") {
-                Box(
-                    Modifier.fillMaxWidth().aspectRatio(0.72f).clip(RoundedCornerShape(18.dp)).border(1.dp, Sgu.Line, RoundedCornerShape(18.dp)).clickable { adding = true },
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Icon(Icons.Outlined.Add, null, tint = Sgu.Sub)
-                        Text("새 프리셋", style = MaterialTheme.typography.bodySmall, color = Sgu.Sub)
-                    }
-                }
-            }
-        }
-    }
-    if (adding) {
-        var name by remember { mutableStateOf("") }
-        AlertDialog(
-            onDismissRequest = { adding = false }, title = { Text("새 프리셋") },
-            text = { OutlinedTextField(name, { name = it }, singleLine = true, placeholder = { Text("예: neutral, smiling") }, shape = RoundedCornerShape(14.dp)) },
-            confirmButton = { TextButton(onClick = { adding = false; openPreset(ImageGenStore.addPreset(cid, name.trim())) }) { Text("만들기", color = Sgu.Ink) } },
-            dismissButton = { TextButton(onClick = { adding = false }) { Text("취소", color = Sgu.Sub) } }, containerColor = Sgu.Card,
-        )
-    }
-}
-
 // ---------- 프리셋 상세 (its own screen, so system back returns to the grid) ----------
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
@@ -559,7 +511,8 @@ fun GenPresetScreen(cid: String, presetId: String, openField: (String) -> Unit, 
     val p = ImageGenStore.preset(g, presetId)
     if (p == null) { LaunchedOnce(onBack); return }
     var expanded by remember { mutableStateOf(false) }
-    var gen by remember { mutableStateOf<Job?>(null) }
+    KeepScreenOn(GenRun.running(cid))
+    GenRun.error[cid]?.let { e -> androidx.compose.runtime.LaunchedEffect(e) { Toast.makeText(ctx, e, Toast.LENGTH_LONG).show(); GenRun.error.remove(cid) } }
     var showPrompt by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
     var addChar by remember { mutableStateOf(false) }
@@ -582,13 +535,9 @@ fun GenPresetScreen(cid: String, presetId: String, openField: (String) -> Unit, 
                 horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically,
             ) {
                 LineButton("프롬프트", onClick = { showPrompt = true }, icon = Icons.Outlined.Visibility)
-                InkButton(if (gen != null) "생성 중… (탭하면 중지)" else "이미지 생성", icon = Icons.Filled.AutoAwesome, modifier = Modifier.weight(1f), onClick = {
-                    gen?.let { it.cancel(); gen = null; return@InkButton }
-                    gen = scope.launch {
-                        runCatching { ImageGenStore.generateForPreset(cid, presetId) }
-                            .onFailure { if (it !is kotlinx.coroutines.CancellationException) Toast.makeText(ctx, it.message ?: "실패", Toast.LENGTH_LONG).show() }
-                        gen = null
-                    }
+                val run = GenRun.progress[cid]
+                InkButton(if (run != null) "생성 중 ${run.done}/${run.total} (탭하면 중지)" else "이미지 생성", icon = Icons.Filled.AutoAwesome, modifier = Modifier.weight(1f), onClick = {
+                    if (run != null) GenRun.stop(cid) else GenRun.run(cid, listOf(presetId), 1)
                 })
             }
         },
@@ -622,28 +571,7 @@ fun GenPresetScreen(cid: String, presetId: String, openField: (String) -> Unit, 
                     }
                 }
             }
-            // Generated images: one horizontal row.
-            item(key = "images") {
-                Text("생성된 이미지 (${images.size}) · 탭하면 대표로 선택", style = MaterialTheme.typography.bodySmall, color = Sgu.Sub, modifier = Modifier.padding(start = 6.dp, top = 6.dp))
-                if (images.isEmpty()) {
-                    Box(Modifier.fillMaxWidth().height(120.dp).padding(top = 6.dp).clip(RoundedCornerShape(18.dp)).border(1.dp, Sgu.Line, RoundedCornerShape(18.dp)), contentAlignment = Alignment.Center) {
-                        Text("아직 생성된 이미지가 없습니다", style = MaterialTheme.typography.bodyMedium, color = Sgu.Sub)
-                    }
-                } else LazyRow(Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    items(images.reversed(), key = { it.s("id") }) { im ->
-                        Box {
-                            FileImage(ImageGenStore.imageFile(cid, im.s("file")),
-                                Modifier.width(150.dp).aspectRatio(ImageGenStore.sizeDims(p.o("size")).let { (w, h) -> w.toFloat() / h })
-                                    .clip(RoundedCornerShape(16.dp)).clickable { ImageGenStore.selectImage(cid, presetId, im.s("id")) }, 640)
-                            if (im.b("selected")) Icon(Icons.Filled.CheckCircle, "선택됨", tint = Color.White,
-                                modifier = Modifier.align(Alignment.TopEnd).padding(6.dp).clip(CircleShape).background(Sgu.Ink))
-                            IconButton(onClick = { ImageGenStore.deleteImage(cid, presetId, im.s("id")) }, modifier = Modifier.align(Alignment.BottomEnd).size(34.dp)) {
-                                Icon(Icons.Outlined.Delete, "이미지 삭제", tint = Color.White, modifier = Modifier.clip(CircleShape).background(Sgu.Ink.copy(alpha = 0.55f)).padding(4.dp))
-                            }
-                        }
-                    }
-                }
-            }
+            item(key = "images") { PresetImages(cid, p) }
             // Characters in this preset with block checklists (folders switch their blocks).
             p.arr("chars").forEach { pc ->
                 val c = ImageGenStore.character(g, pc.s("characterId")) ?: return@forEach
@@ -691,6 +619,7 @@ fun GenPresetScreen(cid: String, presetId: String, openField: (String) -> Unit, 
                     PromptCard("${c.s("name")} 추가 프롬프트 (이 프리셋에서만)", pc.s("prompt")) { openField("gen:pchar:$presetId:${pc.s("id")}:prompt") }
                     Spacer(Modifier.height(6.dp))
                     PromptCard("${c.s("name")} 추가 네거티브", pc.s("negative")) { openField("gen:pchar:$presetId:${pc.s("id")}:negative") }
+                    if (p.arr("chars").size > 1) PositionPicker(cid, p, pc)
                 }
             }
             item(key = "addchar") {
@@ -744,8 +673,8 @@ fun GenPresetScreen(cid: String, presetId: String, openField: (String) -> Unit, 
     if (confirmDelete) {
         AlertDialog(
             onDismissRequest = { confirmDelete = false }, title = { Text("프리셋 삭제") },
-            text = { Text("이 프리셋과 생성된 이미지가 삭제됩니다.") },
-            confirmButton = { TextButton(onClick = { confirmDelete = false; ImageGenStore.removePreset(cid, presetId); onBack() }) { Text("삭제", color = Sgu.Danger) } },
+            text = { Text("프리셋과 생성된 이미지, 봇에 반영된 이미지가 삭제됩니다.") },
+            confirmButton = { TextButton(onClick = { confirmDelete = false; ImageGenStore.removePresetFull(cid, presetId); onBack() }) { Text("삭제", color = Sgu.Danger) } },
             dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("취소", color = Sgu.Sub) } }, containerColor = Sgu.Card,
         )
     }

@@ -136,7 +136,7 @@ fun EditorScreen(characterId: String, onBack: (() -> Unit)?, openField: (String)
             HorizontalPager(state = pager, modifier = Modifier.weight(1f), beyondViewportPageCount = 1) { page ->
                 when (page) {
                     0 -> GroupPage("character", characterId, card, openField, openRoute)
-                    1 -> ImagePage(characterId, openField, openPreset)
+                    1 -> ImagePage(characterId, openField, openPreset, openRoute)
                     2 -> WorkshopPage()
                     3 -> GroupPage("script", characterId, card, openField, openRoute)
                     else -> GroupPage("etc", characterId, card, openField, openRoute)

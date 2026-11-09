@@ -103,6 +103,11 @@ fun SguApp() {
             val id = e.arguments?.getString("id") ?: ""
             LoreScreen(id, e.arguments?.getString("i")?.toIntOrNull() ?: -1, e.arguments?.getString("new") == "1", openField = { key -> openField(id, key) }, onBack = back)
         }
+        composable("gentemplates/{id}") { e -> TemplateManagerScreen(e.arguments?.getString("id") ?: "", onBack = back) }
+        composable("genpick/{id}") { e ->
+            val id = e.arguments?.getString("id") ?: ""
+            ImagePickerScreen(id, openPreset = { pid -> nav.navigate("genpreset/$id/$pid") }, onBack = back)
+        }
         composable("bias/{id}") { e -> BiasScreen(e.arguments?.getString("id") ?: "", onBack = back) }
         composable("onboarding/{id}") { e ->
             val id = e.arguments?.getString("id") ?: ""

@@ -109,6 +109,9 @@ object ImageGenStore {
         put("pos", buildJsonObject { put("mode", JsonPrimitive("auto")) })
     }
 
+    /** An empty imageGen with one character and no presets (original defaultImageGen). */
+    fun blankState(): JsonObject = defaults()
+
     private fun defaults(): JsonObject {
         val c = newCharacter("캐릭터 1")
         return buildJsonObject {
@@ -130,7 +133,20 @@ object ImageGenStore {
         runCatching { CardIO.json.parseToJsonElement(file(cid).readText()).jsonObject }.getOrNull()?.let { t ->
             val d = defaults()
             JsonObject(d + t + ("style" to JsonObject(d.o("style").orEmpty() + t.o("style").orEmpty())))
-        } ?: defaults()
+        } ?: newProject(cid)
+    }
+
+    /** First open of a character: ★ template (or the built-in 기본 템플릿) and ★ art style, like the original. */
+    private fun newProject(cid: String): JsonObject {
+        var g = runCatching { TemplateLibrary.newProjectState(defaults()) }.getOrElse { defaults() }
+        StyleLibrary.patch(runCatching { StyleLibrary.favorite()?.o("data") }.getOrNull())?.let { pairs ->
+            g = g.with("style" to JsonObject(g.o("style").orEmpty() + pairs))
+        }
+        if (CharacterStore.items.any { it.id == cid }) {
+            val text = CardIO.json.encodeToString(JsonElement.serializer(), g)
+            CharacterStore.io.launch { runCatching { file(cid).writeText(text) } }
+        }
+        return g
     }
 
     fun save(cid: String, o: JsonObject) {
@@ -189,10 +205,7 @@ object ImageGenStore {
         return id
     }
 
-    fun removePreset(cid: String, presetId: String) {
-        preset(load(cid), presetId)?.arr("images")?.forEach { imageFile(cid, it.s("file")).delete() }
-        update(cid) { g -> g.mapList("presets") { l -> l.removeAll { it.s("id") == presetId } } }
-    }
+    fun removePreset(cid: String, presetId: String) = removePresetFull(cid, presetId)
 
     /** Toggles one id (block or folder) in a preset character's blockIds. */
     fun toggleBlock(cid: String, presetId: String, pcharId: String, blockId: String) = patchPreset(cid, presetId) { p ->
@@ -204,6 +217,49 @@ object ImageGenStore {
                 l[i] = l[i].with("blockIds" to JsonArray(ids.map { JsonPrimitive(it) }))
             }
         }
+    }
+
+    fun blockIdList(pc: JsonObject?): List<String> = (pc?.get("blockIds") as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.content } ?: emptyList()
+
+    fun normalizeSize(o: JsonObject?): JsonObject {
+        if (o == null) return size()
+        val kind = o.s("kind").takeIf { it == "landscape" || it == "square" || it == "custom" } ?: "portrait"
+        return size(kind, clamp64(o.d("w") ?: 832.0), clamp64(o.d("h") ?: 1216.0))
+    }
+
+    fun normalizePos(o: JsonObject?): JsonObject = if (o.s("mode") == "custom") buildJsonObject {
+        put("mode", JsonPrimitive("custom"))
+        put("col", JsonPrimitive((o.d("col") ?: 2.0).toInt().coerceIn(0, 4))); put("row", JsonPrimitive((o.d("row") ?: 2.0).toInt().coerceIn(0, 4)))
+    } else buildJsonObject { put("mode", JsonPrimitive("auto")) }
+
+    /** Cells nearest the centre first (module 904 P). */
+    private val cellsByCentre: List<Pair<Int, Int>> = (0 until 5).flatMap { r -> (0 until 5).map { c -> c to r } }
+        .sortedBy { (c, r) -> Math.hypot(c - 2.0, r - 2.0) }
+
+    /** Module 904 normalizePositions: all auto, or all custom on distinct cells ([first] keeps its cell). */
+    fun normalizePositions(chars: List<JsonObject>, first: List<Int> = emptyList()): List<JsonObject> {
+        if (chars.none { it.o("pos").s("mode") == "custom" }) return chars.map { if (it.o("pos").s("mode") == "auto") it else it.with("pos" to normalizePos(null)) }
+        val order = first.filter { it in chars.indices } + chars.indices.filter { it !in first }
+        val used = mutableSetOf<String>(); val out = chars.toMutableList()
+        for (i in order) {
+            val pos = chars[i].o("pos")
+            if (pos.s("mode") == "custom") {
+                val key = "${pos.d("col")?.toInt()},${pos.d("row")?.toInt()}"
+                if (key !in used) { used.add(key); continue }
+            }
+            val cell = cellsByCentre.firstOrNull { "${it.first},${it.second}" !in used } ?: cellsByCentre[0]
+            used.add("${cell.first},${cell.second}")
+            out[i] = chars[i].with("pos" to buildJsonObject { put("mode", JsonPrimitive("custom")); put("col", JsonPrimitive(cell.first)); put("row", JsonPrimitive(cell.second)) })
+        }
+        return out
+    }
+
+    /** Module 904 setCharPos. */
+    fun setCharPos(cid: String, presetId: String, pcharId: String, pos: JsonObject) = patchPreset(cid, presetId) { p ->
+        val chars = p.arr("chars"); val i = chars.indexOfFirst { it.s("id") == pcharId }
+        if (i < 0) p
+        else if (pos.s("mode") == "auto") p.with("chars" to JsonArray(chars.map { it.with("pos" to normalizePos(null)) }))
+        else p.with("chars" to JsonArray(normalizePositions(chars.mapIndexed { j, c -> if (j == i) c.with("pos" to pos) else c }, listOf(i))))
     }
 
     fun blockIds(pc: JsonObject?): Set<String> = (pc?.get("blockIds") as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.content }?.toSet() ?: emptySet()
@@ -410,8 +466,8 @@ object ImageGenStore {
         withContext(Dispatchers.IO) { imageFile(cid, name).writeBytes(png) }
         withContext(Dispatchers.Main) {
             patchPreset(cid, presetId) { p ->
-                val imgs = p.arr("images").map { it.with("selected" to JsonPrimitive(false)) } +
-                    buildJsonObject { put("id", JsonPrimitive(newId("gi"))); put("file", JsonPrimitive(name)); put("selected", JsonPrimitive(true)) }
+                val imgs = p.arr("images") +
+                    buildJsonObject { put("id", JsonPrimitive(newId("gi"))); put("file", JsonPrimitive(name)); put("createdAt", JsonPrimitive(System.currentTimeMillis())); put("selected", JsonPrimitive(false)) }
                 p.with("images" to JsonArray(imgs))
             }
         }
@@ -427,13 +483,232 @@ object ImageGenStore {
         return name
     }
 
-    fun selectImage(cid: String, presetId: String, imageId: String) = patchPreset(cid, presetId) { p ->
-        p.with("images" to JsonArray(p.arr("images").map { it.with("selected" to JsonPrimitive(it.s("id") == imageId)) }))
+    // ---------- 봇에 반영 (modules 967 reflectPreset / 968 syncPresetToBot) ----------
+
+    private fun xDir(cid: String) = File(CharacterStore.dir(cid), "x")
+    fun reflectedName(imageName: String, name: String, n: Int) = "${imageName.trim().ifBlank { name.trim() }.ifBlank { "image" }}.$n"
+    private fun ext(file: String) = file.substringAfterLast('.', "png").lowercase().let { if (it == "jpeg") "jpg" else it }
+
+    /** Checked images (selected) become card assets named imageName.1, .2 … (emotion or x-risu-asset); unchecked ones are removed. */
+    fun syncPresetToBot(cid: String, presetId: String) {
+        val p = preset(load(cid), presetId) ?: return
+        val emotion = p.s("imageType") == "emotion"
+        val list = if (emotion) "emotion" else "asset"
+        val folder = if (emotion) "emotion" else "other"
+        val x = xDir(cid).apply { mkdirs() }
+        val remove = mutableSetOf<String>(); val add = mutableListOf<JsonObject>()
+        val images = p.arr("images").toMutableList()
+        images.forEachIndexed { i, im ->
+            val r = im.o("reflected")
+            if (!im.b("selected") && r != null) {
+                remove.add("embeded://" + r.s("path")); File(x, r.s("path")).delete()
+                images[i] = JsonObject(im - "reflected")
+            }
+        }
+        var n = 0
+        images.forEachIndexed { i, im ->
+            if (!im.b("selected")) return@forEachIndexed
+            val src = imageFile(cid, im.s("file"))
+            val r = im.o("reflected")
+            var path: String
+            val rid: String
+            if (r != null && File(x, r.s("path")).exists()) {
+                rid = r.s("id"); path = r.s("path"); remove.add("embeded://$path")
+                if (r.s("list") != list) {
+                    val np = "assets/$folder/image/$rid.${ext(path)}"
+                    File(x, np).parentFile?.mkdirs(); File(x, path).renameTo(File(x, np)); path = np
+                }
+            } else {
+                if (!src.exists()) return@forEachIndexed
+                rid = r?.s("id")?.ifBlank { null } ?: newId("ga")
+                path = "assets/$folder/image/$rid.${ext(im.s("file"))}"
+                File(x, path).parentFile?.mkdirs(); src.copyTo(File(x, path), overwrite = true)
+            }
+            n++
+            images[i] = im.with("reflected" to buildJsonObject { put("id", JsonPrimitive(rid)); put("path", JsonPrimitive(path)); put("list", JsonPrimitive(list)) })
+            add.add(buildJsonObject {
+                put("type", JsonPrimitive(if (emotion) "emotion" else "x-risu-asset")); put("uri", JsonPrimitive("embeded://$path"))
+                put("name", JsonPrimitive(reflectedName(p.s("imageName"), p.s("name"), n))); put("ext", JsonPrimitive(ext(path)))
+            })
+        }
+        if (remove.isNotEmpty() || add.isNotEmpty()) CharacterStore.updateData(cid) { d -> withAssets(d, remove, add) }
+        patchPreset(cid, presetId) { it.with("images" to JsonArray(images)) }
+    }
+
+    /** Replaces asset entries; viewScreen follows the original export (emotion images → "emotion"). */
+    private fun withAssets(d: JsonObject, remove: Set<String>, add: List<JsonObject>): JsonObject {
+        val assets = ((d["assets"] as? JsonArray) ?: JsonArray(emptyList())).filter { a -> ((a as? JsonObject)?.s("uri") ?: "") !in remove } + add
+        var out = d.with("assets" to JsonArray(assets))
+        val emotions = assets.count { (it as? JsonObject)?.s("type") == "emotion" }
+        val risu = out.o("extensions")?.o("risuai")
+        val view = risu.sOrNull("viewScreen")
+        val nextView = if (emotions > 0) "emotion" else if (view == "emotion") "none" else view
+        if (nextView != view && nextView != null) out = Fields.set(out, listOf("extensions", "risuai", "viewScreen"), JsonPrimitive(nextView))
+        return out
+    }
+
+    /** Module 967 unreflectPreset: removes every asset this preset put in the bot. */
+    private fun unreflect(cid: String, p: JsonObject): List<JsonObject> {
+        val x = xDir(cid); val remove = mutableSetOf<String>()
+        val images = p.arr("images").map { im ->
+            val r = im.o("reflected") ?: return@map im
+            remove.add("embeded://" + r.s("path")); File(x, r.s("path")).delete(); JsonObject(im - "reflected")
+        }
+        if (remove.isNotEmpty()) CharacterStore.updateData(cid) { d -> withAssets(d, remove, emptyList()) }
+        return images
+    }
+
+    fun toggleUse(cid: String, presetId: String, imageId: String) {
+        patchPreset(cid, presetId) { p -> p.with("images" to JsonArray(p.arr("images").map { if (it.s("id") == imageId) it.with("selected" to JsonPrimitive(!it.b("selected"))) else it })) }
+        syncPresetToBot(cid, presetId)
+    }
+
+    /** Several images at once (이미지 선별): sets selected and syncs every changed preset. */
+    fun setUses(cid: String, changes: Map<String, Boolean>) {
+        val touched = load(cid).arr("presets").filter { p -> p.arr("images").any { im -> changes[im.s("id")]?.let { it != im.b("selected") } == true } }.map { it.s("id") }
+        touched.forEach { pid ->
+            patchPreset(cid, pid) { p -> p.with("images" to JsonArray(p.arr("images").map { im -> changes[im.s("id")]?.let { im.with("selected" to JsonPrimitive(it)) } ?: im })) }
+            syncPresetToBot(cid, pid)
+        }
     }
 
     fun deleteImage(cid: String, presetId: String, imageId: String) {
-        preset(load(cid), presetId)?.arr("images")?.firstOrNull { it.s("id") == imageId }?.let { imageFile(cid, it.s("file")).delete() }
+        val im = preset(load(cid), presetId)?.arr("images")?.firstOrNull { it.s("id") == imageId } ?: return
+        if (im.o("reflected") != null) {
+            patchPreset(cid, presetId) { p -> p.with("images" to JsonArray(p.arr("images").map { if (it.s("id") == imageId) it.with("selected" to JsonPrimitive(false)) else it })) }
+            syncPresetToBot(cid, presetId)
+        }
+        imageFile(cid, im.s("file")).delete()
         patchPreset(cid, presetId) { p -> p.with("images" to JsonArray(p.arr("images").filter { it.s("id") != imageId })) }
+    }
+
+    /** Module 968 removePresetFull / clearPresetImages. */
+    fun removePresetFull(cid: String, presetId: String) = clear(cid, presetId, true)
+    fun clearPresetImages(cid: String, presetId: String) = clear(cid, presetId, false)
+    private fun clear(cid: String, presetId: String, removePreset: Boolean) {
+        val p = preset(load(cid), presetId) ?: return
+        unreflect(cid, p)
+        p.arr("images").forEach { imageFile(cid, it.s("file")).delete() }
+        update(cid) { g -> g.mapList("presets") { l ->
+            if (removePreset) l.removeAll { it.s("id") == presetId }
+            else { val i = l.indexOfFirst { it.s("id") == presetId }; if (i >= 0) l[i] = l[i].with("images" to JsonArray(emptyList())) }
+        } }
+    }
+
+    // ---------- 이미지 압축 (module 966) ----------
+
+    private val light = setOf("webp", "jpg", "jpeg")
+
+    fun countCompressTargets(cid: String, onlyHeavy: Boolean) =
+        load(cid).arr("presets").sumOf { p -> p.arr("images").count { !onlyHeavy || ext(it.s("file")) !in light } }
+
+    data class CompressResult(val converted: Int, val saved: Long)
+
+    /** Re-saves generated images as WebP/JPEG; reflected images are re-reflected with the new files. */
+    suspend fun compress(cid: String, webp: Boolean, quality: Int, onlyHeavy: Boolean, progress: (Int, Int) -> Unit): CompressResult {
+        val total = countCompressTargets(cid, onlyHeavy)
+        var done = 0; var converted = 0; var saved = 0L
+        withContext(Dispatchers.Main) { progress(0, total) }
+        for (p0 in load(cid).arr("presets")) {
+            val p = preset(load(cid), p0.s("id")) ?: continue
+            val targets = p.arr("images").filter { !onlyHeavy || ext(it.s("file")) !in light }
+            if (targets.isEmpty()) continue
+            val hadReflected = p.arr("images").any { it.o("reflected") != null }
+            val images = withContext(Dispatchers.Main) { if (hadReflected) unreflect(cid, p) else p.arr("images") }
+            val renamed = mutableMapOf<String, String>()
+            for (im in targets) {
+                runCatching {
+                    withContext(Dispatchers.IO) {
+                        val src = imageFile(cid, im.s("file"))
+                        val bmp = android.graphics.BitmapFactory.decodeFile(src.path) ?: return@withContext
+                        val bos = java.io.ByteArrayOutputStream()
+                        @Suppress("DEPRECATION")
+                        bmp.compress(if (webp) android.graphics.Bitmap.CompressFormat.WEBP_LOSSY else android.graphics.Bitmap.CompressFormat.JPEG, quality.coerceIn(5, 100), bos)
+                        bmp.recycle()
+                        val bytes = bos.toByteArray()
+                        val newExt = if (webp) "webp" else "jpg"
+                        if (bytes.size < src.length() || ext(src.name) != newExt) {
+                            val name = src.nameWithoutExtension.substringBefore("_c") + "_c" + System.currentTimeMillis().toString(36) + "." + newExt
+                            imageFile(cid, name).writeBytes(bytes)
+                            saved += src.length() - bytes.size
+                            src.delete(); renamed[im.s("id")] = name; converted++
+                        }
+                    }
+                }
+                done++
+                withContext(Dispatchers.Main) { progress(done, total) }
+            }
+            withContext(Dispatchers.Main) {
+                patchPreset(cid, p.s("id")) { it.with("images" to JsonArray(images.map { im -> renamed[im.s("id")]?.let { f -> im.with("file" to JsonPrimitive(f)) } ?: im })) }
+                if (hadReflected) syncPresetToBot(cid, p.s("id"))
+            }
+        }
+        return CompressResult(converted, saved)
+    }
+
+    /** Module 1687 exportSelectedZip: every image checked for the bot, named imageName.N.ext. */
+    fun writeSelectedZip(cid: String, out: java.io.OutputStream): Int {
+        var count = 0; val used = mutableSetOf<String>()
+        java.util.zip.ZipOutputStream(out).use { zip ->
+            load(cid).arr("presets").forEach { p ->
+                p.arr("images").filter { it.b("selected") }.forEachIndexed { i, im ->
+                    val f = imageFile(cid, im.s("file")); if (!f.exists()) return@forEachIndexed
+                    val base = safeName(p.s("imageName").ifBlank { p.s("name") }.ifBlank { "image" })
+                    var name = "$base.${i + 1}.${ext(f.name)}"; var k = 2
+                    while (name in used) { name = "$base.${i + 1}_$k.${ext(f.name)}"; k++ }
+                    used.add(name)
+                    zip.putNextEntry(java.util.zip.ZipEntry(name)); f.inputStream().use { it.copyTo(zip) }; zip.closeEntry(); count++
+                }
+            }
+        }
+        return count
+    }
+
+    fun selectedCount(g: JsonObject) = g.arr("presets").sumOf { p -> p.arr("images").count { it.b("selected") } }
+
+    fun safeName(s: String) = s.replace(Regex("[\\/:*?\"<>|\u0000-\u001f]+"), "_").trim().ifBlank { "image" }.take(100)
+
+    // ---------- 아이콘으로 추가 (module 1681) ----------
+
+    /** No icon yet → becomes the main icon; otherwise added as an extra icon asset named after the image character. */
+    fun addAsIcon(cid: String, file: File, name: String): Boolean {
+        if (!file.exists()) return false
+        val dir = CharacterStore.dir(cid)
+        val main = File(dir, "icon.png")
+        val x = xDir(cid)
+        if (!main.exists()) {
+            writePng(file, main)
+            val card = CharacterStore.readCard(cid)
+            CardIO.assets(card).firstOrNull { CardIO.str(it, "type") == "icon" && CardIO.str(it, "name") == "main" }
+                ?.let { CardIO.assetFile(x, CardIO.str(it, "uri")) }?.let { writePng(file, it) }
+            CharacterStore.updateData(cid) { it }
+            return true
+        }
+        val rid = newId("icon")
+        val path = "assets/icon/image/$rid.${ext(file.name)}"
+        File(x, path).parentFile?.mkdirs(); file.copyTo(File(x, path), overwrite = true)
+        CharacterStore.updateData(cid) { d -> withAssets(d, emptySet(), listOf(buildJsonObject {
+            put("type", JsonPrimitive("icon")); put("uri", JsonPrimitive("embeded://$path")); put("name", JsonPrimitive(name.ifBlank { "generated" })); put("ext", JsonPrimitive(ext(path)))
+        })) }
+        return false
+    }
+
+    private fun writePng(src: File, dst: File) {
+        if (ext(src.name) == "png") { src.copyTo(dst, overwrite = true); return }
+        val bmp = android.graphics.BitmapFactory.decodeFile(src.path) ?: run { src.copyTo(dst, overwrite = true); return }
+        dst.outputStream().use { bmp.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
+        bmp.recycle()
+    }
+
+    /** Copy of an image character (original 1681 "복사"). */
+    fun duplicateCharacter(cid: String, charId: String) = update(cid) { g ->
+        val c = character(g, charId) ?: return@update g
+        val map = c.arr("blocks").associate { it.s("id") to newId("gb") }
+        val copy = c.with("id" to JsonPrimitive(newId("gc")), "name" to JsonPrimitive(c.s("name") + " 복사"), "blocks" to JsonArray(c.arr("blocks").map { b ->
+            val nb = b.with("id" to JsonPrimitive(map[b.s("id")]!!))
+            b.sOrNull("folderId")?.let { f -> map[f]?.let { nb.with("folderId" to JsonPrimitive(it)) } } ?: nb
+        }))
+        g.mapList("characters") { it.add(copy) }.with("selectedCharacterId" to JsonPrimitive(copy.s("id")))
     }
 
     fun thumb(preset: JsonObject?): JsonObject? = preset?.arr("images")?.let { l -> l.firstOrNull { it.b("selected") } ?: l.lastOrNull() }

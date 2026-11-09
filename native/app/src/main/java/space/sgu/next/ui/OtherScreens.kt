@@ -161,7 +161,7 @@ fun SettingsScreen(open: (String) -> Unit) {
             item { GroupRow(3, 4, "언어", subtitle = "한국어", icon = Icons.Outlined.Language) }
             item {
                 Text(
-                    "SGU Next 0.4.2 · 캐릭터·스크립트·기타·로어북·설정·이미지 생성 작동. 작업실·참고 자료는 다음 단계",
+                    "SGU Next 0.4.3 · 캐릭터·스크립트·기타·로어북·설정·이미지(템플릿·반영·압축) 작동. 작업실·참고 자료는 다음 단계",
                     modifier = Modifier.fillMaxWidth().padding(24.dp),
                     style = MaterialTheme.typography.bodySmall, color = Sgu.Sub,
                 )
