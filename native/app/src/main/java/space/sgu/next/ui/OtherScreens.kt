@@ -108,7 +108,7 @@ fun SettingsScreen(open: (String) -> Unit) {
             item { GroupRow(4, 5, "첫 실행 안내 다시 보기", subtitle = "SGU 소개 화면", icon = Icons.Outlined.Info, onClick = { open("welcome") }) }
             item {
                 Text(
-                    "SGU Next 0.7.3 · 캐릭터·스크립트·기타·로어북·설정·이미지·작업실·참고 자료·내보내기 작동",
+                    "SGU Next 0.7.4 · 캐릭터·스크립트·기타·로어북·설정·이미지·작업실·참고 자료·내보내기 작동",
                     modifier = Modifier.fillMaxWidth().padding(24.dp),
                     style = MaterialTheme.typography.bodySmall, color = Sgu.Sub,
                 )
