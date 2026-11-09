@@ -161,10 +161,16 @@ fun EditorScreen(characterId: String, onBack: (() -> Unit)?, openField: (String)
                 selected = bigOf(pager.currentPage),
                 onSelect = { scope.launch { pager.animateScrollToPage(pageOfBig(it)) } },
             )
+            // 이미지 하위 탭 줄은 pager 밖에 고정: 페이지를 넘겨도 줄은 그대로, 선택만 바뀜
+            androidx.compose.animation.AnimatedVisibility(pager.currentPage in 1..4,
+                enter = androidx.compose.animation.expandVertically() + androidx.compose.animation.fadeIn(),
+                exit = androidx.compose.animation.shrinkVertically() + androidx.compose.animation.fadeOut()) {
+                PillTabs(imageTabs, (pager.currentPage - 1).coerceIn(0, 3), { sub -> scope.launch { pager.animateScrollToPage(sub + 1) } })
+            }
             HorizontalPager(state = pager, modifier = Modifier.weight(1f), beyondViewportPageCount = 1) { page ->
                 when (page) {
                     0 -> GroupPage("character", characterId, card, openField, openRoute)
-                    in 1..4 -> ImageSubPage(characterId, page - 1, { sub -> scope.launch { pager.animateScrollToPage(sub + 1) } }, openField, openPreset, openRoute)
+                    in 1..4 -> ImageSubPage(characterId, page - 1, { sub -> scope.launch { pager.animateScrollToPage(sub + 1) } }, openField, openPreset, openRoute, showTabs = false)
                     5 -> WorkshopPage(characterId, openFieldTab = { fid ->
                         val target = when (WFields.map[fid]?.group ?: Fields.byId[fid]?.group) { "image" -> 1; "script" -> 6; "etc" -> 7; else -> 0 }
                         scope.launch { pager.animateScrollToPage(target) }

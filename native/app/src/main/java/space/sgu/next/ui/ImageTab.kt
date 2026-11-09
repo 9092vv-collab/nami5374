@@ -105,14 +105,14 @@ import space.sgu.next.data.str
 import space.sgu.next.data.with
 import java.io.File
 
-private val imageTabs = listOf("이미지 데이터", "그림체 설정", "캐릭터 설정", "이미지 템플릿")
+val imageTabs = listOf("이미지 데이터", "그림체 설정", "캐릭터 설정", "이미지 템플릿")
 
 /** Image tab: one row of four tabs (no nested "이미지 생성" level). No inner swiping — the editor pager swipes. */
 /** One image sub tab as a page of the editor's flat pager; the sub tab row slides along with its page. */
 @Composable
-fun ImageSubPage(cid: String, sub: Int, onSelect: (Int) -> Unit, openField: (String) -> Unit, openPreset: (String) -> Unit, openRoute: (String) -> Unit = {}) {
+fun ImageSubPage(cid: String, sub: Int, onSelect: (Int) -> Unit, openField: (String) -> Unit, openPreset: (String) -> Unit, openRoute: (String) -> Unit = {}, showTabs: Boolean = true) {
     Column(Modifier.fillMaxSize()) {
-        PillTabs(imageTabs, sub, onSelect)
+        if (showTabs) PillTabs(imageTabs, sub, onSelect)
         Box(Modifier.weight(1f)) {
             when (sub) {
                 0 -> ImageDataTab(cid)
