@@ -7,6 +7,7 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -544,7 +545,7 @@ fun ModelScreen(id: String, onBack: () -> Unit) {
             trailing = { SguSwitch(m.b("stream", true)) { set("stream", JsonPrimitive(it)) } })
         GroupRow(1, 4, "비전 (이미지 입력)", subtitle = "켜면 활성화된 이미지 참고 자료를 함께 보냅니다." + if (!m.b("visionSet")) " 지금은 모델 이름으로 자동 판별했어요." else "",
             trailing = { SguSwitch(vision) { SettingsStore.patch("models", id, "vision" to JsonPrimitive(it), "visionSet" to JsonPrimitive(true)) } })
-        GroupRow(2, 4, "추론 (thinking / reasoning)", subtitle = "Anthropic thinking, Gemini thinkingConfig, OpenAI reasoning_effort",
+        GroupRow(2, 4, "추론 (thinking / reasoning)", subtitle = "Anthropic thinking, Gemini thinkingConfig(2.x 예산 / 3 이상 레벨), OpenAI reasoning_effort",
             trailing = { SguSwitch(thinking.b("enabled")) { setThinking("enabled", JsonPrimitive(it)) } })
         GroupRow(3, 4, "즐겨찾기", subtitle = if (isMain) "기본값 모델은 즐겨찾기가 항상 켜져 있습니다" else "기본 모델 외 최대 2개 · 모델 목록 앞쪽에 표시",
             trailing = {
@@ -556,11 +557,11 @@ fun ModelScreen(id: String, onBack: () -> Unit) {
             })
         AnimatedVisibility(thinking.b("enabled")) {
             Column {
-                FieldLabel("추론 토큰 예산 (Anthropic/Gemini)")
+                FieldLabel("추론 토큰 예산 (Anthropic · Gemini 2.x)")
                 NumberBox("$id-budget", thinking.d("budget"), { setThinking("budget", num(it?.toInt())) }, "미지정")
-                FieldLabel("추론 강도 (OpenAI)")
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    listOf(null to "미지정", "low" to "low", "medium" to "medium", "high" to "high").forEach { (k, label) ->
+                FieldLabel("추론 강도 (OpenAI · Gemini 3 이상)")
+                Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    listOf(null to "미지정", "minimal" to "minimal", "low" to "low", "medium" to "medium", "high" to "high").forEach { (k, label) ->
                         PillChip(label, thinking.sOrNull("effort") == k) { setThinking("effort", str(k)) }
                     }
                 }

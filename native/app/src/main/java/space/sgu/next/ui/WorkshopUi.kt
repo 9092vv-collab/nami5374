@@ -128,7 +128,7 @@ fun WorkshopPage(cid: String, openFieldTab: (String) -> Unit, openRoute: (String
             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(18.dp, Alignment.Bottom),
         ) {
-            if (job != null && job.phase != "idle" && job.phase != "done") item(key = "job") {
+            if (job != null && job.phase != "idle" && job.phase != "done" && job.phase != "error") item(key = "job") {
                 Column {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         if (busy) Badge(Workshop.PHASES[job.phase] ?: job.phase, Sgu.Accent, Color.White)

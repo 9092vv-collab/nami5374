@@ -487,7 +487,7 @@ object Chat {
         else -> e
     }
 
-    fun geminiBody(r: ChatReq, extra: JsonObject): JsonObject {
+    fun geminiBody(r: ChatReq, extra: JsonObject, modelId: String = ""): JsonObject {
         val system = mutableListOf<String>()
         data class GC(val role: String, val parts: MutableList<JsonObject>)
         val contents = mutableListOf<GC>()
@@ -506,7 +506,16 @@ object Chat {
         val p = r.params
         putNum(gc, "maxOutputTokens", p.num("maxTokens")); putNum(gc, "temperature", p.num("temperature")); putNum(gc, "topP", p.num("topP"))
         putNum(gc, "topK", p.num("topK")); putNum(gc, "frequencyPenalty", p.num("frequencyPenalty")); putNum(gc, "presencePenalty", p.num("presencePenalty"))
-        if (r.thinking.bool("enabled")) gc["thinkingConfig"] = buildJsonObject { put("includeThoughts", true); r.thinking.int("budget")?.let { put("thinkingBudget", it) } }
+        if (r.thinking.bool("enabled")) gc["thinkingConfig"] = buildJsonObject {
+            put("includeThoughts", true)
+            // Gemini 1.x/2.x take a token budget; Gemini 3 and newer only accept thinkingLevel (a budget → HTTP 400).
+            if (Regex("gemini-[12](\\.|-|$)", RegexOption.IGNORE_CASE).containsMatchIn(modelId)) r.thinking.int("budget")?.let { put("thinkingBudget", it) }
+            else {
+                val effort = r.thinking.s("effort").lowercase().takeIf { it in setOf("minimal", "low", "medium", "high") }
+                    ?: r.thinking.int("budget")?.let { b -> when { b <= 0 -> "minimal"; b <= 2048 -> "low"; b <= 8192 -> "medium"; else -> "high" } }
+                effort?.let { put("thinkingLevel", it) }
+            }
+        }
         if (r.jsonSchema != null && (r.structuredOutput == "auto" || r.structuredOutput == "json_schema")) {
             gc["responseMimeType"] = JsonPrimitive("application/json"); gc["responseSchema"] = stripSchema(r.jsonSchema.schema)
         } else if (r.structuredOutput == "json_object") gc["responseMimeType"] = JsonPrimitive("application/json")
@@ -528,7 +537,7 @@ object Chat {
     private suspend fun gemini(rs: Resolved, model: String, r: ChatReq, cb: Stream, retries: Int): ChatResult {
         val action = if (r.stream) "streamGenerateContent?alt=sse" else "generateContent"
         val url = Llm.withQueryKey(Llm.joinUrl(rs.baseUrl, "models/${URLEncoder.encode(model, "UTF-8")}:$action"), rs)
-        val res = open(url, Llm.authHeaders(rs), geminiBody(r, rs.extraBody), r.timeoutMs, retries)
+        val res = open(url, Llm.authHeaders(rs), geminiBody(r, rs.extraBody, model), r.timeoutMs, retries)
         fun split(o: JsonObject?): Pair<String, String> {
             val t = StringBuilder(); val th = StringBuilder()
             for (p in o.arr("candidates").firstOrNull().o("content").arr("parts")) {
