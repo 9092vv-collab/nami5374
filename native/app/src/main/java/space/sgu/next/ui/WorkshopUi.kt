@@ -159,6 +159,7 @@ fun WorkshopPage(cid: String, openFieldTab: (String) -> Unit, openRoute: (String
             items(turns.asReversed(), key = { it.s("id") }) { t ->
                 TurnCard(cid, t, isLast = t.s("id") == turns.lastOrNull()?.s("id"), busy = busy, openFieldTab = openFieldTab)
             }
+            if (Workshop.summary(doc) != null || Workshop.summarizing[cid] == true) item(key = "summary") { SummaryCard(cid, doc) }
             if (turns.isEmpty()) item(key = "empty") {
                 Column(Modifier.fillMaxWidth().padding(vertical = 24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                     Icon(Icons.Filled.AutoAwesome, null, tint = Sgu.Accent, modifier = Modifier.size(28.dp))
@@ -276,6 +277,44 @@ private fun ModelListDialog(cid: String, doc: JsonObject, onDismiss: () -> Unit)
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text("닫기", color = Sgu.Sub) } },
     )
+}
+
+/** 세션 요약: earlier turns folded into a short summary that is sent instead of them. */
+@Composable
+private fun SummaryCard(cid: String, doc: JsonObject) {
+    val sum = Workshop.summary(doc)
+    val working = Workshop.summarizing[cid] == true
+    var open by remember { mutableStateOf(false) }
+    var editing by remember { mutableStateOf(false) }
+    var clearing by remember { mutableStateOf(false) }
+    val count = (sum?.get("covered") as? JsonArray)?.size ?: 0
+    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(Sgu.Bubble).clickable { open = !open }.padding(14.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Filled.AutoAwesome, null, tint = Sgu.Accent, modifier = Modifier.size(16.dp))
+            Text("  세션 요약", style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold), modifier = Modifier.weight(1f))
+            Text(if (working) "요약하는 중…" else "이전 턴 ${count}개", style = MaterialTheme.typography.bodySmall, color = Sgu.Sub)
+        }
+        val text = sum?.s("text").orEmpty()
+        if (text.isNotEmpty()) Text(text, style = MaterialTheme.typography.bodyMedium, maxLines = if (open) Int.MAX_VALUE else 3,
+            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, modifier = Modifier.padding(top = 8.dp))
+        if (open && sum != null) Row(Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            TextButton(onClick = { editing = true }) { Text("편집", color = Sgu.Ink) }
+            TextButton(onClick = { Workshop.summarizeNow(cid) }, enabled = !working) { Text("지금 요약", color = Sgu.Ink) }
+            TextButton(onClick = { clearing = true }) { Text("지우기", color = Sgu.Danger) }
+        }
+        if (open) Text("요약된 턴은 원문 대신 이 요약으로 AI에 전달돼요. 화면의 턴 기록은 그대로 남아요.", style = MaterialTheme.typography.bodySmall, color = Sgu.Sub, modifier = Modifier.padding(top = 4.dp))
+    }
+    if (editing) {
+        var t by remember { mutableStateOf(sum?.s("text").orEmpty()) }
+        AlertDialog(
+            onDismissRequest = { editing = false }, title = { Text("세션 요약 편집") }, containerColor = Sgu.Card,
+            text = { Column(Modifier.verticalScroll(rememberScrollState())) { InputBox(t, { t = it }, singleLine = false) } },
+            confirmButton = { TextButton(onClick = { Workshop.setSummaryText(cid, t); editing = false }) { Text("저장", color = Sgu.Ink) } },
+            dismissButton = { TextButton(onClick = { editing = false }) { Text("취소", color = Sgu.Sub) } },
+        )
+    }
+    if (clearing) ConfirmDialog("세션 요약 지우기", "요약을 지우면 이전 턴들이 다시 원래대로(최근 턴 개수 제한 안에서) 전달돼요.", "지우기",
+        onConfirm = { Workshop.clearSummary(cid) }, onDismiss = { clearing = false })
 }
 
 @Composable

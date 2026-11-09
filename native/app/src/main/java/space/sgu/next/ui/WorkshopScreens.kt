@@ -282,7 +282,7 @@ fun PromptPreviewScreen(cid: String, openRoute: (String) -> Unit, onBack: () -> 
         val view = WFields.all.filter { it.viewable && Perms.view(perms.o(it.id)) >= (if (wide) 2 else 3) }.map { it.id }
         val edit = if (wide) WFields.all.filter { Perms.edit(perms.o(it.id)) >= 2 }.map { it.id } else emptyList()
         Prompt.assemble(Prompt.Input(data, PromptBlocks.blocksFor(doc), view, edit, command.ifBlank { "(명령)" }, emptyList(),
-            doc.o("session").arr("turns"), true, Processors.mainModels(doc).first?.o("params")?.d("maxContext")?.toInt()))
+            Workshop.historyTurns(doc), true, Processors.mainModels(doc).first?.o("params")?.d("maxContext")?.toInt(), summary = Workshop.summaryText(doc)))
     }
     Page("프롬프트 설정", "프리셋 선택 · 전송 순서 미리보기 · 약 ${result.tokenEstimate} 토큰", onBack) {
         SectionLabel("프롬프트 프리셋")
@@ -644,5 +644,32 @@ fun BackgroundScreen(onBack: () -> Unit) {
         FieldLabel("검색 API 키 (Tavily, 선택)")
         InputBox(key, { v -> key = v; if (v.isBlank()) Secrets.remove(WebSearch.KEY_ID) else Secrets.put(WebSearch.KEY_ID, v.trim()) }, placeholder = "tvly-… (없으면 무료 웹 검색을 시도합니다)", password = true)
         Hint("검색 기능을 쓸 때, Claude·Gemini·OpenAI 공식 API는 자체 검색을 쓰고 그 외 모델은 앱이 검색합니다. 무료 검색은 막힐 수 있어 Tavily 키를 넣으면 더 안정적입니다.")
+    }
+}
+
+// =====================================================================================
+// 세션 요약 설정 (SGU Next)
+// =====================================================================================
+
+@Composable
+fun SessionSummaryScreen(onBack: () -> Unit) {
+    val cfg = SettingsStore.root.o("sessionSummary").orEmptyObj()
+    fun set(k: String, v: JsonElement) = SettingsStore.update { m -> m["sessionSummary"] = JsonObject((m["sessionSummary"] as? JsonObject).orEmptyObj() + (k to v)) }
+    Page("세션 요약", "긴 세션의 이전 턴을 짧게 요약해 보냅니다", onBack) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f).padding(start = 6.dp)) {
+                Text("자동 요약", style = MaterialTheme.typography.bodyLarge)
+                Text("최근 턴만 원문으로 보내고, 그보다 오래된 턴은 짧은 요약으로 합칩니다.", style = MaterialTheme.typography.bodySmall, color = Sgu.Sub)
+            }
+            SguSwitch(Workshop.summaryEnabled()) { set("enabled", JsonPrimitive(it)) }
+        }
+        FieldLabel("원문으로 보낼 최근 턴 수")
+        InputBox(Workshop.summaryKeep().toString(), { v -> v.filter { it.isDigit() }.take(2).toIntOrNull()?.let { set("keepRecent", JsonPrimitive(it.coerceIn(1, 50))) } }, number = true)
+        Hint("프롬프트 프리셋 '세션 기록' 블록의 '포함할 이전 턴 수'(기본 6)와 같게 두는 걸 권장해요.")
+        FieldLabel("요약할 턴이 몇 개 쌓이면 요약할지")
+        InputBox(Workshop.summaryEvery().toString(), { v -> v.filter { it.isDigit() }.take(2).toIntOrNull()?.let { set("everyTurns", JsonPrimitive(it.coerceIn(2, 50))) } }, number = true)
+        Hint("기본 6: 최근 턴 바깥으로 밀려난 턴이 6개 쌓일 때마다 기존 요약과 합쳐 다시 요약해요. 요약은 서브 프로세서 모델(Jev·꺼짐이면 메인 모델)로 만들고, 10줄·1,200자 이내로 짧게 씁니다.")
+        Spacer(Modifier.height(12.dp))
+        Hint("요약은 세션 기록에만 저장돼 캐릭터 카드(RisuAI 호환)에는 영향이 없어요. 작업실 맨 위 요약 카드에서 보기·편집·지우기, ⋮ › 세션 요약하기로 바로 요약할 수 있어요.")
     }
 }

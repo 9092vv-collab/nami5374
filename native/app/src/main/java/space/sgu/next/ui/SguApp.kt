@@ -115,6 +115,7 @@ fun SguApp() {
         composable("permdefaults") { PermissionDefaultsScreen(onBack = back) }
         composable("fielddescs") { FieldDescriptionsScreen(onBack = back) }
         composable("logs") { LogsScreen(onBack = back) }
+        composable("sessionsummary") { SessionSummaryScreen(onBack = back) }
         composable("background") { BackgroundScreen(onBack = back) }
         composable("ref/{id}") { e -> ReferenceEditScreen(e.arguments?.getString("id") ?: "", openRoute = go, onBack = back) }
         composable("reftext/{id}") { e -> RefTextScreen(e.arguments?.getString("id") ?: "", onBack = back) }

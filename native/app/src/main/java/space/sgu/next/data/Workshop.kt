@@ -394,6 +394,34 @@ object Processors {
             v.filter { it.startsWith("ref:") }.map { it.removePrefix("ref:") }, instruction, null, reasons)
     }
 
+    /** Session summary: the sub processor's model when it is an LLM, otherwise the main model. */
+    suspend fun summarize(previous: String?, turns: List<JsonObject>): String {
+        val sub = SettingsStore.root.o("processors").o("sub")
+        val subModel = if (!sub.b("disabled") && sub.s("strategy") != "jev") SettingsStore.model(sub.sOrNull("modelId")) else null
+        val m = subModel ?: SettingsStore.model(SettingsStore.root.o("processors").o("main").sOrNull("modelId"))
+            ?: throw ProviderError("요약에 쓸 모델이 없습니다. 설정 › 프로세서에서 모델을 지정하세요.")
+        val system = listOf(
+            "You keep a running summary of a session in which a user edits a RisuAI character card with an AI assistant.",
+            "Merge the previous summary (if any) with the new turns into ONE short summary.",
+            "Keep only what later turns need: the user's goals, decisions, preferences and constraints, and which fields were changed and how.",
+            "Do not copy field contents (the card itself is always sent separately). Drop small talk.",
+            "At most 10 short bullet points, under 1,200 characters. Write in the language the user writes in. Output only the summary.",
+        ).joinToString("\n")
+        val lines = turns.mapIndexed { i, t ->
+            val ed = t.arr("edits").takeIf { it.isNotEmpty() }?.joinToString(", ") { "${it.s("field")}:${it.s("op")}" } ?: "no edits"
+            "${i + 1}. User: ${t.s("command")}\n   Result: ${t.s("response").take(600)} [$ed]"
+        }
+        val user = (if (!previous.isNullOrBlank()) "Previous summary:\n$previous\n\n" else "") + "New turns:\n" + lines.joinToString("\n")
+        val params = JsonObject(m.o("params").orEmptyObj() + ("maxTokens" to JsonPrimitive(maxOf(2048, minOf(m.o("params").d("maxTokens")?.toInt() ?: 2048, 8192)))))
+        val req = Chat.buildRequest(m, listOf(Msg("system", system), Msg("user", user)), stream = false, params = params, cacheOff = true)
+        val t0 = System.currentTimeMillis()
+        val r = Chat.chatWithModel(m, req)
+        Logs.add("sub", m.s("modelId"), m.s("providerId"), Logs.messagesJson(req.messages), js(r.text), System.currentTimeMillis() - t0, r.usage)
+        val text = r.text.trim()
+        if (text.isEmpty()) throw ProviderError("요약 응답이 비어 있습니다.")
+        return text
+    }
+
     data class MainOut(val message: String, val edits: List<JsonObject>, val raw: String, val usage: Usage?, val model: JsonObject, val prompt: Assembled)
 
     suspend fun runMain(doc: JsonObject, data: JsonObject, command: String, access: Access, instruction: Boolean, cb: Stream, onRestart: () -> Unit): MainOut {
@@ -405,7 +433,7 @@ object Processors {
             val refs = References.loadForPrompt(doc, access.viewRefs, Chat.effectiveVision(m)).toMutableList()
             if (web && !native) refs.add(RefText("Web search results", null, "text", WebSearch.context(command)))
             val prompt = Prompt.assemble(Prompt.Input(data, PromptBlocks.blocksFor(doc), access.viewFields, access.editFields, command, refs,
-                doc.o("session").arr("turns"), instruction, m.o("params").d("maxContext")?.toInt() ?: 150000))
+                Workshop.historyTurns(doc), instruction, m.o("params").d("maxContext")?.toInt() ?: 150000, summary = Workshop.summaryText(doc)))
             val req0 = Chat.buildRequest(m, prompt.messages, SguData.MAIN_OUTPUT_SCHEMA, webSearch = native)
             val req = req0.copy(cache = req0.cache?.copy(key = doc.s("id").ifBlank { null }))
             val t0 = System.currentTimeMillis()
@@ -438,7 +466,7 @@ object Processors {
         val perms = doc.o("permissions").orEmptyObj()
         val view = WFields.all.filter { it.viewable && Perms.view(perms.o(it.id)) == 3 }.map { it.id }
         return Prompt.assemble(Prompt.Input(data, PromptBlocks.blocksFor(doc), view, emptyList(), command.ifBlank { "(명령)" }, emptyList(),
-            doc.o("session").arr("turns"), true, Processors.mainModels(doc).first?.o("params")?.d("maxContext")?.toInt()))
+            Workshop.historyTurns(doc), true, Processors.mainModels(doc).first?.o("params")?.d("maxContext")?.toInt(), summary = Workshop.summaryText(doc)))
     }
 }
 
@@ -604,6 +632,7 @@ object Workshop {
                 ))
                 if (res.rejected.isNotEmpty()) Logs.add("error", error = "거부된 편집 ${res.rejected.size}건: " + res.rejected.joinToString(", ") { "${it.first.s("field")}/${it.first.s("op")} (${it.second})" })
                 setJob(cid) { it.copy(phase = "done") }
+                maybeSummarize(cid)
             } catch (e: Throwable) {
                 val cancelled = e is CancellationException
                 val msg = if (cancelled) "취소됨" else e.message ?: e.toString()
@@ -614,6 +643,59 @@ object Workshop {
             } finally {
                 running.remove(cid); approvals.remove(cid)
             }
+        }
+    }
+
+    // ---------- 세션 요약 (SGU Next) ----------
+    // Done turns that fell out of the recent window are folded into a short running summary (session.summary =
+    // {text, covered:[turnIds], at}); the history block then sends the summary + the recent turns.
+
+    val summarizing = androidx.compose.runtime.mutableStateMapOf<String, Boolean>()
+    private fun summarySettings() = SettingsStore.root.o("sessionSummary").orEmptyObj()
+    fun summaryEnabled() = summarySettings().b("enabled", true)
+    fun summaryEvery() = (summarySettings().d("everyTurns")?.toInt() ?: 6).coerceIn(2, 50)
+    fun summaryKeep() = (summarySettings().d("keepRecent")?.toInt() ?: 6).coerceIn(1, 50)
+
+    fun summary(doc: JsonObject): JsonObject? = doc.o("session").o("summary")
+    fun summaryText(doc: JsonObject): String? = summary(doc)?.s("text")?.takeIf { it.isNotBlank() }
+    private fun covered(doc: JsonObject) = (summary(doc)?.get("covered") as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.content }?.toSet() ?: emptySet()
+    fun historyTurns(doc: JsonObject): List<JsonObject> { val c = covered(doc); return doc.o("session").arr("turns").filter { it.s("id") !in c } }
+    private fun foldable(doc: JsonObject, keep: Int) = historyTurns(doc).filter { it.s("status") == "done" && !it.b("noResponse") }.dropLast(keep)
+
+    private fun setSummary(cid: String, sum: JsonObject?) = updateDoc(cid) { d ->
+        val sess = d.o("session").orEmptyObj()
+        JsonObject(d + ("session" to if (sum == null) JsonObject(sess - "summary") else JsonObject(sess + ("summary" to sum))))
+    }
+
+    fun setSummaryText(cid: String, text: String) {
+        val cur = summary(doc(cid))
+        if (text.isBlank() && cur == null) return
+        setSummary(cid, buildJsonObject { put("text", text.trim()); put("covered", cur?.get("covered") ?: JsonArray(emptyList())); put("at", System.currentTimeMillis()); put("edited", true) })
+    }
+
+    /** Forget the summary: every turn goes back to the normal history. */
+    fun clearSummary(cid: String) = setSummary(cid, null)
+
+    private fun maybeSummarize(cid: String) {
+        if (!summaryEnabled() || summarizing[cid] == true) return
+        if (foldable(doc(cid), summaryKeep()).size >= summaryEvery()) summarizeNow(cid)
+    }
+
+    /** Folds every done turn except the recent ones into the summary (also the "지금 요약" button). */
+    fun summarizeNow(cid: String, keep: Int = summaryKeep()) {
+        if (summarizing[cid] == true) return
+        val turns = foldable(doc(cid), keep)
+        if (turns.isEmpty()) { toast("요약할 이전 턴이 없어요"); return }
+        summarizing[cid] = true
+        scope.launch {
+            try {
+                val text = Processors.summarize(summaryText(doc(cid)), turns)
+                val ids = covered(doc(cid)) + turns.map { it.s("id") }
+                setSummary(cid, buildJsonObject { put("text", text.trim()); put("covered", JsonArray(ids.map { JsonPrimitive(it) })); put("at", System.currentTimeMillis()) })
+            } catch (e: CancellationException) { throw e } catch (e: Throwable) {
+                Logs.add("error", error = "세션 요약 실패: ${e.message}")
+                toast("세션 요약에 실패했어요 · 요청 로그 확인")
+            } finally { summarizing.remove(cid) }
         }
     }
 

@@ -743,7 +743,8 @@ object Prompt {
     }
 
     class Input(val data: JsonObject, val blocks: List<JsonObject>, val viewFields: List<String>, val editFields: List<String>, val command: String,
-                val references: List<RefText>, val turns: List<JsonObject>, val instruction: Boolean, val maxContext: Int?, val images: List<Part> = emptyList())
+                val references: List<RefText>, val turns: List<JsonObject>, val instruction: Boolean, val maxContext: Int?, val images: List<Part> = emptyList(),
+                val summary: String? = null)
 
     fun assemble(e: Input): Assembled {
         var t = build(e, Int.MAX_VALUE)
@@ -760,12 +761,16 @@ object Prompt {
         val done = e.turns.filter { it.s("status") == "done" }
         val take = minOf(if (limit > 0) limit else Int.MAX_VALUE, cap)
         val list = if (take == Int.MAX_VALUE) done else if (take <= 0) emptyList() else done.takeLast(take)
-        if (list.isEmpty()) return ""
+        val sum = e.summary?.trim().orEmpty()
+        if (list.isEmpty() && sum.isEmpty()) return ""
         val lines = list.mapIndexed { i, t ->
             val ed = t.arr("edits").takeIf { it.isNotEmpty() }?.joinToString(", ") { "${it.s("field")}:${it.s("op")}" } ?: "no edits"
             "${i + 1}. User: ${t.s("command")}\n   Result: ${t.s("response").take(300)} [$ed]"
         }
-        return PromptBlocks.applySlot(block.s("text"), lines.joinToString("\n"))
+        // Session summary (SGU Next): earlier turns folded into a short summary, then the recent turns as before.
+        val body = if (sum.isEmpty()) lines.joinToString("\n")
+            else "Summary of earlier turns in this session:\n$sum" + if (lines.isNotEmpty()) "\n\nRecent turns:\n" + lines.joinToString("\n") else ""
+        return PromptBlocks.applySlot(block.s("text"), body)
     }
 
     private fun build(e: Input, cap: Int): Assembled {

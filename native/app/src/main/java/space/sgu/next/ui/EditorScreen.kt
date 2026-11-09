@@ -134,6 +134,7 @@ fun EditorScreen(characterId: String, onBack: (() -> Unit)?, openField: (String)
                         DropdownMenu(expanded = menu, onDismissRequest = { menu = false }, containerColor = Sgu.Card, shape = RoundedCornerShape(16.dp)) {
                             DropdownMenuItem(text = { Text("새로운 세션 추가") }, enabled = !busy, onClick = { menu = false; newSession = true })
                             DropdownMenuItem(text = { Text("세션 이동") }, onClick = { menu = false; sessions = true })
+                            DropdownMenuItem(text = { Text("세션 요약하기") }, enabled = !busy && Workshop.summarizing[characterId] != true, onClick = { menu = false; Workshop.summarizeNow(characterId) })
                             DropdownMenuItem(text = { Text("복제") }, onClick = {
                                 menu = false
                                 val nid = CharacterStore.duplicate(characterId)

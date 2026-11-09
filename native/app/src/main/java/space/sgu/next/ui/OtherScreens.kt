@@ -25,6 +25,7 @@ import androidx.compose.material.icons.outlined.Language
 import androidx.compose.material.icons.outlined.Memory
 import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.Shield
+import androidx.compose.material.icons.outlined.Summarize
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.SmartToy
 import androidx.compose.material.icons.outlined.Tune
@@ -81,13 +82,14 @@ fun SettingsScreen(open: (String) -> Unit) {
             item { GroupRow(1, 3, "프로바이더", subtitle = SettingsStore.providers.size.let { if (it == 0) "없음 · 눌러서 추가" else "${it}개 · " + SettingsStore.providers.joinToString(", ") { p -> p.s("name") } }, icon = Icons.Outlined.Key, onClick = { open("providers") }) }
             item { GroupRow(2, 3, "모델", subtitle = "등록된 모델 ${SettingsStore.models.size}개", icon = Icons.Outlined.Memory, onClick = { open("models") }) }
             item { SectionLabel("권한 · 프롬프트") }
-            item { GroupRow(0, 3, "새 캐릭터 기본 권한", subtitle = "필드별 열람/편집 기본 등급", icon = Icons.Outlined.Shield, onClick = { open("permdefaults") }) }
-            item { GroupRow(1, 3, "항목 설명", subtitle = "서브 프로세서가 판단할 때 보는 항목별 설명", icon = Icons.Outlined.Description, onClick = { open("fielddescs") }) }
+            item { GroupRow(0, 4, "새 캐릭터 기본 권한", subtitle = "필드별 열람/편집 기본 등급", icon = Icons.Outlined.Shield, onClick = { open("permdefaults") }) }
+            item { GroupRow(1, 4, "항목 설명", subtitle = "서브 프로세서가 판단할 때 보는 항목별 설명", icon = Icons.Outlined.Description, onClick = { open("fielddescs") }) }
             item {
                 val presets = SettingsStore.root.arr("promptPresets")
                 val active = presets.firstOrNull { it.s("id") == SettingsStore.root.s("activePromptPresetId") }?.s("name") ?: "-"
-                GroupRow(2, 3, "프롬프트 프리셋", subtitle = "${presets.size}개 프리셋 · 기본값: $active", icon = Icons.Outlined.SmartToy, onClick = { open("promptpresets") })
+                GroupRow(2, 4, "프롬프트 프리셋", subtitle = "${presets.size}개 프리셋 · 기본값: $active", icon = Icons.Outlined.SmartToy, onClick = { open("promptpresets") })
             }
+            item { GroupRow(3, 4, "세션 요약", subtitle = if (space.sgu.next.data.Workshop.summaryEnabled()) "자동 요약 켜짐 · 최근 ${space.sgu.next.data.Workshop.summaryKeep()}턴 원문" else "자동 요약 꺼짐", icon = Icons.Outlined.Summarize, onClick = { open("sessionsummary") }) }
             item { SectionLabel("화면 · 저장") }
             item { GroupRow(0, 3, "세이프 모드", subtitle = "모든 이미지를 썸네일로 표시", trailing = { SguSwitch(AppState.safeMode) { AppState.safeMode = it } }) }
             item { GroupRow(1, 3, "자동 압축", subtitle = "내보낼 때 이미지를 WebP 80%로 압축", trailing = { SguSwitch(AppState.autoCompress) { AppState.autoCompress = it } }) }
