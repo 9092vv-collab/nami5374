@@ -513,15 +513,33 @@ private fun BlockRow(b: JsonObject, checked: Boolean, enabled: Boolean, onToggle
 /** Block / folder options: name, type, keep, move up/down, folder, delete. */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun BlockDialog(cid: String, charId: String, b: JsonObject, folders: List<JsonObject>, onDismiss: () -> Unit) {
-    val id = b.s("id")
+private fun BlockDialog(cid: String, charId: String, b0: JsonObject, folders: List<JsonObject>, onDismiss: () -> Unit) {
+    val id = b0.s("id")
+    // 저장소의 최신 블록을 읽어서 고른 값(종류·폴더·보존)이 바로 보이게
+    val b = remember(ImageGenStore.version) { ImageGenStore.character(ImageGenStore.load(cid), charId)?.arr("blocks")?.firstOrNull { it.s("id") == id } } ?: b0
     val isFolder = b.s("type") == "folder"
     var name by remember(id) { mutableStateOf(b.s("name")) }
     fun patch(vararg pairs: Pair<String, kotlinx.serialization.json.JsonElement>) =
         ImageGenStore.patchBlocks(cid, charId) { l -> val i = l.indexOfFirst { it.s("id") == id }; if (i >= 0) l[i] = l[i].with(*pairs) }
+    // 같은 줄(같은 폴더 안 / 폴더끼리)에서만 한 칸 위·아래로
+    fun groupOf(x: JsonObject, l: List<JsonObject>): String {
+        if (x.s("type") == "folder") return "#folders"
+        val f = x.sOrNull("folderId")
+        return if (f != null && l.any { it.s("id") == f && it.s("type") == "folder" }) f else "#loose"
+    }
     fun move(delta: Int) = ImageGenStore.patchBlocks(cid, charId) { l ->
-        val i = l.indexOfFirst { it.s("id") == id }; val j = i + delta
-        if (i >= 0 && j in l.indices) { val t = l[i]; l[i] = l[j]; l[j] = t }
+        val i = l.indexOfFirst { it.s("id") == id }; if (i < 0) return@patchBlocks
+        val gname = groupOf(l[i], l)
+        var j = i + delta
+        while (j in l.indices && groupOf(l[j], l) != gname) j += delta
+        if (j in l.indices) { val t = l[i]; l[i] = l[j]; l[j] = t }
+    }
+    // 폴더로 옮기면 그 폴더의 맨 뒤로
+    fun moveToFolder(folderId: String?) = ImageGenStore.patchBlocks(cid, charId) { l ->
+        val i = l.indexOfFirst { it.s("id") == id }; if (i < 0) return@patchBlocks
+        val item = l.removeAt(i).let { if (folderId == null) JsonObject(it - "folderId") else it.with("folderId" to JsonPrimitive(folderId)) }
+        val last = l.indexOfLast { if (folderId == null) it.s("type") != "folder" && it.sOrNull("folderId") == null else it.sOrNull("folderId") == folderId || it.s("id") == folderId }
+        l.add(if (last >= 0) last + 1 else l.size, item)
     }
     AlertDialog(
         onDismissRequest = { patch("name" to JsonPrimitive(name)); onDismiss() },
@@ -542,11 +560,12 @@ private fun BlockDialog(cid: String, charId: String, b: JsonObject, folders: Lis
                         }
                         SguSwitch(b.b("keep")) { patch("keep" to JsonPrimitive(it)) }
                     }
+                    if (folders.isEmpty()) Hint("폴더로 옮기려면 아래 '폴더 추가'로 폴더를 먼저 만들어 주세요.")
                     if (folders.isNotEmpty()) {
-                        FieldLabel("폴더")
+                        FieldLabel("폴더로 이동")
                         FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            PillChip("폴더 없음", b.sOrNull("folderId") == null) { patch("folderId" to kotlinx.serialization.json.JsonNull) }
-                            folders.forEach { f -> PillChip(f.s("name").ifBlank { "폴더" }, b.sOrNull("folderId") == f.s("id")) { patch("folderId" to JsonPrimitive(f.s("id"))) } }
+                            PillChip("폴더 없음", b.sOrNull("folderId") == null) { moveToFolder(null) }
+                            folders.forEach { f -> PillChip(f.s("name").ifBlank { "폴더" }, b.sOrNull("folderId") == f.s("id"), Icons.Outlined.Folder) { moveToFolder(f.s("id")) } }
                         }
                     }
                 }
