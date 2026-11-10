@@ -225,7 +225,7 @@ fun WorkshopPage(cid: String, openFieldTab: (String) -> Unit, openRoute: (String
                 else Icon(Icons.Filled.ArrowUpward, "보내기", tint = if (input.isBlank()) Sgu.Sub else Color.White)
             }
         }
-        ModelBar(cid, doc) { modelSheet = true }
+        Spacer(Modifier.height(8.dp))
     }
 
     if (job?.phase == "awaiting") ElevationDialog(job.access?.elevation ?: emptyList(), job.access?.denied ?: emptyList(), job.decision?.task) { Workshop.approve(cid, it) }

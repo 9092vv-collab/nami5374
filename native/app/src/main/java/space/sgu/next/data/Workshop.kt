@@ -285,10 +285,10 @@ object Processors {
     }
     fun isSubOff(): Boolean = SettingsStore.root.o("processors").o("sub").b("disabled") || !subAssigned()
 
-    fun mainModelId(doc: JsonObject): String? {
-        val id = doc.sOrNull("mainModelId")
-        return if (id != null && SettingsStore.models.any { it.s("id") == id }) id else SettingsStore.root.o("processors").o("main").sOrNull("modelId")
-    }
+    /** 작업실 아래 모델 줄을 없앴으므로(사용자 요청) 항상 설정 › 프로세서 배정의 메인 모델을 쓴다. 예전에 캐릭터별로 고른 값은 무시. */
+    @Suppress("UNUSED_PARAMETER")
+    fun mainModelId(doc: JsonObject): String? = SettingsStore.root.o("processors").o("main").sOrNull("modelId")
+
     fun mainModels(doc: JsonObject): Pair<JsonObject?, JsonObject?> =
         SettingsStore.model(mainModelId(doc)) to SettingsStore.model(SettingsStore.root.o("processors").o("main").sOrNull("fallbackModelId"))
 
