@@ -1,6 +1,11 @@
 package space.sgu.next.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.material.icons.outlined.AutoAwesome
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -99,7 +104,7 @@ fun RisuTogglePreviewDialog(p: JsonObject, onDismiss: () -> Unit) {
                         type == "cot" && values[COT_KEY] != "1" -> hidden++
                         type in RisuPreset.TEXT_TYPES -> {
                             val r = show(it.s("text"))
-                            if (r.isBlank()) hidden++ else PreviewCard(name, RisuPreset.roleLabel(it.s("role").ifBlank { "system" }), r)
+                            if (r.isBlank()) hidden++ else PreviewCard(name, it.s("role").ifBlank { "system" }, r)
                         }
                         type in RisuPreset.FORMAT_TYPES && it.s("innerFormat").isNotBlank() -> {
                             val r = show(it.s("innerFormat"))
@@ -109,7 +114,7 @@ fun RisuTogglePreviewDialog(p: JsonObject, onDismiss: () -> Unit) {
                     }
                 }
                 if (hidden > 0) Hint("꺼진 토글 때문에 비게 된 블록 ${hidden}개는 숨겼어요.")
-                Hint("{{char}}·{{user}} 같은 나머지 명령어는 그대로 보여줘요. 회색 줄은 캐릭터 설명·채팅처럼 RisuAI가 채워 넣는 자리예요.")
+                Hint("역할별로 시스템은 흰 카드, 유저는 오른쪽 말풍선, 봇(프리필)은 주황빛 카드로 보여줘요. 탈옥 블록은 위 '탈옥 프롬프트 사용'을 켜야 나와요. {{char}}·{{user}} 같은 나머지 명령어는 그대로 보여줘요. 회색 줄은 캐릭터 설명·채팅처럼 RisuAI가 채워 넣는 자리예요.")
             }
         }
     }
@@ -178,16 +183,34 @@ private fun CheckRow(label: String, sub: String?, checked: Boolean, onChange: (B
     }
 }
 
+/** 역할별 모양: 시스템 = 흰 카드, 유저 = 오른쪽 회색 말풍선, 봇(어시스턴트) = 주황빛 카드 + ✦. */
 @Composable
 private fun PreviewCard(title: String, role: String?, text: String) {
-    LineCard(Modifier.padding(vertical = 4.dp)) {
-        Column {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(title, style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.SemiBold), modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                if (role != null) Badge(role, Sgu.Bubble, Sgu.Sub)
+    val body = @Composable { SelectionContainer { Text(text, style = MaterialTheme.typography.bodySmall, color = Sgu.Ink) } }
+    when (role) {
+        "user" -> Column(Modifier.fillMaxWidth().padding(vertical = 6.dp), horizontalAlignment = Alignment.End) {
+            Text("유저 · $title", style = MaterialTheme.typography.labelMedium, color = Sgu.Sub, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(end = 8.dp, bottom = 4.dp))
+            Box(Modifier.fillMaxWidth(0.88f).clip(RoundedCornerShape(22.dp)).background(Sgu.Bubble).padding(horizontal = 16.dp, vertical = 12.dp)) { body() }
+        }
+        "bot", "assistant" -> Column(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
+            Row(Modifier.padding(start = 4.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Outlined.AutoAwesome, null, tint = Sgu.Accent, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("봇 · $title", style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold), color = Sgu.Accent,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
-            Spacer(Modifier.height(6.dp))
-            SelectionContainer { Text(text, style = MaterialTheme.typography.bodySmall, color = Sgu.Ink) }
+            Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(22.dp)).background(Sgu.AccentSoft).padding(horizontal = 16.dp, vertical = 12.dp)) { body() }
+        }
+        else -> LineCard(Modifier.padding(vertical = 4.dp)) {
+            Column {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(title, style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.SemiBold), modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    if (role != null) Badge(RisuPreset.roleLabel(role), Sgu.Bubble, Sgu.Sub)
+                }
+                Spacer(Modifier.height(6.dp))
+                body()
+            }
         }
     }
 }
