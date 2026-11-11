@@ -514,6 +514,25 @@ fun PromptPresetScreen(presetId: String, onBack: () -> Unit) {
         onDismissRequest = { adding = false }, title = { Text("블록 추가") }, containerColor = Sgu.Card,
         text = {
             Column(Modifier.verticalScroll(rememberScrollState())) {
+                if (linked) {
+                    val RP = space.sgu.next.data.RisuPreset
+                    FieldLabel("RisuAI 블록 (원본 파일에 저장됨)")
+                    RP.TYPES.forEach { (type, label) ->
+                        Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable {
+                            val item = RP.retype(JsonObject(emptyMap()), "", type, "normal").let { JsonObject(it - "name") }
+                            val isText = type in RP.TEXT_TYPES
+                            val nb = JsonObject(mapOf("id" to JsonPrimitive(Scripts.newId("blk")), "type" to JsonPrimitive(if (isText) "text" else "risu"), "enabled" to JsonPrimitive(true),
+                                "role" to JsonPrimitive("system"), "name" to JsonPrimitive("Risu · $label"), "text" to JsonPrimitive(""), "risuItem" to item))
+                            // 다른 RisuAI 블록들 바로 뒤에 넣음 (SGU 고유 블록 앞)
+                            setBlocks { l -> val at = l.indexOfLast { it["risuItem"] != null }; l.add(if (at >= 0) at + 1 else 0, nb) }
+                            adding = false; editing = nb
+                        }.padding(10.dp)) {
+                            Text(label, style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.SemiBold))
+                            Text(if (type in RP.TEXT_TYPES) "작업실 프롬프트에도 들어가요." else "RisuAI 전용 칸 · 작업실 프롬프트에는 안 들어가요.", style = MaterialTheme.typography.bodySmall, color = Sgu.Sub)
+                        }
+                    }
+                    FieldLabel("SGU 작업실 블록 (원본 파일에는 저장 안 됨)")
+                }
                 PromptBlocks.TYPE_LABELS.forEach { (type, label) ->
                     Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable {
                         val nb = PromptBlocks.newBlock(type); setBlocks { it.add(nb) }; adding = false; editing = nb
