@@ -126,7 +126,6 @@ fun EditorScreen(characterId: String, onBack: (() -> Unit)?, openField: (String)
 
     // 작업실에서는 상단바·탭 줄을 항상 숨김 (탭 이동은 좌우로 밀어서). 봇 전체 검색 중엔 보임.
     val hideChrome = pager.currentPage == 5 && !BotSearch.open
-    }
 
     Scaffold(
         containerColor = Sgu.Bg,
