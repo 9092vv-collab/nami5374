@@ -74,12 +74,22 @@ object RisuPreset {
     }
 
     /** RisuAI 내보내기와 같은 .risup 바이트. 키 관련 칸은 원본처럼 비운다. */
-    fun encodeRisup(p0: JsonObject): ByteArray {
+    fun encodeRisup(p0: JsonObject, packed: Boolean = true): ByteArray {
         val p = scrub(p0)
         val inner = aes(Cipher.ENCRYPT_MODE, MsgPack.write(p))
         val outer = MsgPack.write(JsonObject(mapOf("presetVersion" to JsonPrimitive(2), "type" to JsonPrimitive("preset"), "preset" to bin(inner))))
         val gz = ByteArrayOutputStream().also { o -> GZIPOutputStream(o).use { it.write(outer) } }.toByteArray()
-        return rpack(gz, ENC)
+        return if (packed) rpack(gz, ENC) else gz
+    }
+
+    fun nameOf(c: Context, u: Uri): String = runCatching {
+        c.contentResolver.query(u, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use { if (it.moveToFirst()) it.getString(0) else null }
+    }.getOrNull() ?: u.lastPathSegment ?: "preset"
+
+    /** 연 파일과 같은 형식으로 (.json → JSON, .risupreset → 압축만, 그 밖은 .risup). */
+    fun encodeFor(fileName: String, p: JsonObject): ByteArray {
+        val n = fileName.lowercase()
+        return when { n.endsWith(".json") -> encodeJson(p); n.endsWith(".risupreset") -> encodeRisup(p, packed = false); else -> encodeRisup(p) }
     }
 
     private val pretty = kotlinx.serialization.json.Json { prettyPrint = true; prettyPrintIndent = "  " }

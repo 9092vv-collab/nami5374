@@ -508,6 +508,7 @@ fun PromptPresetScreen(presetId: String, onBack: () -> Unit) {
         onDelete = { setBlocks { l -> l.removeAll { it.s("id") == b.s("id") } }; editing = null }, onDismiss = { editing = null }) }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun BlockEditDialog(b: JsonObject, onSave: (JsonObject) -> Unit, onDelete: () -> Unit, onDismiss: () -> Unit) {
     var name by remember(b.s("id")) { mutableStateOf(b.s("name")) }
@@ -516,15 +517,25 @@ private fun BlockEditDialog(b: JsonObject, onSave: (JsonObject) -> Unit, onDelet
     var enabled by remember(b.s("id")) { mutableStateOf(b.b("enabled", true)) }
     var fmt by remember(b.s("id")) { mutableStateOf(b.s("fieldFormat").ifBlank { PromptBlocks.DEFAULT_FIELD_FORMAT }) }
     var limit by remember(b.s("id")) { mutableStateOf((b.d("historyLimit")?.toInt() ?: 6).toString()) }
-    val type = b.s("type")
+    var type by remember(b.s("id")) { mutableStateOf(b.s("type")) }
     AlertDialog(
         onDismissRequest = onDismiss, title = { Text("블록 편집") }, containerColor = Sgu.Card,
         text = {
             Column(Modifier.verticalScroll(rememberScrollState())) {
-                Text(PromptBlocks.TYPE_LABELS[type] ?: type, style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold), color = Sgu.Sub)
-                Text(PromptBlocks.TYPE_DESCRIPTIONS[type] ?: "", style = MaterialTheme.typography.bodySmall, color = Sgu.Sub)
                 FieldLabel("이름")
                 InputBox(name, { name = it })
+                FieldLabel("타입")
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    PromptBlocks.TYPE_LABELS.forEach { (k, label) -> PillChip(label, type == k) {
+                        if (type != k) {
+                            type = k
+                            // 내용이 들어가는 타입인데 자리 표시가 없으면 넣어 줌
+                            if (k in PromptBlocks.SLOT_TYPES && PromptBlocks.SLOT !in text) text = if (text.isBlank()) PromptBlocks.SLOT else text + "\n\n" + PromptBlocks.SLOT
+                            if (k == "command") role = "user"
+                        }
+                    } }
+                }
+                Text(PromptBlocks.TYPE_DESCRIPTIONS[type] ?: "", style = MaterialTheme.typography.bodySmall, color = Sgu.Sub, modifier = Modifier.padding(start = 6.dp, top = 6.dp))
                 if (type != "cachePoint") {
                     FieldLabel("역할")
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) { listOf("system", "user", "assistant").forEach { r -> PillChip(r, role == r) { role = r } } }
@@ -541,7 +552,7 @@ private fun BlockEditDialog(b: JsonObject, onSave: (JsonObject) -> Unit, onDelet
             }
         },
         confirmButton = { TextButton(onClick = {
-            var nb = JsonObject(b + mapOf("name" to JsonPrimitive(name), "role" to JsonPrimitive(role), "text" to JsonPrimitive(text), "enabled" to JsonPrimitive(enabled)))
+            var nb = JsonObject(b + mapOf("type" to JsonPrimitive(type), "name" to JsonPrimitive(name), "role" to JsonPrimitive(role), "text" to JsonPrimitive(text), "enabled" to JsonPrimitive(enabled)))
             if (type == "fieldData") nb = JsonObject(nb + ("fieldFormat" to JsonPrimitive(fmt)))
             if (type == "history") nb = JsonObject(nb + ("historyLimit" to JsonPrimitive(limit.toIntOrNull() ?: 0)))
             onSave(nb)

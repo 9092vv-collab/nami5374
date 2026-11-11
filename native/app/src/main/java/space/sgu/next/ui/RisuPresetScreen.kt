@@ -51,6 +51,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -62,6 +63,9 @@ object RisuPresetEditor {
     var preset by mutableStateOf<JsonObject?>(null)
     var fileName by mutableStateOf("")
     var dirty by mutableStateOf(false)
+    /** 연 원본 파일 (맨 위 '저장'이 여기에 덮어씀) */
+    var uri by mutableStateOf<android.net.Uri?>(null)
+    var sourceName by mutableStateOf("")
     fun set(p: JsonObject) { preset = p; dirty = true }
     fun setItems(list: List<JsonObject>) { preset?.let { set(JsonObject(it + ("promptTemplate" to JsonArray(list)))) } }
 }
@@ -84,13 +88,19 @@ fun RisuPresetScreen(onBack: () -> Unit) {
     var removing by remember { mutableStateOf<Int?>(null) }
     var msg by remember { mutableStateOf("") }
     var previewing by remember { mutableStateOf(false) }
+    var saveMsg by remember { mutableStateOf<Pair<Boolean?, String>>(null to "") }
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
     var retyping by remember { mutableStateOf<Int?>(null) }
     val saveRisup = rememberSaver("application/octet-stream")
     val saveJson = rememberSaver("application/json")
     val opener = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { u ->
         if (u == null) return@rememberLauncherForActivityResult
         runCatching { RisuPreset.read(ctx, u) }
-            .onSuccess { RisuPresetEditor.preset = it; RisuPresetEditor.fileName = it.s("name"); RisuPresetEditor.dirty = false; msg = "" }
+            .onSuccess {
+                RisuPresetEditor.preset = it; RisuPresetEditor.fileName = it.s("name"); RisuPresetEditor.dirty = false; msg = ""; saveMsg = null to ""
+                runCatching { ctx.contentResolver.takePersistableUriPermission(u, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION) }
+                RisuPresetEditor.uri = u; RisuPresetEditor.sourceName = RisuPreset.nameOf(ctx, u)
+            }
             .onFailure { msg = it.message ?: "열지 못했어요" }
     }
     val baseName = (p?.s("name") ?: "preset").replace(Regex("[\\\\/:*?\"<>|]+"), "_").ifBlank { "preset" }
@@ -102,6 +112,27 @@ fun RisuPresetScreen(onBack: () -> Unit) {
             Hint("RisuAI에서 내보낸 프롬프트 프리셋(.risup, .risupreset, .json)을 열어서 보고 고친 뒤, 다시 .risup으로 저장해 RisuAI에 넣을 수 있어요. SGU 작업실 프리셋으로 가져올 수도 있어요.")
             if (msg.isNotEmpty()) Text(msg, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 8.dp))
             return@Page
+        }
+        val src = RisuPresetEditor.uri
+        if (src != null) {
+            Spacer(Modifier.height(8.dp))
+            InkButton(if (RisuPresetEditor.dirty) "저장 · 원본 파일에 덮어쓰기" else "저장됨", enabled = RisuPresetEditor.dirty, modifier = Modifier.fillMaxWidth(), icon = Icons.Outlined.Save, onClick = {
+                val name = RisuPresetEditor.sourceName
+                scope.launch {
+                    runCatching {
+                        val bytes = RisuPreset.encodeFor(name, p)
+                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                            val r = ctx.contentResolver
+                            val out = runCatching { r.openOutputStream(src, "wt") }.getOrNull() ?: r.openOutputStream(src, "w")
+                            (out ?: error("파일을 열 수 없어요")).use { it.write(bytes) }
+                        }
+                    }.onSuccess { RisuPresetEditor.dirty = false; saveMsg = true to "'$name'에 덮어썼어요." }
+                        .onFailure { saveMsg = false to "덮어쓰지 못했어요 (${it.message}). 아래 '.risup으로 저장'으로 새 파일에 저장해 주세요." }
+                }
+            })
+            if (saveMsg.second.isNotEmpty()) Text(saveMsg.second, style = MaterialTheme.typography.bodySmall,
+                color = if (saveMsg.first == false) MaterialTheme.colorScheme.error else Sgu.Sub, modifier = Modifier.padding(start = 6.dp, top = 6.dp))
+            else Hint("원본: ${RisuPresetEditor.sourceName}")
         }
         FieldLabel("프리셋 이름")
         InputBox(p.s("name"), { RisuPresetEditor.set(JsonObject(p + ("name" to JsonPrimitive(it)))) })
