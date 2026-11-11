@@ -163,7 +163,8 @@ private fun ToggleList(list: List<RisuToggles.Toggle>, values: Map<String, Strin
 @Composable
 private fun ToggleItem(t: RisuToggles.Toggle, values: Map<String, String>, uses: (String) -> Int, onFind: (RisuToggles.Toggle) -> Unit, onSet: (String, String) -> Unit) {
     val n = uses(t.key)
-    val find: (@Composable () -> Unit)? = if (n > 0) @Composable { FindChip(n) { onFind(t) } } else null
+    val findChip: @Composable () -> Unit = { FindChip(n) { onFind(t) } }
+    val find: (@Composable () -> Unit)? = if (n > 0) findChip else null
     when (t.type) {
         "caption" -> Hint(t.label)
         "divider" -> Row(Modifier.fillMaxWidth().padding(vertical = 8.dp, horizontal = 6.dp), verticalAlignment = Alignment.CenterVertically) {
