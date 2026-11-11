@@ -28,6 +28,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.KeyboardArrowDown
 import androidx.compose.material.icons.outlined.KeyboardArrowUp
 import androidx.compose.material.icons.outlined.Search
+import androidx.compose.material.icons.outlined.Translate
 import kotlinx.serialization.json.JsonPrimitive
 import androidx.compose.material3.IconButton
 import androidx.compose.material.icons.outlined.Delete
@@ -302,10 +303,12 @@ private fun ToggleFindDialog(t: RisuToggles.Toggle, sources: List<FindSrc>, valu
                         options.forEachIndexed { i, o -> PillChip("$i · $o", pick == i) { pick = i } }
                     }
                 }
+                if (space.sgu.next.data.KoTranslate.status.isNotEmpty()) Hint(space.sgu.next.data.KoTranslate.status)
                 if (found.isEmpty()) Hint(if (pick != null) "이 선택지일 때 들어가는 구간이 없어요." else "이 토글로 감싼 구간이 없어요.")
                 found.forEach { (src, uses) ->
                     SectionLabel(src.name)
                     uses.forEach { u ->
+                        var ko by remember(src.ref, u.start, u.segment) { mutableStateOf(false) }
                         LineCard(Modifier.padding(vertical = 4.dp)) {
                             Column {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -315,12 +318,13 @@ private fun ToggleFindDialog(t: RisuToggles.Toggle, sources: List<FindSrc>, valu
                                         u.active == false -> Badge("지금 빠짐", Sgu.Bubble, Sgu.Sub)
                                     }
                                     Spacer(Modifier.weight(1f))
+                                    IconButton(onClick = { ko = !ko }, modifier = Modifier.size(36.dp)) { Icon(Icons.Outlined.Translate, "한글로 보기", tint = if (ko) Sgu.Accent else Sgu.Sub, modifier = Modifier.size(19.dp)) }
                                     IconButton(onClick = { editing = src to u }, modifier = Modifier.size(36.dp)) { Icon(Icons.Outlined.Edit, "수정", tint = Sgu.Sub, modifier = Modifier.size(19.dp)) }
                                     IconButton(onClick = { removing = src to u }, modifier = Modifier.size(36.dp)) { Icon(Icons.Outlined.Delete, "삭제", tint = Sgu.Sub, modifier = Modifier.size(19.dp)) }
                                 }
                                 Spacer(Modifier.height(6.dp))
                                 SelectionContainer {
-                                    Text(u.segment, style = MaterialTheme.typography.bodySmall.copy(fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace),
+                                    Text(koText(u.segment, ko), style = MaterialTheme.typography.bodySmall.copy(fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace),
                                         color = if (pick == null && u.active == false) Sgu.Sub else Sgu.Ink)
                                 }
                             }
