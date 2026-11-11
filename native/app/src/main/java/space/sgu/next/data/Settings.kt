@@ -108,14 +108,17 @@ object SettingsStore {
                 if (p.s("format") == "novelai-image" && (url.isBlank() || "text.novelai.net" in url)) p.with("baseUrl" to JsonPrimitive(Presets.NAI_IMAGE_URL)) else p
             })
         }
-        // 예전 기본 "JB" 블록(글을 고치지 않은 것)은 모든 프리셋에서 뺌 (사용자 요청, 0.9.2)
-        (merged["promptPresets"] as? JsonArray)?.let { list ->
-            merged["promptPresets"] = JsonArray(list.map { e ->
-                val p = e as? JsonObject ?: return@map e
-                val blocks = p.arr("blocks")
-                val kept = blocks.filterNot { it.s("type") == "text" && it.s("name") == "JB" && it.s("text") == PromptBlocks.JB_TEXT && it["risuItem"] == null }
-                if (kept.size == blocks.size) p else JsonObject(p + ("blocks" to JsonArray(kept)))
-            })
+        // 0.9.2가 기본 "JB" 블록을 지웠던 것을 한 번 되돌림: SGU에서 만든 프리셋(RisuAI 블록 없음)에 JB라는 블록이 없으면 맨 위에 다시 넣음.
+        if (!t.b("jbRestored093")) {
+            (merged["promptPresets"] as? JsonArray)?.let { list ->
+                merged["promptPresets"] = JsonArray(list.map { e ->
+                    val p = e as? JsonObject ?: return@map e
+                    val blocks = p.arr("blocks")
+                    if (blocks.isEmpty() || blocks.any { it["risuItem"] != null } || blocks.any { it.s("name") == "JB" }) p
+                    else JsonObject(p + ("blocks" to JsonArray(listOf(PromptBlocks.defaults().first { it.s("name") == "JB" }) + blocks)))
+                })
+            }
+            merged["jbRestored093"] = JsonPrimitive(true)
         }
         return JsonObject(merged)
     }

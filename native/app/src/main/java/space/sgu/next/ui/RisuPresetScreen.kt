@@ -149,14 +149,13 @@ fun RisuPresetScreen(onBack: () -> Unit) {
         LineButton(if (toggleCount > 0) "토글 미리보기 · 토글 ${toggleCount}개" else "적용된 프롬프트 미리보기", onClick = { previewing = true },
             modifier = Modifier.fillMaxWidth(), icon = Icons.Outlined.Visibility)
 
-        // 옛 형식 프리셋의 메인 · 탈옥 · 글로벌 노트
-        listOf("mainPrompt" to "메인 프롬프트 (옛 형식)", "jailbreak" to "탈옥 프롬프트 (옛 형식)", "globalNote" to "글로벌 노트 (옛 형식)").forEach { (k, label) ->
-            if (p.s(k).isNotBlank()) {
-                FieldLabel(label)
-                PromptCard(label, p.s(k)) { editing = -1 - listOf("mainPrompt", "jailbreak", "globalNote").indexOf(k) }
-            }
+        // RisuAI '프롬프트' 탭의 메인 프롬프트 · 탈옥 프롬프트 · 글로벌 노트 (비어 있어도 항상 보이고 고칠 수 있음)
+        SectionLabel("메인 · 탈옥 · 글로벌 노트")
+        if (RisuPreset.items(p).isNotEmpty()) Hint("이 프리셋엔 프롬프트 템플릿이 있어서, RisuAI는 아래 템플릿을 쓰고 이 세 칸은 쓰지 않아요. 파일에는 그대로 저장돼요.")
+        listOf("mainPrompt" to "메인 프롬프트", "jailbreak" to "탈옥 프롬프트", "globalNote" to "글로벌 노트").forEach { (k, label) ->
+            FieldLabel(label)
+            PromptCard(label, p.s(k)) { editing = -1 - listOf("mainPrompt", "jailbreak", "globalNote").indexOf(k) }
         }
-
         val items = RisuPreset.items(p)
         SectionLabel("프롬프트 템플릿 ${items.size}개")
         KoToggle(Modifier.padding(bottom = 6.dp))
@@ -237,7 +236,7 @@ fun RisuPresetScreen(onBack: () -> Unit) {
         val item = if (idx >= 0) items.getOrNull(idx) else null
         val key = legacyKey ?: item?.let { RisuPreset.textKey(it) }
         if (p == null || key == null) { editing = null; return@let }
-        val title = legacyKey?.let { "옛 형식 · $it" } ?: (item!!.s("name").ifBlank { RisuPreset.typeLabel(item) })
+        val title = legacyKey?.let { mapOf("mainPrompt" to "메인 프롬프트", "jailbreak" to "탈옥 프롬프트", "globalNote" to "글로벌 노트")[it] } ?: (item!!.s("name").ifBlank { RisuPreset.typeLabel(item) })
         TextEditDialog(title, if (legacyKey != null) p.s(legacyKey) else item!!.s(key), onDismiss = { editing = null }) { v ->
             if (legacyKey != null) RisuPresetEditor.set(JsonObject(p + (legacyKey to JsonPrimitive(v))))
             else RisuPresetEditor.setItems(items.toMutableList().apply { this[idx] = JsonObject(item!! + (key to JsonPrimitive(v))) })
