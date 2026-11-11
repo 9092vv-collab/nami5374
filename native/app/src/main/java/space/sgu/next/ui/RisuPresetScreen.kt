@@ -73,7 +73,10 @@ object RisuPresetEditor {
 /** RisuAI 프리셋을 SGU 작업실 프리셋으로 추가. Returns a short result message. */
 fun importRisuToSgu(p: JsonObject, uri: android.net.Uri? = null, fileName: String = ""): String {
     val (blocks, slots) = RisuPreset.toSguBlocks(p)
-    val name = "Risu · " + p.s("name").ifBlank { "가져온 프리셋" }
+    val base = "Risu · " + p.s("name").ifBlank { "가져온 프리셋" }
+    // 같은 이름이 이미 있으면 (2), (3)… 을 붙여 구분
+    val taken = space.sgu.next.data.PromptBlocks.presets().map { it.s("name") }.toSet()
+    val name = if (base !in taken) base else generateSequence(2) { it + 1 }.map { "$base ($it)" }.first { it !in taken }
     val linked = uri != null && RisuPreset.items(p).isNotEmpty()
     addPreset(name, blocks, if (linked) mapOf("risuUri" to JsonPrimitive(uri.toString()), "risuFile" to JsonPrimitive(fileName)) else emptyMap())
     val texts = blocks.count { it.s("type") == "text" && (it["risuItem"] != null || it.s("name") in setOf("메인 프롬프트", "탈옥 프롬프트", "글로벌 노트")) }

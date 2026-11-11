@@ -404,6 +404,8 @@ fun PromptPresetsScreen(openRoute: (String) -> Unit, onBack: () -> Unit) {
                 Column(Modifier.weight(1f)) {
                     Text(p.s("name"), style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.SemiBold))
                     Text("블록 ${p.arr("blocks").size}개" + if (id == active) " · 기본" else "", style = MaterialTheme.typography.bodySmall, color = Sgu.Sub)
+                    if (p.s("risuUri").isNotBlank()) Text("연결: ${p.s("risuFile")} · ${java.text.SimpleDateFormat("M월 d일 HH:mm", java.util.Locale.KOREA).format(java.util.Date(p.d("createdAt")?.toLong() ?: 0L))} 가져옴" +
+                        if (p.b("risuDirty")) " · 저장 안 한 변경 있음" else "", style = MaterialTheme.typography.bodySmall, color = if (p.b("risuDirty")) Sgu.Accent else Sgu.Sub)
                 }
                 IconButton(onClick = { SettingsStore.update { it["activePromptPresetId"] = JsonPrimitive(id) } }) {
                     Icon(if (id == active) Icons.Filled.Star else Icons.Outlined.StarBorder, "기본 프리셋", tint = if (id == active) Sgu.Accent else Sgu.Sub)
@@ -470,26 +472,54 @@ fun PromptPresetScreen(presetId: String, onBack: () -> Unit) {
     val scope = androidx.compose.runtime.rememberCoroutineScope()
     val linked = p.s("risuUri").isNotBlank()
     var sync by remember { mutableStateOf<Pair<Boolean?, String>>(null to "") }
-    fun setBlocks(f: (MutableList<JsonObject>) -> Unit) {
-        editPresets { l ->
-            val i = l.indexOfFirst { it.s("id") == presetId }
-            if (i >= 0) { val b = l[i].arr("blocks").toMutableList(); f(b); l[i] = JsonObject(l[i] + ("blocks" to JsonArray(b))) }
+    var reloading by remember { mutableStateOf(false) }
+    val dirty = p.b("risuDirty")
+    // 블록을 고쳐도 원본 파일은 건드리지 않음. '원본 파일에 저장'을 눌러야 덮어씀.
+    fun setBlocks(f: (MutableList<JsonObject>) -> Unit) = editPresets { l ->
+        val i = l.indexOfFirst { it.s("id") == presetId }
+        if (i >= 0) {
+            val b = l[i].arr("blocks").toMutableList(); f(b)
+            l[i] = JsonObject(l[i] + ("blocks" to JsonArray(b)) + if (l[i].s("risuUri").isNotBlank()) mapOf("risuDirty" to JsonPrimitive(true)) else emptyMap())
         }
-        // 원본 RisuAI 파일과 연결된 프리셋이면 바뀔 때마다 파일에도 저장
+    }
+    fun setDirty(v: Boolean) = editPresets { l -> val i = l.indexOfFirst { it.s("id") == presetId }; if (i >= 0) l[i] = JsonObject(l[i] + ("risuDirty" to JsonPrimitive(v))) }
+    fun saveToFile() {
         val now = PromptBlocks.presets().firstOrNull { it.s("id") == presetId } ?: return
-        if (now.s("risuUri").isBlank()) return
+        sync = null to "원본 파일에 저장하는 중…"
         scope.launch {
             runCatching { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { space.sgu.next.data.RisuPreset.syncBack(ctx, now) } }
                 .onSuccess { out ->
-                    sync = true to "원본 파일(${now.s("risuFile")})에 저장했어요."
+                    setDirty(false); sync = true to "원본 파일(${now.s("risuFile")})에 저장했어요."
                     if (RisuPresetEditor.uri?.toString() == now.s("risuUri")) { RisuPresetEditor.preset = out; RisuPresetEditor.dirty = false }
                 }
                 .onFailure { sync = false to "원본 파일에 저장하지 못했어요 (${it.message}). 파일이 옮겨졌거나 지워졌다면 다시 가져와 주세요." }
         }
     }
+    // 원본 파일을 다시 읽어 RisuAI 블록을 통째로 바꿈 (SGU 고유 블록은 그대로 뒤에 둠)
+    fun reloadFromFile() {
+        val now = PromptBlocks.presets().firstOrNull { it.s("id") == presetId } ?: return
+        scope.launch {
+            runCatching { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { space.sgu.next.data.RisuPreset.read(ctx, android.net.Uri.parse(now.s("risuUri"))) } }
+                .onSuccess { file ->
+                    val fresh = space.sgu.next.data.RisuPreset.toSguBlocks(file).first.filter { it["risuItem"] != null }
+                    editPresets { l ->
+                        val i = l.indexOfFirst { it.s("id") == presetId }
+                        if (i >= 0) l[i] = JsonObject(l[i] + mapOf("blocks" to JsonArray(fresh + l[i].arr("blocks").filter { it["risuItem"] == null }), "risuDirty" to JsonPrimitive(false)))
+                    }
+                    sync = true to "원본 파일에서 다시 불러왔어요 (RisuAI 블록 ${fresh.size}개)."
+                }
+                .onFailure { sync = false to "원본 파일을 읽지 못했어요 (${it.message})." }
+        }
+    }
     Page("블록 편집", p.s("name"), onBack) {
-        if (linked) Text(sync.second.ifEmpty { "RisuAI 파일 ${p.s("risuFile")}과 연결됨 · 블록을 고치면 원본 파일에도 저장돼요." }, style = MaterialTheme.typography.bodySmall,
-            color = if (sync.first == false) Sgu.Danger else Sgu.Accent, modifier = Modifier.padding(start = 6.dp, bottom = 6.dp))
+        if (linked) {
+            Text(sync.second.ifEmpty { "RisuAI 파일 ${p.s("risuFile")}과 연결됨 · 저장을 눌러야 원본 파일이 바뀌어요." }, style = MaterialTheme.typography.bodySmall,
+                color = if (sync.first == false) Sgu.Danger else Sgu.Sub, modifier = Modifier.padding(start = 6.dp, bottom = 6.dp))
+            InkButton(if (dirty) "원본 파일에 저장" else "원본 파일과 같음", onClick = { saveToFile() }, modifier = Modifier.fillMaxWidth(), enabled = dirty)
+            Spacer(Modifier.height(8.dp))
+            LineButton("원본에서 다시 불러오기", onClick = { reloading = true }, modifier = Modifier.fillMaxWidth())
+            Spacer(Modifier.height(10.dp))
+        }
         Hint("위에서 아래 순서로 메인 프로세서에 전달됩니다. 블록을 누르면 편집합니다.")
         blocks.forEachIndexed { i, b ->
             val on = b.b("enabled", true)
@@ -547,6 +577,8 @@ fun PromptPresetScreen(presetId: String, onBack: () -> Unit) {
         },
         confirmButton = { TextButton(onClick = { adding = false }) { Text("닫기", color = Sgu.Sub) } },
     )
+    if (reloading) ConfirmDialog("원본에서 다시 불러오기", "저장하지 않은 변경을 버리고, RisuAI 블록을 원본 파일 내용으로 되돌립니다. SGU 작업실 블록은 그대로 둡니다.", "불러오기",
+        onConfirm = { reloadFromFile() }, onDismiss = { reloading = false })
     if (restore) ConfirmDialog("기본값 복원", "이 프리셋의 블록을 기본 구성으로 되돌릴까요?", "복원", onConfirm = { setBlocks { it.clear(); it.addAll(PromptBlocks.defaults()) } }, onDismiss = { restore = false })
     editing?.let { b -> BlockEditDialog(b, onSave = { nb -> setBlocks { l -> val i = l.indexOfFirst { it.s("id") == nb.s("id") }; if (i >= 0) l[i] = nb } ; editing = null },
         onDelete = { setBlocks { l -> l.removeAll { it.s("id") == b.s("id") } }; editing = null }, onDismiss = { editing = null }) }
