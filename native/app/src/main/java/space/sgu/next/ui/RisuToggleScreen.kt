@@ -27,6 +27,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.KeyboardArrowDown
 import androidx.compose.material.icons.outlined.KeyboardArrowUp
+import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -67,6 +68,16 @@ fun RisuTogglePreviewDialog(p: JsonObject, onDismiss: () -> Unit) {
     val hasJb = items.any { it.s("type") == "jailbreak" } || (items.isEmpty() && p.s("jailbreak").isNotBlank())
     val hasCot = items.any { it.s("type") == "cot" }
     val tv = values.filterKeys { !it.startsWith("\u0000") }
+    // 토글 찾기 대상: 블록 이름 → 글
+    val sources = remember(p) {
+        val legacy = if (items.isEmpty()) listOf("mainPrompt" to "메인 프롬프트", "jailbreak" to "탈옥 프롬프트", "globalNote" to "글로벌 노트")
+            .filter { p.s(it.first).isNotBlank() }.map { it.second to p.s(it.first) } else emptyList()
+        legacy + items.mapNotNull { x -> RisuPreset.textKey(x)?.let { k -> x.s(k).takeIf { it.isNotBlank() }?.let { (x.s("name").ifBlank { RisuPreset.typeLabel(x) }) to it } } }
+    }
+    val useCount = remember(sources, toggles) {
+        toggles.associate { t -> t.key to sources.sumOf { RisuToggles.findUses(it.second, t.key, emptyMap()).size } }
+    }
+    var finding by remember { mutableStateOf<RisuToggles.Toggle?>(null) }
 
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
         Column(Modifier.fillMaxSize().background(Sgu.Bg).statusBarsPadding().navigationBarsPadding().imePadding()) {
@@ -80,7 +91,7 @@ fun RisuTogglePreviewDialog(p: JsonObject, onDismiss: () -> Unit) {
             Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp).padding(bottom = 24.dp)) {
                 SectionLabel("토글")
                 if (toggles.isEmpty() && !hasJb && !hasCot) Hint("이 프리셋에는 토글이 없어요.")
-                ToggleList(toggles, values) { k, v -> set(k, v) }
+                ToggleList(toggles, values, { useCount[it] ?: 0 }, { finding = it }) { k, v -> set(k, v) }
                 if (hasJb) CheckRow("탈옥 프롬프트 사용", "RisuAI 설정 쪽 스위치", values[JB_KEY] == "1") { set(JB_KEY, if (it) "1" else "0") }
                 if (hasCot) CheckRow("생각의 사슬(CoT) 사용", "RisuAI 설정 쪽 스위치", values[COT_KEY] == "1") { set(COT_KEY, if (it) "1" else "0") }
                 Hint("켠 상태는 이 앱에만 저장돼요. RisuAI의 토글 상태와는 따로예요.")
@@ -118,10 +129,11 @@ fun RisuTogglePreviewDialog(p: JsonObject, onDismiss: () -> Unit) {
             }
         }
     }
+    finding?.let { t -> ToggleFindDialog(t, sources, tv) { finding = null } }
 }
 
 @Composable
-private fun ToggleList(list: List<RisuToggles.Toggle>, values: Map<String, String>, onSet: (String, String) -> Unit) {
+private fun ToggleList(list: List<RisuToggles.Toggle>, values: Map<String, String>, uses: (String) -> Int, onFind: (RisuToggles.Toggle) -> Unit, onSet: (String, String) -> Unit) {
     // RisuAI처럼 group … groupEnd 사이를 묶음으로
     val grouped = mutableListOf<Pair<RisuToggles.Toggle, MutableList<RisuToggles.Toggle>?>>()
     var open = false
@@ -139,17 +151,19 @@ private fun ToggleList(list: List<RisuToggles.Toggle>, values: Map<String, Strin
                 Text(t.label, style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.SemiBold), modifier = Modifier.weight(1f))
                 Icon(if (expanded) Icons.Outlined.KeyboardArrowUp else Icons.Outlined.KeyboardArrowDown, null, tint = Sgu.Sub)
             }
-            if (expanded) Column(Modifier.padding(start = 12.dp)) { children.forEach { ToggleItem(it, values, onSet) } }
+            if (expanded) Column(Modifier.padding(start = 12.dp)) { children.forEach { ToggleItem(it, values, uses, onFind, onSet) } }
         } else {
             if (t.type == "divider" && i > 0 && grouped[i - 1].first.type == "divider" && grouped[i - 1].first.label == t.label) return@forEachIndexed
-            ToggleItem(t, values, onSet)
+            ToggleItem(t, values, uses, onFind, onSet)
         }
     }
 }
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun ToggleItem(t: RisuToggles.Toggle, values: Map<String, String>, onSet: (String, String) -> Unit) {
+private fun ToggleItem(t: RisuToggles.Toggle, values: Map<String, String>, uses: (String) -> Int, onFind: (RisuToggles.Toggle) -> Unit, onSet: (String, String) -> Unit) {
+    val n = uses(t.key)
+    val find: (@Composable () -> Unit)? = if (n > 0) @Composable { FindChip(n) { onFind(t) } } else null
     when (t.type) {
         "caption" -> Hint(t.label)
         "divider" -> Row(Modifier.fillMaxWidth().padding(vertical = 8.dp, horizontal = 6.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -157,28 +171,29 @@ private fun ToggleItem(t: RisuToggles.Toggle, values: Map<String, String>, onSet
             HorizontalDivider(Modifier.weight(1f), color = Sgu.Line)
         }
         "select" -> Column(Modifier.padding(vertical = 6.dp, horizontal = 6.dp)) {
-            Text(t.label, style = MaterialTheme.typography.bodyLarge)
+            Row(verticalAlignment = Alignment.CenterVertically) { Text(t.label, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f)); find?.invoke() }
             Spacer(Modifier.height(6.dp))
             FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 t.options.forEachIndexed { i, o -> PillChip(o, values[t.key] == i.toString()) { onSet(t.key, i.toString()) } }
             }
         }
         "text", "textarea" -> Column(Modifier.padding(vertical = 6.dp, horizontal = 6.dp)) {
-            Text(t.label, style = MaterialTheme.typography.bodyLarge)
+            Row(verticalAlignment = Alignment.CenterVertically) { Text(t.label, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f)); find?.invoke() }
             Spacer(Modifier.height(6.dp))
             InputBox(values[t.key] ?: "", { onSet(t.key, it) }, singleLine = t.type == "text")
         }
-        else -> CheckRow(t.label, null, values[t.key] == "1") { onSet(t.key, if (it) "1" else "0") }
+        else -> CheckRow(t.label, null, values[t.key] == "1", find) { onSet(t.key, if (it) "1" else "0") }
     }
 }
 
 @Composable
-private fun CheckRow(label: String, sub: String?, checked: Boolean, onChange: (Boolean) -> Unit) {
+private fun CheckRow(label: String, sub: String?, checked: Boolean, find: (@Composable () -> Unit)? = null, onChange: (Boolean) -> Unit) {
     Row(Modifier.fillMaxWidth().clickable { onChange(!checked) }.padding(vertical = 8.dp, horizontal = 6.dp), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Text(label, style = MaterialTheme.typography.bodyLarge)
             if (sub != null) Text(sub, style = MaterialTheme.typography.bodySmall, color = Sgu.Sub)
         }
+        if (find != null) { find(); Spacer(Modifier.width(8.dp)) }
         SguSwitch(checked, onChange)
     }
 }
@@ -218,4 +233,55 @@ private fun PreviewCard(title: String, role: String?, text: String) {
 @Composable
 private fun SlotLine(label: String) {
     Text("· $label", style = MaterialTheme.typography.bodySmall, color = Sgu.Sub, modifier = Modifier.padding(start = 10.dp, top = 6.dp, bottom = 6.dp))
+}
+
+/** 토글 옆 "N곳" 버튼 */
+@Composable
+private fun FindChip(n: Int, onClick: () -> Unit) {
+    Row(Modifier.clip(RoundedCornerShape(50)).background(Sgu.Bubble).clickable(onClick = onClick).padding(horizontal = 10.dp, vertical = 5.dp),
+        verticalAlignment = Alignment.CenterVertically) {
+        Icon(Icons.Outlined.Search, "쓰인 곳 찾기", tint = Sgu.Sub, modifier = Modifier.size(15.dp))
+        Spacer(Modifier.width(4.dp))
+        Text("${n}곳", style = MaterialTheme.typography.labelMedium, color = Sgu.Sub)
+    }
+}
+
+/** 토글 찾기: 이 토글을 조건으로 감싼 구간을 블록별로. 지금 값으로 들어가는지/빠지는지 표시. */
+@Composable
+private fun ToggleFindDialog(t: RisuToggles.Toggle, sources: List<Pair<String, String>>, values: Map<String, String>, onDismiss: () -> Unit) {
+    val found = remember(t, sources, values) { sources.map { (name, text) -> name to RisuToggles.findUses(text, t.key, values) }.filter { it.second.isNotEmpty() } }
+    val total = found.sumOf { it.second.size }
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
+        Column(Modifier.fillMaxSize().background(Sgu.Bg).statusBarsPadding().navigationBarsPadding()) {
+            Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                TextButton(onClick = onDismiss) { Text("닫기", color = Sgu.Ink) }
+                Column(Modifier.weight(1f)) {
+                    Text("‘${t.label}’ 쓰인 곳", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text("${found.size}개 블록 · ${total}곳 · 토글 키 ${t.key}", style = MaterialTheme.typography.bodySmall, color = Sgu.Sub, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
+            Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp).padding(bottom = 24.dp)) {
+                found.forEach { (name, uses) ->
+                    SectionLabel(name)
+                    uses.forEach { u ->
+                        LineCard(Modifier.padding(vertical = 4.dp)) {
+                            Column {
+                                when (u.active) {
+                                    true -> Badge("지금 들어감", Sgu.AccentSoft, Sgu.Accent)
+                                    false -> Badge("지금 빠짐", Sgu.Bubble, Sgu.Sub)
+                                    null -> {}
+                                }
+                                Spacer(Modifier.height(8.dp))
+                                SelectionContainer {
+                                    Text(u.segment, style = MaterialTheme.typography.bodySmall.copy(fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace),
+                                        color = if (u.active == false) Sgu.Sub else Sgu.Ink)
+                                }
+                            }
+                        }
+                    }
+                }
+                Hint("‘지금 들어감/빠짐’은 미리보기에서 켜 둔 토글 기준이에요. {{:else}}가 있는 구간은 빠질 때 else 뒤쪽이 들어가요.")
+            }
+        }
+    }
 }

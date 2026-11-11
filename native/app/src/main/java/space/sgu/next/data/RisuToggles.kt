@@ -116,6 +116,7 @@ object RisuToggles {
     }
 
     private fun call(dat: String, gv: (String) -> String): String? {
+        if (dat.startsWith("? ")) return jsNum(calcString(dat.substring(2), gv))
         val a = dat.split("::")
         val arg = { i: Int -> a.getOrElse(i + 1) { "" } }
         return when (a[0].trim().lowercase()) {
@@ -125,6 +126,7 @@ object RisuToggles {
             "and" -> if (arg(0) == "1" && arg(1) == "1") "1" else "0"
             "or" -> if (arg(0) == "1" || arg(1) == "1") "1" else "0"
             "not" -> if (arg(0) == "1") "0" else "1"
+            "calc" -> jsNum(calcString(arg(0), gv))
             else -> null
         }
     }
@@ -202,5 +204,141 @@ object RisuToggles {
             }
         }
         else -> "" // ignore
+    }
+
+    // ---------- {{? 식}} 계산 (RisuAI src/ts/process/infunctions.ts 그대로) ----------
+
+    private fun jsNum(d: Double): String = when {
+        d.isNaN() -> "NaN"
+        d.isInfinite() -> if (d > 0) "Infinity" else "-Infinity"
+        d == Math.floor(d) && Math.abs(d) < 1e21 -> d.toLong().toString()
+        else -> d.toString()
+    }
+
+    /** JS parseFloat: 앞쪽 숫자 부분만, 없으면 NaN */
+    private fun parseFloatJs(s: String): Double {
+        val m = Regex("^[+-]?(Infinity|\\d+\\.?\\d*(?:[eE][+-]?\\d+)?|\\.\\d+(?:[eE][+-]?\\d+)?)").find(s.trimStart()) ?: return Double.NaN
+        val t = m.value
+        return if (t.endsWith("Infinity")) (if (t.startsWith("-")) Double.NEGATIVE_INFINITY else Double.POSITIVE_INFINITY) else t.toDoubleOrNull() ?: Double.NaN
+    }
+
+    private fun isNumTok(t: String): Boolean { val v = parseFloatJs(t); return (!v.isNaN() && v != 0.0) || t == "0" }
+
+    private val OPS = mapOf('+' to 2, '-' to 2, '*' to 3, '/' to 3, '^' to 4, '%' to 3, '<' to 1, '>' to 1, '|' to 1, '&' to 1,
+        '≤' to 1, '≥' to 1, '=' to 1, '≠' to 1, '!' to 5)
+
+    private fun toRpn(expr0: String): List<String> {
+        val expr = expr0.replace(Regex("\\s+"), "")
+        val toks = mutableListOf<String>()
+        var last = ""
+        for (i in expr.indices) {
+            val c = expr[i]
+            if (c == '-' && (i == 0 || expr[i - 1] in OPS || expr[i - 1] == '(')) last += c
+            else if (c in OPS) { toks.add(if (last != "") last else "0"); last = ""; toks.add(c.toString()) }
+            else last += c
+        }
+        toks.add(if (last != "") last else "0")
+        val out = mutableListOf<String>()
+        val st = ArrayDeque<Char>()
+        for (t in toks) {
+            if (isNumTok(t)) out.add(t)
+            else if (t.length == 1 && t[0] in OPS) {
+                val c = t[0]; val pr = OPS[c]!!
+                while (st.isNotEmpty() && ((c != '!' && pr <= OPS[st.last()]!!) || (c == '!' && pr < OPS[st.last()]!!))) out.add(st.removeLast().toString())
+                st.addLast(c)
+            }
+        }
+        while (st.isNotEmpty()) out.add(st.removeLast().toString())
+        return out
+    }
+
+    private fun jsTruthy(d: Double) = !(d.isNaN() || d == 0.0)
+
+    private fun calcRpn(rpn: List<String>): Double {
+        val st = ArrayDeque<Double>()
+        fun pop() = if (st.isEmpty()) Double.NaN else st.removeLast()
+        for (t in rpn) {
+            if (isNumTok(t)) { st.addLast(parseFloatJs(t)); continue }
+            val b = pop(); val a = pop()
+            fun bool(v: Boolean) = if (v) 1.0 else 0.0
+            when (t) {
+                "+" -> st.addLast(a + b); "-" -> st.addLast(a - b); "*" -> st.addLast(a * b); "/" -> st.addLast(a / b)
+                "^" -> st.addLast(Math.pow(a, b)); "%" -> st.addLast(a % b)
+                "<" -> st.addLast(bool(a < b)); ">" -> st.addLast(bool(a > b))
+                "|" -> st.addLast(if (jsTruthy(a)) a else b); "&" -> st.addLast(if (jsTruthy(a)) b else a)
+                "≤" -> st.addLast(bool(a <= b)); "≥" -> st.addLast(bool(a >= b))
+                "=" -> st.addLast(bool(a == b)); "≠" -> st.addLast(bool(a != b))
+                "!" -> st.addLast(bool(!jsTruthy(b)))
+            }
+        }
+        return if (st.isEmpty()) 0.0 else st.removeLast()
+    }
+
+    private fun execCalc(text0: String, gv: (String) -> String): Double {
+        fun num(v: String): String { val d = parseFloatJs(v); return if (d.isNaN()) "0" else jsNum(d) }
+        val text = text0
+            .replace(Regex("\\$([a-zA-Z0-9_]+)")) { "0" }
+            .replace(Regex("@([a-zA-Z0-9_]+)")) { num(gv(it.groupValues[1])) }
+            .replace("&&", "&").replace("||", "|").replace("<=", "≤").replace(">=", "≥").replace("==", "=").replace("!=", "≠")
+            .replace(Regex("null", RegexOption.IGNORE_CASE), "0")
+        return calcRpn(toRpn(text))
+    }
+
+    fun calcString(text: String, gv: (String) -> String): Double {
+        val depth = mutableListOf(StringBuilder())
+        for (c in text) {
+            when {
+                c == '(' -> depth.add(StringBuilder())
+                c == ')' && depth.size > 1 -> { val r = execCalc(depth.removeAt(depth.size - 1).toString(), gv); depth.last().append(jsNum(r)) }
+                else -> depth.last().append(c)
+            }
+        }
+        return execCalc(depth.joinToString(""), gv)
+    }
+
+    // ---------- 토글 찾기: 이 토글을 조건으로 쓰는 {{#…}} … {{/…}} 구간 ----------
+
+    data class Use(val header: String, val segment: String, val active: Boolean?)
+
+    private fun refersTo(header: String, key: String): Boolean {
+        val k = Regex.escape(key)
+        val end = "(?![\\p{L}\\p{N}_])"
+        return Regex("toggle_$k$end").containsMatchIn(header) ||
+            Regex("(^|::)toggle::$k(::|$)").containsMatchIn(header) ||
+            Regex("(^|::)$k::(tis|tisnot)(::|$)").containsMatchIn(header)
+    }
+
+    /** {{#if…}}·{{#when…}}처럼 이 토글로 감싼 구간들 (중첩도 각각). active = 지금 값으로 앞쪽(참) 내용이 들어가는지. */
+    fun findUses(text: String, key: String, values: Map<String, String>): List<Use> {
+        val out = mutableListOf<Pair<Int, Use>>()
+        val stack = ArrayDeque<Pair<Int, String>>() // start index, header
+        var i = 0
+        while (i < text.length - 1) {
+            if (text[i] == '{' && text[i + 1] == '{') {
+                var depth = 1; var j = i + 2
+                while (j < text.length - 1 && depth > 0) {
+                    if (text[j] == '{' && text[j + 1] == '{') { depth++; j += 2 }
+                    else if (text[j] == '}' && text[j + 1] == '}') { depth--; if (depth == 0) break; j += 2 }
+                    else j++
+                }
+                if (depth != 0) break
+                val dat = text.substring(i + 2, j)
+                val endIdx = j + 2
+                if (dat.startsWith("#")) stack.addLast(i to dat)
+                else if (dat.startsWith("/") && !dat.startsWith("//") && stack.isNotEmpty()) {
+                    val (st, h) = stack.removeLast()
+                    if (refersTo(h, key)) out.add(st to Use(h, text.substring(st, endIdx), headerActive(h, values)))
+                }
+                i = endIdx
+            } else i++
+        }
+        return out.sortedBy { it.first }.map { it.second }
+    }
+
+    private fun headerActive(header: String, values: Map<String, String>): Boolean? {
+        fun gv(name: String): String = if (name.startsWith("toggle_")) values[name.removePrefix("toggle_")] ?: "null" else "null"
+        val resolved = render(header, values)
+        val b = blockStart(resolved, ::gv) ?: return null
+        return b.type == "parse" || b.type == "ifpure" || b.type == "newif"
     }
 }
