@@ -12,8 +12,8 @@ android {
         applicationId = "space.sgu.next"
         minSdk = 31
         targetSdk = 36
-        versionCode = 32
-        versionName = "0.8.5"
+        versionCode = 33
+        versionName = "0.8.6"
     }
 
     // Personal sideload key (kept in the repo so updates install over the old version).
@@ -57,4 +57,5 @@ dependencies {
     implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.navigation:navigation-compose:2.9.0")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.8.1")
+    implementation("com.google.mlkit:translate:17.0.3")
 }

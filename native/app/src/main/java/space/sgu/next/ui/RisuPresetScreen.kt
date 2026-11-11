@@ -155,6 +155,7 @@ fun RisuPresetScreen(onBack: () -> Unit) {
 
         val items = RisuPreset.items(p)
         SectionLabel("프롬프트 템플릿 ${items.size}개")
+        KoToggle(Modifier.padding(bottom = 6.dp))
         items.forEachIndexed { i, it ->
             val key = RisuPreset.textKey(it)
             val role = when (it.s("type")) { in RisuPreset.TEXT_TYPES -> it.s("role"); "cache" -> it.s("role"); else -> it.s("role2") }
@@ -181,7 +182,7 @@ fun RisuPresetScreen(onBack: () -> Unit) {
                     }
                     if (key != null) {
                         val text = it.s(key)
-                        Text(text.ifBlank { "비어 있음 · 탭하여 편집" }, style = MaterialTheme.typography.bodySmall, color = if (text.isBlank()) Sgu.Sub else Sgu.Ink,
+                        Text(if (text.isBlank()) "비어 있음 · 탭하여 편집" else koText(text.take(700)), style = MaterialTheme.typography.bodySmall, color = if (text.isBlank()) Sgu.Sub else Sgu.Ink,
                             maxLines = 4, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 6.dp))
                     }
                     if (it.s("type") in RisuPreset.TEXT_TYPES && it.s("type") != "chatML") {
@@ -252,6 +253,7 @@ fun RisuPresetScreen(onBack: () -> Unit) {
 @Composable
 fun TextEditDialog(title: String, initial: String, onDismiss: () -> Unit, onSave: (String) -> Unit) {
     var text by remember { mutableStateOf(initial) }
+    var ko by remember { mutableStateOf(false) }
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
         Column(Modifier.fillMaxSize().background(Sgu.Bg).statusBarsPadding().navigationBarsPadding().imePadding()) {
             Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -259,9 +261,16 @@ fun TextEditDialog(title: String, initial: String, onDismiss: () -> Unit, onSave
                 Text(title, style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold), modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text("${text.length}자", style = MaterialTheme.typography.bodySmall, color = Sgu.Sub)
                 Spacer(Modifier.width(4.dp))
+                TextButton(onClick = { ko = !ko }) { Text(if (ko) "원문" else "한글", color = Sgu.Accent) }
                 TextButton(onClick = { onSave(text) }) { Text("저장", color = Sgu.Ink, fontWeight = FontWeight.Bold) }
             }
-            BasicTextField(text, { text = it }, textStyle = MaterialTheme.typography.bodyMedium.copy(color = Sgu.Ink, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace),
+            if (ko) {
+                // 번역은 보기 전용 (원문은 그대로). '원문'을 누르면 다시 편집
+                if (space.sgu.next.data.KoTranslate.status.isNotEmpty()) Text(space.sgu.next.data.KoTranslate.status, style = MaterialTheme.typography.bodySmall, color = Sgu.Sub, modifier = Modifier.padding(horizontal = 16.dp))
+                androidx.compose.foundation.text.selection.SelectionContainer(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp)) {
+                    Text(koText(text, true), style = MaterialTheme.typography.bodyMedium, color = Sgu.Ink)
+                }
+            } else BasicTextField(text, { text = it }, textStyle = MaterialTheme.typography.bodyMedium.copy(color = Sgu.Ink, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace),
                 modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp))
         }
     }

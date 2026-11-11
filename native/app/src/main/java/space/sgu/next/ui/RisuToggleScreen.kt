@@ -115,6 +115,7 @@ fun RisuTogglePreviewDialog(p: JsonObject, onDismiss: () -> Unit) {
                 Hint("켠 상태는 이 앱에만 저장돼요. RisuAI의 토글 상태와는 따로예요.")
 
                 SectionLabel("적용된 프롬프트")
+                KoToggle(Modifier.padding(bottom = 6.dp))
                 var hidden = 0
                 fun show(text: String) = RisuToggles.render(text, tv).replace(Regex("\n{3,}"), "\n\n").trim()
                 if (items.isEmpty()) {
@@ -220,7 +221,8 @@ private fun CheckRow(label: String, sub: String?, checked: Boolean, find: (@Comp
 /** 역할별 모양: 시스템 = 흰 카드, 유저 = 오른쪽 회색 말풍선, 봇(어시스턴트) = 주황빛 카드 + ✦. */
 @Composable
 private fun PreviewCard(title: String, role: String?, text: String) {
-    val body = @Composable { SelectionContainer { Text(text, style = MaterialTheme.typography.bodySmall, color = Sgu.Ink) } }
+    val shown = koText(text)
+    val body = @Composable { SelectionContainer { Text(shown, style = MaterialTheme.typography.bodySmall, color = Sgu.Ink) } }
     when (role) {
         "user" -> Column(Modifier.fillMaxWidth().padding(vertical = 6.dp), horizontalAlignment = Alignment.End) {
             Text("유저 · $title", style = MaterialTheme.typography.labelMedium, color = Sgu.Sub, maxLines = 1, overflow = TextOverflow.Ellipsis,

@@ -621,6 +621,11 @@ private fun BlockEditDialog(b: JsonObject, onSave: (JsonObject) -> Unit, onDelet
                     FieldLabel(if (type == "outputFormat") "outputFormat (비워 두면 내장 규칙)" else if (type in PromptBlocks.SLOT_TYPES) "텍스트 (${PromptBlocks.SLOT} 자리에 내용이 들어갑니다)" else "텍스트")
                     InputBox(text, { text = it }, singleLine = false)
                 }
+                if (type != "cachePoint" && text.isNotBlank()) {
+                    KoToggle(Modifier.padding(top = 8.dp))
+                    if (space.sgu.next.data.KoTranslate.on) Text(koText(text), style = MaterialTheme.typography.bodySmall, color = Sgu.Ink,
+                        modifier = Modifier.padding(top = 6.dp).fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Sgu.Bubble).padding(12.dp))
+                }
                 if (type == "fieldData") { FieldLabel("필드 포맷 ({{label}}, {{id}}, {{value}})"); InputBox(fmt, { fmt = it }, singleLine = false) }
                 if (type == "history") { FieldLabel("포함할 이전 턴 수 (0 = 전체)"); InputBox(limit, { v -> limit = v.filter { it.isDigit() }.take(3) }, number = true) }
             }
