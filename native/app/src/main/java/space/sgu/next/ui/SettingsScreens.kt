@@ -29,6 +29,9 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.CheckCircle
+import androidx.compose.material.icons.outlined.Cloud
+import androidx.compose.material.icons.outlined.CloudDownload
+import androidx.compose.material.icons.outlined.CloudUpload
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material.icons.outlined.FileDownload
@@ -69,6 +72,7 @@ import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
+import space.sgu.next.data.DriveBackup
 import space.sgu.next.data.Llm
 import space.sgu.next.data.Presets
 import space.sgu.next.data.SettingsStore
@@ -683,9 +687,28 @@ fun ProcessorsScreen(open: (String) -> Unit, onBack: () -> Unit) {
 fun BackupScreen(onBack: () -> Unit) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
-    var withKeys by remember { mutableStateOf(false) }
+    var withKeys by remember { mutableStateOf(DriveBackup.withKeys(ctx)) }
+    var target by remember { mutableStateOf(DriveBackup.target(ctx)) }
     var msg by remember { mutableStateOf<Pair<Boolean?, String>>(null to "") }
     var confirmImport by remember { mutableStateOf<String?>(null) }
+    val keyNote = { if (withKeys) "API 키 포함 · 파일이 유출되지 않도록 주의하세요." else "API 키는 넣지 않았어요." }
+
+    fun runDriveBackup() {
+        msg = null to "드라이브에 백업하는 중…"
+        scope.launch {
+            runCatching { DriveBackup.backup(ctx) }
+                .onSuccess { target = it; msg = true to "드라이브에 백업했어요 · ${keyNote()}" }
+                .onFailure { msg = false to "백업하지 못했어요. 파일이 지워졌거나 접근 권한이 풀렸을 수 있어요. '위치 바꾸기'로 다시 골라주세요. (${it.message})" }
+        }
+    }
+
+    val driveTarget = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
+        if (uri != null) {
+            DriveBackup.setTarget(ctx, uri)
+            target = DriveBackup.target(ctx)
+            runDriveBackup()
+        }
+    }
     val importer = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) scope.launch {
             runCatching { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { ctx.contentResolver.openInputStream(uri)!!.use { it.readBytes().toString(Charsets.UTF_8) } } }
@@ -698,13 +721,47 @@ fun BackupScreen(onBack: () -> Unit) {
             runCatching {
                 val text = SettingsStore.exportBackup(withKeys)
                 kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { ctx.contentResolver.openOutputStream(uri)!!.use { it.write(text.toByteArray()) } }
-            }.onSuccess {
-                msg = true to if (withKeys) "설정을 API 키와 함께 내보냈습니다. 파일이 유출되지 않도록 주의하세요." else "설정을 내보냈습니다. API 키는 포함되지 않습니다."
-            }.onFailure { msg = false to "실패: ${it.message}" }
+            }.onSuccess { msg = true to "설정을 내보냈어요 · ${keyNote()}" }
+                .onFailure { msg = false to "실패: ${it.message}" }
         }
     }
     Page("백업 · 복원", "프로바이더 · 모델 · 프로세서 · 권한 · 템플릿", onBack) {
-        FieldLabel("가져오기")
+        FieldLabel("드라이브 백업")
+        val t = target
+        if (t == null) {
+            LineCard {
+                Column {
+                    Text("처음 한 번만 저장 위치를 고르면, 다음부터는 버튼 한 번으로 같은 파일에 덮어써요.", style = MaterialTheme.typography.bodyMedium)
+                    Text("파일 선택 창 왼쪽 메뉴(☰)에서 Drive를 고르고 원하는 폴더에서 저장을 누르세요.",
+                        style = MaterialTheme.typography.bodySmall, color = Sgu.Sub, modifier = Modifier.padding(top = 6.dp))
+                    Spacer(Modifier.height(14.dp))
+                    InkButton("백업 위치 고르기", onClick = { driveTarget.launch("sgu-settings.json") }, icon = Icons.Outlined.CloudUpload)
+                }
+            }
+        } else {
+            val last = if (t.lastAt == 0L) "아직 백업하지 않았어요"
+                else "마지막 백업 " + java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.KOREA).format(java.util.Date(t.lastAt))
+            GroupRow(0, 1, t.name, subtitle = last, icon = Icons.Outlined.Cloud)
+            Spacer(Modifier.height(12.dp))
+            InkButton("지금 백업", onClick = { runDriveBackup() }, modifier = Modifier.fillMaxWidth(), icon = Icons.Outlined.CloudUpload)
+            Spacer(Modifier.height(8.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                LineButton("여기서 복원", onClick = {
+                    scope.launch {
+                        runCatching { DriveBackup.read(ctx) }
+                            .onSuccess { confirmImport = it }
+                            .onFailure { msg = false to "백업 파일을 읽지 못했어요. 파일이 지워졌거나 접근 권한이 풀렸을 수 있어요. (${it.message})" }
+                    }
+                }, modifier = Modifier.weight(1f), icon = Icons.Outlined.CloudDownload)
+                LineButton("위치 바꾸기", onClick = { driveTarget.launch("sgu-settings.json") }, modifier = Modifier.weight(1f), icon = Icons.Outlined.Sync)
+            }
+        }
+        Spacer(Modifier.height(12.dp))
+        GroupRow(0, 1, "API 키 · 서비스 계정 키 포함", subtitle = if (withKeys) "경고: 해당 파일이 유출되지 않도록 주의하십시오" else "드라이브 백업 · 내보내기 모두에 적용",
+            trailing = { SguSwitch(withKeys) { withKeys = it; DriveBackup.setWithKeys(ctx, it) } })
+        ResultLine(msg.first, msg.second)
+
+        FieldLabel("파일로 옮기기")
         LineCard {
             Column {
                 Text("기존 SGU 앱의 '설정 JSON 내보내기' 파일을 그대로 가져올 수 있어요.", style = MaterialTheme.typography.bodyMedium)
@@ -714,14 +771,10 @@ fun BackupScreen(onBack: () -> Unit) {
                 InkButton("설정 JSON 가져오기", onClick = { importer.launch(arrayOf("application/json", "text/plain", "*/*")) }, icon = Icons.Outlined.FileUpload)
             }
         }
-        FieldLabel("내보내기")
-        GroupRow(0, 1, "API 키 · 서비스 계정 키 포함", subtitle = if (withKeys) "경고: 해당 파일이 유출되지 않도록 주의하십시오" else null,
-            trailing = { SguSwitch(withKeys) { withKeys = it } })
         Spacer(Modifier.height(12.dp))
         LineButton("설정 JSON 내보내기", onClick = {
             exporter.launch("sgu-settings-${java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(java.util.Date())}.json")
         }, icon = Icons.Outlined.FileDownload)
-        ResultLine(msg.first, msg.second)
     }
     confirmImport?.let { text ->
         AlertDialog(
