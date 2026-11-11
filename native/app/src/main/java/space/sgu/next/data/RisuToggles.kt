@@ -298,7 +298,7 @@ object RisuToggles {
 
     // ---------- 토글 찾기: 이 토글을 조건으로 쓰는 {{#…}} … {{/…}} 구간 ----------
 
-    data class Use(val header: String, val segment: String, val active: Boolean?)
+    data class Use(val header: String, val segment: String, val active: Boolean?, val start: Int = 0, val end: Int = 0)
 
     private fun refersTo(header: String, key: String): Boolean {
         val k = Regex.escape(key)
@@ -327,7 +327,7 @@ object RisuToggles {
                 if (dat.startsWith("#")) stack.addLast(i to dat)
                 else if (dat.startsWith("/") && !dat.startsWith("//") && stack.isNotEmpty()) {
                     val (st, h) = stack.removeLast()
-                    if (refersTo(h, key)) out.add(st to Use(h, text.substring(st, endIdx), headerActive(h, values)))
+                    if (refersTo(h, key)) out.add(st to Use(h, text.substring(st, endIdx), headerActive(h, values), st, endIdx))
                 }
                 i = endIdx
             } else i++

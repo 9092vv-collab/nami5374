@@ -28,6 +28,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.KeyboardArrowDown
 import androidx.compose.material.icons.outlined.KeyboardArrowUp
 import androidx.compose.material.icons.outlined.Search
+import kotlinx.serialization.json.JsonPrimitive
+import androidx.compose.material3.IconButton
+import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -68,14 +72,28 @@ fun RisuTogglePreviewDialog(p: JsonObject, onDismiss: () -> Unit) {
     val hasJb = items.any { it.s("type") == "jailbreak" } || (items.isEmpty() && p.s("jailbreak").isNotBlank())
     val hasCot = items.any { it.s("type") == "cot" }
     val tv = values.filterKeys { !it.startsWith("\u0000") }
-    // 토글 찾기 대상: 블록 이름 → 글
+    // 토글 찾기 대상: 블록 이름 · 글 · 위치(ref: 0 이상 = 템플릿 순번, 음수 = 옛 형식 칸)
+    val legacyKeys = listOf("mainPrompt", "jailbreak", "globalNote")
     val sources = remember(p) {
-        val legacy = if (items.isEmpty()) listOf("mainPrompt" to "메인 프롬프트", "jailbreak" to "탈옥 프롬프트", "globalNote" to "글로벌 노트")
-            .filter { p.s(it.first).isNotBlank() }.map { it.second to p.s(it.first) } else emptyList()
-        legacy + items.mapNotNull { x -> RisuPreset.textKey(x)?.let { k -> x.s(k).takeIf { it.isNotBlank() }?.let { (x.s("name").ifBlank { RisuPreset.typeLabel(x) }) to it } } }
+        val legacy = if (items.isEmpty()) listOf("메인 프롬프트", "탈옥 프롬프트", "글로벌 노트")
+            .mapIndexedNotNull { i, label -> p.s(legacyKeys[i]).takeIf { it.isNotBlank() }?.let { FindSrc(label, it, -1 - i) } } else emptyList()
+        legacy + items.mapIndexedNotNull { i, x -> RisuPreset.textKey(x)?.let { k -> x.s(k).takeIf { it.isNotBlank() }?.let { FindSrc(x.s("name").ifBlank { RisuPreset.typeLabel(x) }, it, i) } } }
     }
     val useCount = remember(sources, toggles) {
-        toggles.associate { t -> t.key to sources.sumOf { RisuToggles.findUses(it.second, t.key, emptyMap()).size } }
+        toggles.associate { t -> t.key to sources.sumOf { RisuToggles.findUses(it.text, t.key, emptyMap()).size } }
+    }
+    // 구간 고치기/지우기: 프리셋의 해당 글에서 [start, end)를 바꿔 넣음
+    fun replaceIn(src: FindSrc, u: RisuToggles.Use, new: String?) {
+        if (u.end > src.text.length || src.text.substring(u.start, u.end) != u.segment) return
+        var st = u.start; var en = u.end
+        if (new == null && en < src.text.length && src.text[en] == '\n' && (st == 0 || src.text[st - 1] == '\n')) en++ // 혼자 차지하던 줄도 같이 지움
+        val out = src.text.substring(0, st) + (new ?: "") + src.text.substring(en)
+        if (src.ref < 0) RisuPresetEditor.set(JsonObject(p + (legacyKeys[-1 - src.ref] to JsonPrimitive(out))))
+        else {
+            val item = items.getOrNull(src.ref) ?: return
+            val key = RisuPreset.textKey(item) ?: return
+            RisuPresetEditor.setItems(items.toMutableList().apply { this[src.ref] = JsonObject(item + (key to JsonPrimitive(out))) })
+        }
     }
     var finding by remember { mutableStateOf<RisuToggles.Toggle?>(null) }
 
@@ -129,7 +147,7 @@ fun RisuTogglePreviewDialog(p: JsonObject, onDismiss: () -> Unit) {
             }
         }
     }
-    finding?.let { t -> ToggleFindDialog(t, sources, tv) { finding = null } }
+    finding?.let { t -> ToggleFindDialog(t, sources, tv, { s, u, n -> replaceIn(s, u, n) }) { finding = null } }
 }
 
 @Composable
@@ -247,10 +265,24 @@ private fun FindChip(n: Int, onClick: () -> Unit) {
     }
 }
 
-/** 토글 찾기: 이 토글을 조건으로 감싼 구간을 블록별로. 지금 값으로 들어가는지/빠지는지 표시. */
+class FindSrc(val name: String, val text: String, val ref: Int)
+
+/**
+ * 토글 찾기: 이 토글을 조건으로 감싼 구간을 블록별로. 맨 위 칩으로 선택지(0, 1, 2…)를 고르면
+ * 그 선택지일 때 들어가는 구간만 보여줌. 구간마다 수정·삭제.
+ */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun ToggleFindDialog(t: RisuToggles.Toggle, sources: List<Pair<String, String>>, values: Map<String, String>, onDismiss: () -> Unit) {
-    val found = remember(t, sources, values) { sources.map { (name, text) -> name to RisuToggles.findUses(text, t.key, values) }.filter { it.second.isNotEmpty() } }
+private fun ToggleFindDialog(t: RisuToggles.Toggle, sources: List<FindSrc>, values: Map<String, String>,
+                             onReplace: (FindSrc, RisuToggles.Use, String?) -> Unit, onDismiss: () -> Unit) {
+    val options = when (t.type) { "select" -> t.options; "check" -> listOf("꺼짐", "켜짐"); else -> emptyList() }
+    var pick by remember(t.key) { mutableStateOf<Int?>(null) }
+    var editing by remember { mutableStateOf<Pair<FindSrc, RisuToggles.Use>?>(null) }
+    var removing by remember { mutableStateOf<Pair<FindSrc, RisuToggles.Use>?>(null) }
+    val found = remember(t, sources, values, pick) {
+        val v = pick?.let { values + (t.key to it.toString()) } ?: values
+        sources.map { src -> src to RisuToggles.findUses(src.text, t.key, v).filter { pick == null || it.active == true } }.filter { it.second.isNotEmpty() }
+    }
     val total = found.sumOf { it.second.size }
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
         Column(Modifier.fillMaxSize().background(Sgu.Bg).statusBarsPadding().navigationBarsPadding()) {
@@ -262,27 +294,46 @@ private fun ToggleFindDialog(t: RisuToggles.Toggle, sources: List<Pair<String, S
                 }
             }
             Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp).padding(bottom = 24.dp)) {
-                found.forEach { (name, uses) ->
-                    SectionLabel(name)
+                if (options.isNotEmpty()) {
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(top = 6.dp)) {
+                        PillChip("전체", pick == null) { pick = null }
+                        options.forEachIndexed { i, o -> PillChip("$i · $o", pick == i) { pick = i } }
+                    }
+                }
+                if (found.isEmpty()) Hint(if (pick != null) "이 선택지일 때 들어가는 구간이 없어요." else "이 토글로 감싼 구간이 없어요.")
+                found.forEach { (src, uses) ->
+                    SectionLabel(src.name)
                     uses.forEach { u ->
                         LineCard(Modifier.padding(vertical = 4.dp)) {
                             Column {
-                                when (u.active) {
-                                    true -> Badge("지금 들어감", Sgu.AccentSoft, Sgu.Accent)
-                                    false -> Badge("지금 빠짐", Sgu.Bubble, Sgu.Sub)
-                                    null -> {}
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    when {
+                                        pick != null -> Badge("${pick} · ${options.getOrElse(pick!!) { "" }}일 때 들어감", Sgu.AccentSoft, Sgu.Accent)
+                                        u.active == true -> Badge("지금 들어감", Sgu.AccentSoft, Sgu.Accent)
+                                        u.active == false -> Badge("지금 빠짐", Sgu.Bubble, Sgu.Sub)
+                                    }
+                                    Spacer(Modifier.weight(1f))
+                                    IconButton(onClick = { editing = src to u }, modifier = Modifier.size(36.dp)) { Icon(Icons.Outlined.Edit, "수정", tint = Sgu.Sub, modifier = Modifier.size(19.dp)) }
+                                    IconButton(onClick = { removing = src to u }, modifier = Modifier.size(36.dp)) { Icon(Icons.Outlined.Delete, "삭제", tint = Sgu.Sub, modifier = Modifier.size(19.dp)) }
                                 }
-                                Spacer(Modifier.height(8.dp))
+                                Spacer(Modifier.height(6.dp))
                                 SelectionContainer {
                                     Text(u.segment, style = MaterialTheme.typography.bodySmall.copy(fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace),
-                                        color = if (u.active == false) Sgu.Sub else Sgu.Ink)
+                                        color = if (pick == null && u.active == false) Sgu.Sub else Sgu.Ink)
                                 }
                             }
                         }
                     }
                 }
-                Hint("‘지금 들어감/빠짐’은 미리보기에서 켜 둔 토글 기준이에요. {{:else}}가 있는 구간은 빠질 때 else 뒤쪽이 들어가요.")
+                Hint("칩의 숫자는 RisuAI가 토글 값으로 쓰는 번호예요(0 = 첫 번째). 선택지를 고르면 다른 토글은 미리보기에서 켜 둔 그대로 두고 계산해요. 수정·삭제는 프리셋에 바로 반영되고, 편집기에서 .risup으로 저장해야 파일에 남아요.")
             }
         }
+    }
+    editing?.let { (src, u) ->
+        TextEditDialog("${src.name} · 구간 수정", u.segment, onDismiss = { editing = null }) { v -> onReplace(src, u, v); editing = null }
+    }
+    removing?.let { (src, u) ->
+        ConfirmDialog("구간 삭제", "'${src.name}'에서 이 구간을 조건문({{#…}} ~ {{/…}})째로 지웁니다.", "삭제",
+            onConfirm = { onReplace(src, u, null) }, onDismiss = { removing = null })
     }
 }
