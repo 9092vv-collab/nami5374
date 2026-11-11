@@ -741,7 +741,20 @@ object PromptBlocks {
     fun activePreset(): JsonObject = presets().firstOrNull { it.s("id") == SettingsStore.root.s("activePromptPresetId") } ?: presets().firstOrNull()
         ?: buildJsonObject { put("id", "preset_default"); put("name", "기본"); put("blocks", JsonArray(defaults())); put("createdAt", 0) }
     fun presetFor(doc: JsonObject): JsonObject = presets().firstOrNull { it.s("id") == doc.s("promptPresetId") } ?: activePreset()
-    fun blocksFor(doc: JsonObject): List<JsonObject> = presetFor(doc).arr("blocks").ifEmpty { defaults() }
+    fun blocksFor(doc: JsonObject): List<JsonObject> = presetFor(doc).let { applyToggles(it, it.arr("blocks").ifEmpty { defaults() }) }
+
+    /** 프리셋에 저장된 RisuAI 토글 값 (risuToggleValues) */
+    fun toggleValues(preset: JsonObject): Map<String, String> =
+        preset.o("risuToggleValues")?.mapNotNull { (k, v) -> (v as? JsonPrimitive)?.contentOrNull?.let { k to it } }?.toMap() ?: emptyMap()
+
+    /** RisuAI에서 온 글 블록은 토글 조건문({{#if…}}, {{#when…}}, {{? …}})을 풀어서 넘김. 비게 된 블록은 조립에서 빠짐. */
+    fun applyToggles(preset: JsonObject, blocks: List<JsonObject>): List<JsonObject> {
+        if (blocks.none { it["risuItem"] != null }) return blocks
+        val v = toggleValues(preset)
+        return blocks.map { b ->
+            if (b["risuItem"] != null && b.s("type") == "text" && "{{" in b.s("text")) JsonObject(b + ("text" to JsonPrimitive(RisuToggles.render(b.s("text"), v).replace(Regex("\n{3,}"), "\n\n").trim()))) else b
+        }
+    }
 }
 
 data class PromptPart(val name: String, val type: String, val role: String, val text: String, val tokens: Int, val fieldIds: List<String>)

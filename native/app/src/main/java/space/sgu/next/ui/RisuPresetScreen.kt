@@ -78,7 +78,8 @@ fun importRisuToSgu(p: JsonObject, uri: android.net.Uri? = null, fileName: Strin
     val taken = space.sgu.next.data.PromptBlocks.presets().map { it.s("name") }.toSet()
     val name = if (base !in taken) base else generateSequence(2) { it + 1 }.map { "$base ($it)" }.first { it !in taken }
     val linked = uri != null && RisuPreset.items(p).isNotEmpty()
-    addPreset(name, blocks, if (linked) mapOf("risuUri" to JsonPrimitive(uri.toString()), "risuFile" to JsonPrimitive(fileName)) else emptyMap())
+    addPreset(name, blocks, (if (linked) mapOf("risuUri" to JsonPrimitive(uri.toString()), "risuFile" to JsonPrimitive(fileName)) else emptyMap()) +
+        mapOf("risuToggles" to JsonPrimitive(p.s("customPromptTemplateToggle")), "risuName" to JsonPrimitive(p.s("name"))))
     val texts = blocks.count { it.s("type") == "text" && (it["risuItem"] != null || it.s("name") in setOf("메인 프롬프트", "탈옥 프롬프트", "글로벌 노트")) }
     return "'$name' 프리셋을 만들었어요. RisuAI 텍스트 블록 ${texts}개" + (if (slots > 0) ", RisuAI 전용 칸 ${slots}개(작업실 프롬프트에는 안 들어가요)" else "") + "를 넣었어요." +
         if (linked) " 블록을 고치면 원본 파일($fileName)에도 저장돼요." else ""

@@ -153,7 +153,7 @@ fun RisuTogglePreviewDialog(p: JsonObject, onDismiss: () -> Unit) {
 }
 
 @Composable
-private fun ToggleList(list: List<RisuToggles.Toggle>, values: Map<String, String>, uses: (String) -> Int, onFind: (RisuToggles.Toggle) -> Unit, onSet: (String, String) -> Unit) {
+internal fun ToggleList(list: List<RisuToggles.Toggle>, values: Map<String, String>, uses: (String) -> Int, onFind: (RisuToggles.Toggle) -> Unit, onSet: (String, String) -> Unit) {
     // RisuAI처럼 group … groupEnd 사이를 묶음으로
     val grouped = mutableListOf<Pair<RisuToggles.Toggle, MutableList<RisuToggles.Toggle>?>>()
     var open = false
@@ -341,5 +341,23 @@ private fun ToggleFindDialog(t: RisuToggles.Toggle, sources: List<FindSrc>, valu
     removing?.let { (src, u) ->
         ConfirmDialog("구간 삭제", "'${src.name}'에서 이 구간을 조건문({{#…}} ~ {{/…}})째로 지웁니다.", "삭제",
             onConfirm = { onReplace(src, u, null) }, onDismiss = { removing = null })
+    }
+}
+
+/** 작업실 프리셋용 토글 설정: 여기서 고른 값이 작업실 프롬프트에 실제로 적용됨. */
+@Composable
+fun WorkshopToggleDialog(toggles: List<RisuToggles.Toggle>, values: Map<String, String>, onSet: (String, String) -> Unit, onDismiss: () -> Unit) {
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
+        Column(Modifier.fillMaxSize().background(Sgu.Bg).statusBarsPadding().navigationBarsPadding().imePadding()) {
+            Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                TextButton(onClick = onDismiss) { Text("닫기", color = Sgu.Ink) }
+                Text("토글 설정", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold))
+            }
+            Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp).padding(bottom = 24.dp)) {
+                Hint("여기서 고른 대로 작업실 프롬프트가 만들어져요. 고르는 즉시 적용되고, 원본 RisuAI 파일은 바뀌지 않아요.")
+                if (toggles.isEmpty()) Hint("이 프리셋에는 토글이 없어요.")
+                ToggleList(toggles, values, { 0 }, {}) { k, v -> onSet(k, v) }
+            }
+        }
     }
 }

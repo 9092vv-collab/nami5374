@@ -25,6 +25,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.KeyboardArrowDown
@@ -474,6 +475,24 @@ fun PromptPresetScreen(presetId: String, onBack: () -> Unit) {
     var sync by remember { mutableStateOf<Pair<Boolean?, String>>(null to "") }
     var reloading by remember { mutableStateOf(false) }
     val dirty = p.b("risuDirty")
+    // RisuAI 토글: 정의(risuToggles)와 고른 값(risuToggleValues)은 프리셋에 저장. 프롬프트 조립 때 적용됨.
+    val fromRisu = blocks.any { it["risuItem"] != null }
+    var toggling by remember { mutableStateOf(false) }
+    val toggleDefs = remember(p.s("risuToggles")) { space.sgu.next.data.RisuToggles.parse(p.s("risuToggles")) }
+    val toggleCount = toggleDefs.count { it.type in setOf("check", "select", "text", "textarea") }
+    fun patchPreset(vararg pairs: Pair<String, JsonElement>) = editPresets { l -> val i = l.indexOfFirst { it.s("id") == presetId }; if (i >= 0) l[i] = JsonObject(l[i] + pairs) }
+    // 예전에 가져온 프리셋엔 토글 정의가 없음 → 원본 파일에서 한 번 읽어 옴. 값이 없으면 토글 미리보기에서 고른 값으로 시작.
+    androidx.compose.runtime.LaunchedEffect(presetId) {
+        if (!p.containsKey("risuToggles") && linked) runCatching {
+            val file = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { space.sgu.next.data.RisuPreset.read(ctx, android.net.Uri.parse(p.s("risuUri"))) }
+            patchPreset("risuToggles" to JsonPrimitive(file.s("customPromptTemplateToggle")), "risuName" to JsonPrimitive(file.s("name")))
+        }
+        val cur = PromptBlocks.presets().firstOrNull { it.s("id") == presetId }
+        if (cur != null && !cur.containsKey("risuToggleValues") && cur.s("risuName").isNotBlank()) {
+            val seed = space.sgu.next.data.RisuToggles.load(ctx, cur.s("risuName").ifBlank { "이름 없는 프리셋" }).filterKeys { !it.startsWith("\u0000") }
+            if (seed.isNotEmpty()) patchPreset("risuToggleValues" to JsonObject(seed.mapValues { JsonPrimitive(it.value) }))
+        }
+    }
     // 블록을 고쳐도 원본 파일은 건드리지 않음. '원본 파일에 저장'을 눌러야 덮어씀.
     fun setBlocks(f: (MutableList<JsonObject>) -> Unit) = editPresets { l ->
         val i = l.indexOfFirst { it.s("id") == presetId }
@@ -504,7 +523,8 @@ fun PromptPresetScreen(presetId: String, onBack: () -> Unit) {
                     val fresh = space.sgu.next.data.RisuPreset.toSguBlocks(file).first.filter { it["risuItem"] != null }
                     editPresets { l ->
                         val i = l.indexOfFirst { it.s("id") == presetId }
-                        if (i >= 0) l[i] = JsonObject(l[i] + mapOf("blocks" to JsonArray(fresh + l[i].arr("blocks").filter { it["risuItem"] == null }), "risuDirty" to JsonPrimitive(false)))
+                        if (i >= 0) l[i] = JsonObject(l[i] + mapOf("blocks" to JsonArray(fresh + l[i].arr("blocks").filter { it["risuItem"] == null }), "risuDirty" to JsonPrimitive(false),
+                            "risuToggles" to JsonPrimitive(file.s("customPromptTemplateToggle")), "risuName" to JsonPrimitive(file.s("name"))))
                     }
                     sync = true to "원본 파일에서 다시 불러왔어요 (RisuAI 블록 ${fresh.size}개)."
                 }
@@ -519,6 +539,11 @@ fun PromptPresetScreen(presetId: String, onBack: () -> Unit) {
             Spacer(Modifier.height(8.dp))
             LineButton("원본에서 다시 불러오기", onClick = { reloading = true }, modifier = Modifier.fillMaxWidth())
             Spacer(Modifier.height(10.dp))
+        }
+        if (fromRisu) {
+            LineButton(if (toggleCount > 0) "토글 설정 · ${toggleCount}개" else "토글 설정", onClick = { toggling = true }, modifier = Modifier.fillMaxWidth(), icon = Icons.Outlined.Tune)
+            Hint("RisuAI 글 블록의 토글 조건문은 여기서 고른 값대로 풀려서 작업실 프롬프트에 들어가요.")
+            Spacer(Modifier.height(6.dp))
         }
         Hint("위에서 아래 순서로 메인 프로세서에 전달됩니다. 블록을 누르면 편집합니다.")
         blocks.forEachIndexed { i, b ->
@@ -577,6 +602,9 @@ fun PromptPresetScreen(presetId: String, onBack: () -> Unit) {
         },
         confirmButton = { TextButton(onClick = { adding = false }) { Text("닫기", color = Sgu.Sub) } },
     )
+    if (toggling) WorkshopToggleDialog(toggleDefs, PromptBlocks.toggleValues(p), onSet = { k, v ->
+        patchPreset("risuToggleValues" to JsonObject(PromptBlocks.toggleValues(p).mapValues { JsonPrimitive(it.value) } + (k to JsonPrimitive(v))))
+    }, onDismiss = { toggling = false })
     if (reloading) ConfirmDialog("원본에서 다시 불러오기", "저장하지 않은 변경을 버리고, RisuAI 블록을 원본 파일 내용으로 되돌립니다. SGU 작업실 블록은 그대로 둡니다.", "불러오기",
         onConfirm = { reloadFromFile() }, onDismiss = { reloading = false })
     if (restore) ConfirmDialog("기본값 복원", "이 프리셋의 블록을 기본 구성으로 되돌릴까요?", "복원", onConfirm = { setBlocks { it.clear(); it.addAll(PromptBlocks.defaults()) } }, onDismiss = { restore = false })
