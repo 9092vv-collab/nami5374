@@ -3,6 +3,11 @@ package space.sgu.next.ui
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -79,6 +84,7 @@ fun RisuPresetScreen(onBack: () -> Unit) {
     var removing by remember { mutableStateOf<Int?>(null) }
     var msg by remember { mutableStateOf("") }
     var previewing by remember { mutableStateOf(false) }
+    var retyping by remember { mutableStateOf<Int?>(null) }
     val saveRisup = rememberSaver("application/octet-stream")
     val saveJson = rememberSaver("application/json")
     val opener = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { u ->
@@ -133,6 +139,12 @@ fun RisuPresetScreen(onBack: () -> Unit) {
                         if (role.isNotBlank()) Badge(RisuPreset.roleLabel(role), Sgu.Bubble, Sgu.Sub)
                         if (it.s("type") == "chat") Badge("${it.s("rangeStart")} ~ ${it.s("rangeEnd")}", Sgu.Bubble, Sgu.Sub)
                         if (it.s("type") == "cache") Badge("깊이 ${it.s("depth")}", Sgu.Bubble, Sgu.Sub)
+                        Row(Modifier.clip(RoundedCornerShape(50)).background(Sgu.Bubble).clickable { retyping = i }.padding(horizontal = 10.dp, vertical = 3.dp),
+                            verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Outlined.Edit, "이름 · 타입 바꾸기", tint = Sgu.Sub, modifier = Modifier.size(13.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("이름 · 타입", style = MaterialTheme.typography.labelMedium, color = Sgu.Sub)
+                        }
                     }
                     if (key != null) {
                         val text = it.s(key)
@@ -172,6 +184,15 @@ fun RisuPresetScreen(onBack: () -> Unit) {
     }
 
     if (previewing && p != null) RisuTogglePreviewDialog(p) { previewing = false }
+    retyping?.let { i ->
+        val items = RisuPreset.items(p ?: JsonObject(emptyMap()))
+        val item = items.getOrNull(i)
+        if (item == null) { retyping = null; return@let }
+        BlockTypeDialog(item, onDismiss = { retyping = null }) { name, type, type2 ->
+            RisuPresetEditor.setItems(items.toMutableList().apply { this[i] = RisuPreset.retype(item, name, type, type2) })
+            retyping = null
+        }
+    }
     editing?.let { idx ->
         val legacyKey = if (idx < 0) listOf("mainPrompt", "jailbreak", "globalNote")[-1 - idx] else null
         val items = RisuPreset.items(p ?: JsonObject(emptyMap()))
@@ -211,4 +232,38 @@ fun TextEditDialog(title: String, initial: String, onDismiss: () -> Unit, onSave
                 modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp))
         }
     }
+}
+
+/** RisuAI 프롬프트 편집의 "이름 · 타입" (+ 순수/탈옥 프롬프트의 특수 타입). */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun BlockTypeDialog(item: JsonObject, onDismiss: () -> Unit, onSave: (String, String, String) -> Unit) {
+    var name by remember { mutableStateOf(item.s("name")) }
+    var type by remember { mutableStateOf(item.s("type")) }
+    var type2 by remember { mutableStateOf(item.s("type2").ifBlank { "normal" }) }
+    val types = RisuPreset.TYPES + if (item.s("type") == "cot") listOf("cot" to "생각의 사슬(CoT)") else emptyList()
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("이름 · 타입") },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                FieldLabel("이름")
+                InputBox(name, { name = it })
+                FieldLabel("타입")
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    types.forEach { (k, label) -> PillChip(label, type == k) { type = k } }
+                }
+                if (type in setOf("plain", "jailbreak", "cot")) {
+                    FieldLabel("특수 타입")
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        RisuPreset.SPECIAL.forEach { (k, label) -> PillChip(label, type2 == k) { type2 = k } }
+                    }
+                }
+                if (type != item.s("type")) Hint("타입을 바꿔도 이미 적어 둔 글은 지우지 않고 그대로 보관해요.")
+            }
+        },
+        confirmButton = { TextButton(onClick = { onSave(name, type, type2) }) { Text("저장", color = Sgu.Ink, fontWeight = FontWeight.Bold) } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("취소", color = Sgu.Sub) } },
+        containerColor = Sgu.Card,
+    )
 }

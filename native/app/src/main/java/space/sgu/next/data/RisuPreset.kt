@@ -98,20 +98,36 @@ object RisuPreset {
 
     fun items(p: JsonObject): List<JsonObject> = (p["promptTemplate"] as? JsonArray)?.mapNotNull { it as? JsonObject } ?: emptyList()
 
+    /** RisuAI 프롬프트 편집 화면의 타입 목록 (순서·이름 그대로). */
+    val TYPES = listOf("plain" to "순수 프롬프트", "jailbreak" to "탈옥 프롬프트", "chat" to "챗", "persona" to "페르소나 프롬프트",
+        "description" to "캐릭터 설명", "authornote" to "작가의 노트", "lorebook" to "로어북", "memory" to "장기 기억",
+        "postEverything" to "최종 삽입 프롬프트", "chatML" to "chatML", "cache" to "캐시 포인트")
+    val SPECIAL = listOf("normal" to "없음", "main" to "메인 프롬프트", "globalNote" to "글로벌 노트")
+
     fun typeLabel(x: JsonObject): String = when (x.s("type")) {
-        "plain" -> when (x.s("type2")) { "main" -> "메인 프롬프트"; "globalNote" -> "글로벌 노트"; else -> "일반 프롬프트" }
-        "jailbreak" -> "탈옥 프롬프트"
+        "plain" -> when (x.s("type2")) { "main" -> "메인 프롬프트"; "globalNote" -> "글로벌 노트"; else -> "순수 프롬프트" }
         "cot" -> "생각의 사슬(CoT)"
-        "chatML" -> "ChatML"
-        "persona" -> "페르소나"
-        "description" -> "캐릭터 설명"
-        "lorebook" -> "로어북"
-        "postEverything" -> "모든 것 뒤에"
-        "memory" -> "장기 기억"
-        "authornote" -> "작가의 노트"
-        "chat" -> "채팅"
-        "cache" -> "캐시"
-        else -> x.s("type")
+        else -> TYPES.firstOrNull { it.first == x.s("type") }?.second ?: x.s("type")
+    }
+
+    /** 이름·타입 바꾸기. 타입이 바뀌면 RisuAI처럼 그 타입의 기본 칸을 채움 (단, 이미 있는 글은 지우지 않음). */
+    fun retype(x: JsonObject, name: String, type: String, type2: String): JsonObject {
+        val m = x.toMutableMap()
+        m["name"] = JsonPrimitive(name)
+        val changed = x.s("type") != type
+        m["type"] = JsonPrimitive(type)
+        when (type) {
+            "plain", "jailbreak", "cot" -> {
+                if (m["text"] !is JsonPrimitive) m["text"] = JsonPrimitive("")
+                if (x.s("role") !in setOf("user", "bot", "system")) m["role"] = JsonPrimitive("system")
+                m["type2"] = JsonPrimitive(type2)
+            }
+            "chatML" -> if (m["text"] !is JsonPrimitive) m["text"] = JsonPrimitive("")
+            "cache" -> if (changed) { m["depth"] = JsonPrimitive(1); m["role"] = JsonPrimitive("all") }
+            "chat" -> if (changed) { m["rangeStart"] = JsonPrimitive(-1000); m["rangeEnd"] = JsonPrimitive("end") }
+            "persona", "description", "authornote", "memory" -> if (x.s("role2") !in setOf("user", "bot", "system", "assistant")) m["role2"] = JsonPrimitive("system")
+        }
+        return JsonObject(m)
     }
 
     fun roleLabel(r: String) = when (r) { "user" -> "유저"; "bot" -> "봇"; "system" -> "시스템"; "assistant" -> "어시스턴트"; "all" -> "전체"; else -> r.ifBlank { "시스템" } }
