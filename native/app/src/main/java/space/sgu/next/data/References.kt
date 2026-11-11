@@ -299,8 +299,8 @@ object References {
                 val text = SguData.serialize(data, f.id); if (text.isBlank()) continue
                 val rid = "$XC$id:${f.id}"
                 xcTexts[rid] = text
-                out.add(Xc(obj("id" to rid, "name" to "$name's ${f.aiLabel}", "kind" to "text", "ext" to "txt", "mime" to "text/plain", "bytes" to text.length,
-                    "createdAt" to 0, "note" to "${text.length} characters", "mode" to "sub"), name, f.id, f.aiLabel, text))
+                out.add(Xc(obj("id" to rid, "name" to "$name's ${BuiltinPrompts.label(f.id)}", "kind" to "text", "ext" to "txt", "mime" to "text/plain", "bytes" to text.length,
+                    "createdAt" to 0, "note" to "${text.length} characters", "mode" to "sub"), name, f.id, BuiltinPrompts.label(f.id), text))
             }
         }
         return out

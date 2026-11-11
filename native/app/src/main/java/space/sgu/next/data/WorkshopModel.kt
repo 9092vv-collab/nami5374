@@ -296,7 +296,7 @@ object SguData {
         val out = mutableListOf<String>()
         for (id in ids) {
             val f = WFields.map[id] ?: continue
-            out.add("- $id — ${f.aiLabel}: ${WFields.description(id)}")
+            out.add("- $id — ${BuiltinPrompts.label(id)}: ${WFields.description(id)}")
             for ((op, v) in if (f.kind == "gen") GenOps.ops(id) else opsFor(f.kind)) out.add("    op \"$op\": value = $v")
         }
         return out.joinToString("\n")
@@ -795,18 +795,18 @@ object Prompt {
         val sum = e.summary?.trim().orEmpty()
         if (list.isEmpty() && sum.isEmpty()) return ""
         val lines = list.mapIndexed { i, t ->
-            val ed = t.arr("edits").takeIf { it.isNotEmpty() }?.joinToString(", ") { "${it.s("field")}:${it.s("op")}" } ?: "no edits"
-            "${i + 1}. User: ${t.s("command")}\n   Result: ${t.s("response").take(300)} [$ed]"
+            val ed = t.arr("edits").takeIf { it.isNotEmpty() }?.joinToString(", ") { "${it.s("field")}:${it.s("op")}" } ?: BuiltinPrompts.get("main.noEdits")
+            BuiltinPrompts.t("main.turnLine", "n" to "${i + 1}", "command" to t.s("command"), "response" to t.s("response").take(300), "edits" to ed)
         }
         // Session summary (SGU Next): earlier turns folded into a short summary, then the recent turns as before.
         val body = if (sum.isEmpty()) lines.joinToString("\n")
-            else "Summary of earlier turns in this session:\n$sum" + if (lines.isNotEmpty()) "\n\nRecent turns:\n" + lines.joinToString("\n") else ""
+            else BuiltinPrompts.t("main.historySummary", "summary" to sum) + if (lines.isNotEmpty()) "\n\n" + BuiltinPrompts.t("main.historyRecent", "turns" to lines.joinToString("\n")) else ""
         return PromptBlocks.applySlot(block.s("text"), body)
     }
 
     private fun build(e: Input, cap: Int): Assembled {
         val parts = mutableListOf<PromptPart>(); val msgs = mutableListOf<Msg>()
-        var pending = e.images.flatMap { listOf(Part(text = "[Attached image]"), it) }.toMutableList()
+        var pending = e.images.flatMap { listOf(Part(text = BuiltinPrompts.get("main.image")), it) }.toMutableList()
         for (l in e.blocks) {
             if (!l.b("enabled", true)) continue
             var text = ""; var fieldIds = emptyList<String>(); var imgs = emptyList<Part>()
@@ -819,21 +819,21 @@ object Prompt {
                     for (id in e.viewFields) {
                         val f = WFields.map[id] ?: continue; if (!f.viewable) continue
                         val v = SguData.serialize(e.data, id)
-                        rows.add(fmt.replace("{{label}}", f.aiLabel).replace("{{id}}", id).replace("{{value}}", v.ifEmpty { "(empty)" })); ids.add(id)
+                        rows.add(fmt.replace("{{label}}", BuiltinPrompts.label(id)).replace("{{id}}", id).replace("{{value}}", v.ifEmpty { BuiltinPrompts.get("main.emptyValue") })); ids.add(id)
                     }
-                    text = PromptBlocks.applySlot(l.s("text"), if (rows.isNotEmpty()) rows.joinToString("\n") else "(no fields are visible this turn)"); fieldIds = ids
+                    text = PromptBlocks.applySlot(l.s("text"), if (rows.isNotEmpty()) rows.joinToString("\n") else BuiltinPrompts.get("main.noFields")); fieldIds = ids
                 }
                 "fieldSchema" -> { text = PromptBlocks.applySlot(l.s("text"), SguData.describeEditable(e.data, e.editFields)); fieldIds = e.editFields }
                 "references" -> {
                     if (e.references.isEmpty()) continue
                     val chunks = mutableListOf<String>()
                     for (r in e.references) {
-                        if (r.text != null) chunks.add(if (r.kind == "persona") "### Persona of {{user}} (${r.name}) — information about the user, who is {{user}}\n${if (r.sendNote && !r.note.isNullOrEmpty()) "Note: ${r.note}\n" else ""}${r.text}"
+                        if (r.text != null) chunks.add(if (r.kind == "persona") BuiltinPrompts.t("main.refPersona", "name" to r.name) + "\n${if (r.sendNote && !r.note.isNullOrEmpty()) BuiltinPrompts.t("main.refNote", "note" to r.note) + "\n" else ""}${r.text}"
                             else "### ${r.name}${if (!r.note.isNullOrEmpty()) " — ${r.note}" else ""}\n${r.text}")
                         if (r.image != null) {
-                            val label = if (r.kind == "persona") "persona image of {{user}} (${r.name})" else r.name + (if (!r.note.isNullOrEmpty()) " — ${r.note}" else "")
-                            chunks.add("### ${r.name}\n(Image attached to the user's message below.)")
-                            pending.add(Part(text = "[Attached image: $label]")); pending.add(r.image)
+                            val label = if (r.kind == "persona") BuiltinPrompts.t("main.personaImage", "name" to r.name) else r.name + (if (!r.note.isNullOrEmpty()) " — ${r.note}" else "")
+                            chunks.add("### ${r.name}\n" + BuiltinPrompts.get("main.refImage"))
+                            pending.add(Part(text = BuiltinPrompts.t("main.imageLabel", "label" to label))); pending.add(r.image)
                         }
                     }
                     text = PromptBlocks.applySlot(l.s("text"), chunks.joinToString("\n\n"))
@@ -841,12 +841,12 @@ object Prompt {
                 "history" -> { text = history(e, l, cap); if (text.isEmpty()) continue }
                 "command" -> {
                     if (pending.isNotEmpty()) {
-                        if (role == "user") imgs = pending else msgs.add(Msg("user", parts = listOf(Part(text = "(Images attached by the user)")) + pending))
+                        if (role == "user") imgs = pending else msgs.add(Msg("user", parts = listOf(Part(text = BuiltinPrompts.get("main.imagesMsg"))) + pending))
                         pending = mutableListOf()
                     }
-                    text = PromptBlocks.applySlot(l.s("text"), if (!e.instruction) "${e.command}\n\n[Note: the user is making ordinary conversation, not giving an instruction. Reply naturally in \"message\" and return an empty \"edits\" array.]" else e.command)
+                    text = PromptBlocks.applySlot(l.s("text"), if (!e.instruction) "${e.command}\n\n" + BuiltinPrompts.get("main.chatNote") else e.command)
                 }
-                "outputFormat" -> text = l.s("text").ifBlank { SguData.OUTPUT_FORMAT_TEXT }
+                "outputFormat" -> text = l.s("text").ifBlank { BuiltinPrompts.get("main.outputFormat") }
                 "cachePoint" -> { msgs.lastOrNull()?.cacheAfter = true; parts.add(PromptPart(l.s("name"), "cachePoint", role, "", 0, emptyList())); continue }
             }
             if (text.isBlank() && imgs.isEmpty()) continue

@@ -405,7 +405,7 @@ object Chat {
         if (r.jsonSchema != null && r.structuredOutput != "none") {
             val last = msgs.last()
             if (last.role == "user") last.content.add(buildJsonObject {
-                put("type", "text"); put("text", "Respond with a single JSON object only (no prose, no code fences) matching this JSON schema:\n${js(r.jsonSchema.schema)}")
+                put("type", "text"); put("text", BuiltinPrompts.t("chat.jsonOnly", "schema" to js(r.jsonSchema.schema)))
             })
         }
         val o = mutableMapOf<String, JsonElement>(

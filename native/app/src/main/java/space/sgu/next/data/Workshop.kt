@@ -265,11 +265,11 @@ object WebSearch {
 
     suspend fun context(q: String): String = try {
         val r = search(q)
-        if (r.isEmpty()) "Web search for \"$q\" returned no results (the search service may be blocked or unavailable). Answer from your own knowledge and say that search found nothing."
-        else "Web search results for \"$q\" (retrieved just now). Use them when relevant and mention the source URL when you rely on one.\n\n" +
-            r.mapIndexed { i, h -> "[${i + 1}] ${h.title}\n${h.url}\n${h.snippet}${h.page?.let { "\nPage excerpt: $it" } ?: ""}" }.joinToString("\n\n")
+        if (r.isEmpty()) BuiltinPrompts.t("web.empty", "query" to q)
+        else BuiltinPrompts.t("web.results", "query" to q, "results" to
+            r.mapIndexed { i, h -> "[${i + 1}] ${h.title}\n${h.url}\n${h.snippet}${h.page?.let { "\nPage excerpt: $it" } ?: ""}" }.joinToString("\n\n"))
     } catch (e: CancellationException) { throw e } catch (e: Exception) {
-        "Web search for \"$q\" failed (${e.message}). Tell the user that web search is unavailable right now and answer from your own knowledge."
+        BuiltinPrompts.t("web.failed", "query" to q, "error" to (e.message ?: ""))
     }
 }
 
@@ -303,7 +303,8 @@ object Processors {
         return if (n.isEmpty()) command else (n + "User: $command").joinToString("\n")
     }
 
-    private fun describe(data: JsonObject, id: String) = "${WFields.map[id]?.aiLabel} ($id): ${WFields.description(id)} Currently ${if (SguData.isEmpty(data, id)) "EMPTY" else "has content"}."
+    private fun describe(data: JsonObject, id: String) = BuiltinPrompts.t("sub.fieldLine", "label" to BuiltinPrompts.label(id), "id" to id, "description" to WFields.description(id),
+        "state" to BuiltinPrompts.get(if (SguData.isEmpty(data, id)) "sub.stateEmpty" else "sub.stateFilled"))
 
     private val SUB_SCHEMA = JsonSchema("sgu_sub_decision", buildJsonObject {
         put("type", "object")
@@ -326,15 +327,15 @@ object Processors {
             ?: throw ProviderError("Jev 프로바이더가 설정되지 않았습니다. 설정 › 프로세서에서 Jev를 지정하세요.")
         val (view, edit) = Perms.candidates(doc.o("permissions").orEmptyObj())
         val refCands = References.subCandidates(doc)
-        val state = (listOf("The user is editing a RisuAI character card with an AI assistant.",
-            "User command (the last message is the one to act on; earlier lines are context only): \"\"\"${subInput(doc, command)}\"\"\"", "", "Character fields:") +
+        val state = (listOf(BuiltinPrompts.get("jev.intro"),
+            BuiltinPrompts.t("sub.user", "command" to subInput(doc, command)), "", BuiltinPrompts.get("jev.fieldsHeading")) +
             WFields.all.filter { it.viewable }.map { "- " + describe(data, it.id) } +
-            refCands.let { c -> if (c.isEmpty()) emptyList() else listOf("", "Reference materials:") + c.map { "- " + References.describe(it) } }).joinToString("\n")
+            refCands.let { c -> if (c.isEmpty()) emptyList() else listOf("", BuiltinPrompts.get("jev.refsHeading")) + c.map { "- " + References.describe(it) } }).joinToString("\n")
         val q = mutableMapOf<String, JsonElement>()
-        q["intent:instruction"] = buildJsonObject { put("type", "noul"); put("instructions", "Is the user's intent an instruction or command to create, change or look up the character (not just ordinary conversation, a greeting, a question about the assistant, or small talk)? Answer yes only if the user wants the assistant to do work on the character.") }
-        for (e in view) q["view:$e"] = buildJsonObject { put("type", "noul"); put("instructions", "To carry out the user command well, does the assistant need to READ the current content of the field \"$e\"? Answer yes only if the command depends on or should stay consistent with that field.") }
-        for (r in refCands) q["view:ref:${r.s("id")}"] = buildJsonObject { put("type", "noul"); put("instructions", "Does the assistant need to READ the reference material \"${r.s("name")}\" to carry out the user command well? Answer yes only if the command clearly benefits from it.") }
-        for (e in edit) q["edit:$e"] = buildJsonObject { put("type", "noul"); put("instructions", "To carry out the user command, should the assistant MODIFY the field \"$e\" (write, change, add to or delete from it)? Answer yes only if the command explicitly or clearly implies changing this field.") }
+        q["intent:instruction"] = buildJsonObject { put("type", "noul"); put("instructions", BuiltinPrompts.get("jev.qIntent")) }
+        for (e in view) q["view:$e"] = buildJsonObject { put("type", "noul"); put("instructions", BuiltinPrompts.t("jev.qView", "field" to e)) }
+        for (r in refCands) q["view:ref:${r.s("id")}"] = buildJsonObject { put("type", "noul"); put("instructions", BuiltinPrompts.t("jev.qRef", "name" to r.s("name"))) }
+        for (e in edit) q["edit:$e"] = buildJsonObject { put("type", "noul"); put("instructions", BuiltinPrompts.t("jev.qEdit", "field" to e)) }
         val t0 = System.currentTimeMillis()
         val timeout = minOf(SettingsStore.root.d("requestTimeoutMs")?.toInt() ?: 180000, 90000)
         val res = Chat.jevSystemOne(p, o.s("jevModel").ifBlank { "jev-latest" }, state, JsonObject(q), timeout, SettingsStore.root.d("retries")?.toInt() ?: 2)
@@ -359,17 +360,11 @@ object Processors {
         val fallback = SettingsStore.model(o.sOrNull("fallbackModelId"))
         val (view, edit) = Perms.candidates(doc.o("permissions").orEmptyObj())
         val refCands = References.subCandidates(doc)
-        val system = (listOf(
-            "You are the planning stage of a RisuAI character-card editing assistant.",
-            "First judge the user's intent: is it an instruction/command to work on the character (instruction=true), or ordinary conversation rather than a command (instruction=false)? For ordinary conversation, return empty view and edit lists.",
-            "Given the user's command and the list of character fields, decide which fields the writing stage must READ and which it must MODIFY.",
-            "Be minimal: request reading only fields the command depends on, and modifying only fields the command asks to change.",
-            "Fields that are always visible or never allowed are omitted from the lists below; do not invent field ids.",
-            "", "Fields available to READ:") + view.map { "- " + describe(data, it) } +
-            (if (refCands.isEmpty()) emptyList() else listOf("", "Reference materials available to READ (use the ref:<id> value in the 'view' array):") + refCands.map { "- " + References.describe(it) }) +
-            listOf("", "Fields available to MODIFY:") + edit.map { "- $it" } +
-            listOf("", "Respond with JSON: {\"instruction\": boolean, \"task\": string, \"view\": string[], \"edit\": string[], \"reasons\": {fieldId: string}}")).joinToString("\n")
-        val user = "User command (the last message is the one to act on; earlier lines are context only): \"\"\"${subInput(doc, command)}\"\"\""
+        val system = (listOf(BuiltinPrompts.get("sub.system"), "", BuiltinPrompts.get("sub.viewHeading")) + view.map { "- " + describe(data, it) } +
+            (if (refCands.isEmpty()) emptyList() else listOf("", BuiltinPrompts.get("sub.refHeading")) + refCands.map { "- " + References.describe(it) }) +
+            listOf("", BuiltinPrompts.get("sub.editHeading")) + edit.map { "- $it" } +
+            listOf("", BuiltinPrompts.get("sub.format"))).joinToString("\n")
+        val user = BuiltinPrompts.t("sub.user", "command" to subInput(doc, command))
 
         suspend fun call(m: JsonObject, maxOverride: Int?): String {
             val base = maxOf(4096, minOf(m.o("params").d("maxTokens")?.toInt() ?: 4096, 16384))
@@ -402,18 +397,12 @@ object Processors {
         val subModel = if (!sub.b("disabled") && sub.s("strategy") != "jev") SettingsStore.model(sub.sOrNull("modelId")) else null
         val m = subModel ?: SettingsStore.model(SettingsStore.root.o("processors").o("main").sOrNull("modelId"))
             ?: throw ProviderError("요약에 쓸 모델이 없습니다. 설정 › 프로세서에서 모델을 지정하세요.")
-        val system = listOf(
-            "You keep a running summary of a session in which a user edits a RisuAI character card with an AI assistant.",
-            "Merge the previous summary (if any) with the new turns into ONE short summary.",
-            "Keep only what later turns need: the user's goals, decisions, preferences and constraints, and which fields were changed and how.",
-            "Do not copy field contents (the card itself is always sent separately). Drop small talk.",
-            "At most 10 short bullet points, under 1,200 characters. Write in the language the user writes in. Output only the summary.",
-        ).joinToString("\n")
+        val system = BuiltinPrompts.get("summary.system")
         val lines = turns.mapIndexed { i, t ->
-            val ed = t.arr("edits").takeIf { it.isNotEmpty() }?.joinToString(", ") { "${it.s("field")}:${it.s("op")}" } ?: "no edits"
-            "${i + 1}. User: ${t.s("command")}\n   Result: ${t.s("response").take(600)} [$ed]"
+            val ed = t.arr("edits").takeIf { it.isNotEmpty() }?.joinToString(", ") { "${it.s("field")}:${it.s("op")}" } ?: BuiltinPrompts.get("main.noEdits")
+            BuiltinPrompts.t("main.turnLine", "n" to "${i + 1}", "command" to t.s("command"), "response" to t.s("response").take(600), "edits" to ed)
         }
-        val user = (if (!previous.isNullOrBlank()) "Previous summary:\n$previous\n\n" else "") + "New turns:\n" + lines.joinToString("\n")
+        val user = (if (!previous.isNullOrBlank()) BuiltinPrompts.t("summary.previous", "summary" to previous) else "") + BuiltinPrompts.t("summary.turns", "turns" to lines.joinToString("\n"))
         val params = JsonObject(m.o("params").orEmptyObj() + ("maxTokens" to JsonPrimitive(maxOf(2048, minOf(m.o("params").d("maxTokens")?.toInt() ?: 2048, 8192)))))
         val req = Chat.buildRequest(m, listOf(Msg("system", system), Msg("user", user)), stream = false, params = params, cacheOff = true)
         val t0 = System.currentTimeMillis()

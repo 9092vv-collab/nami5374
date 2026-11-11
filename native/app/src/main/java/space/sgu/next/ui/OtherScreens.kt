@@ -87,14 +87,18 @@ fun SettingsScreen(open: (String) -> Unit) {
             item { GroupRow(1, 3, "프로바이더", subtitle = SettingsStore.providers.size.let { if (it == 0) "없음 · 눌러서 추가" else "${it}개 · " + SettingsStore.providers.joinToString(", ") { p -> p.s("name") } }, icon = Icons.Outlined.Key, onClick = { open("providers") }) }
             item { GroupRow(2, 3, "모델", subtitle = "등록된 모델 ${SettingsStore.models.size}개", icon = Icons.Outlined.Memory, onClick = { open("models") }) }
             item { SectionLabel("권한 · 프롬프트") }
-            item { GroupRow(0, 4, "새 캐릭터 기본 권한", subtitle = "필드별 열람/편집 기본 등급", icon = Icons.Outlined.Shield, onClick = { open("permdefaults") }) }
-            item { GroupRow(1, 4, "항목 설명", subtitle = "서브 프로세서가 판단할 때 보는 항목별 설명", icon = Icons.Outlined.Description, onClick = { open("fielddescs") }) }
+            item { GroupRow(0, 5, "새 캐릭터 기본 권한", subtitle = "필드별 열람/편집 기본 등급", icon = Icons.Outlined.Shield, onClick = { open("permdefaults") }) }
+            item { GroupRow(1, 5, "항목 설명", subtitle = "서브 프로세서가 판단할 때 보는 항목별 설명", icon = Icons.Outlined.Description, onClick = { open("fielddescs") }) }
             item {
                 val presets = SettingsStore.root.arr("promptPresets")
                 val active = presets.firstOrNull { it.s("id") == SettingsStore.root.s("activePromptPresetId") }?.s("name") ?: "-"
-                GroupRow(2, 4, "프롬프트 프리셋", subtitle = "${presets.size}개 프리셋 · 기본값: $active", icon = Icons.Outlined.SmartToy, onClick = { open("promptpresets") })
+                GroupRow(2, 5, "프롬프트 프리셋", subtitle = "${presets.size}개 프리셋 · 기본값: $active", icon = Icons.Outlined.SmartToy, onClick = { open("promptpresets") })
             }
-            item { GroupRow(3, 4, "세션 요약", subtitle = if (space.sgu.next.data.Workshop.summaryEnabled()) "자동 요약 켜짐 · 최근 ${space.sgu.next.data.Workshop.summaryKeep()}턴 원문" else "자동 요약 꺼짐", icon = Icons.Outlined.Summarize, onClick = { open("sessionsummary") }) }
+            item {
+                val n = space.sgu.next.data.BuiltinPrompts.items.count { space.sgu.next.data.BuiltinPrompts.overridden(it.key) }
+                GroupRow(3, 5, "내장 프롬프트", subtitle = "앱에 들어 있는 서브 판단 · 요약 · 출력 형식 문구" + if (n > 0) " · ${n}개 수정됨" else "", icon = Icons.Outlined.Description, onClick = { open("builtinprompts") })
+            }
+            item { GroupRow(4, 5, "세션 요약", subtitle = if (space.sgu.next.data.Workshop.summaryEnabled()) "자동 요약 켜짐 · 최근 ${space.sgu.next.data.Workshop.summaryKeep()}턴 원문" else "자동 요약 꺼짐", icon = Icons.Outlined.Summarize, onClick = { open("sessionsummary") }) }
             item { SectionLabel("프로젝트 · 저장") }
             item { GroupRow(0, 3, "제작자 이름", subtitle = SettingsStore.root.s("creatorName").trim().ifEmpty { "비워 두면 새 프로젝트의 제작자도 비어 있습니다" }, icon = Icons.Outlined.Badge, onClick = { editingCreator = true }) }
             item { GroupRow(1, 3, "되돌리기 버튼을 프로젝트명 아래에 표시", subtitle = "켜면 채팅 입력창 옆 대신 상단 프로젝트명 아래로 이동합니다.",
@@ -108,7 +112,7 @@ fun SettingsScreen(open: (String) -> Unit) {
             item { GroupRow(4, 5, "첫 실행 안내 다시 보기", subtitle = "SGU 소개 화면", icon = Icons.Outlined.Info, onClick = { open("welcome") }) }
             item {
                 Text(
-                    "SGU Next 0.9.0 · 캐릭터·스크립트·기타·로어북·설정·이미지·작업실·참고 자료·내보내기 작동",
+                    "SGU Next 0.9.1 · 캐릭터·스크립트·기타·로어북·설정·이미지·작업실·참고 자료·내보내기 작동",
                     modifier = Modifier.fillMaxWidth().padding(24.dp),
                     style = MaterialTheme.typography.bodySmall, color = Sgu.Sub,
                 )

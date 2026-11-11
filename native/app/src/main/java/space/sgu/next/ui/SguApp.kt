@@ -127,6 +127,7 @@ fun SguApp() {
         composable("promptpreset/{pid}") { e -> PromptPresetScreen(e.arguments?.getString("pid") ?: "", onBack = back) }
         composable("permdefaults") { PermissionDefaultsScreen(onBack = back) }
         composable("fielddescs") { FieldDescriptionsScreen(onBack = back) }
+        composable("builtinprompts") { BuiltinPromptsScreen(onBack = back) }
         composable("logs") { LogsScreen(onBack = back) }
         composable("sessionsummary") { SessionSummaryScreen(onBack = back) }
         composable("background") { BackgroundScreen(onBack = back) }
