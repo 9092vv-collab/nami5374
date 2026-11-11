@@ -367,7 +367,8 @@ private fun parsePresets(e: JsonElement?): List<Pair<String, List<JsonObject>>> 
 fun PromptPresetsScreen(openRoute: (String) -> Unit, onBack: () -> Unit) {
     val presets = PromptBlocks.presets()
     val active = PromptBlocks.activePreset().s("id")
-    var selected by remember { mutableStateOf(active) }
+    // 블록 편집에 다녀와도 고른 프리셋이 유지되게 (전에는 기본 프리셋으로 되돌아가서 내보내기가 기본만 나갔음)
+    var selected by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(active) }
     val cur = presets.firstOrNull { it.s("id") == selected } ?: presets.firstOrNull()
     var msg by remember { mutableStateOf("") }
     var renaming by remember { mutableStateOf(false) }
@@ -382,6 +383,7 @@ fun PromptPresetsScreen(openRoute: (String) -> Unit, onBack: () -> Unit) {
         if (u != null) msg = runCatching {
             runCatching { risuCtx.contentResolver.takePersistableUriPermission(u, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION) }
             importRisuToSgu(space.sgu.next.data.RisuPreset.read(risuCtx, u), u, space.sgu.next.data.RisuPreset.nameOf(risuCtx, u))
+                .also { PromptBlocks.presets().lastOrNull()?.let { np -> selected = np.s("id") } }
         }.getOrElse { it.message ?: "가져오지 못했어요" }
     }
     val pick = rememberJsonPicker { o ->
