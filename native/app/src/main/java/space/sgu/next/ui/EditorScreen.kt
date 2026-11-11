@@ -28,9 +28,9 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
-import androidx.compose.foundation.layout.isImeVisible
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.windowInsetsTopHeight
-import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -97,7 +97,7 @@ private val editorTabs = listOf("캐릭터", "이미지", "작업실", "스크�
 fun fieldLabel(key: String): String = Fields.label(key)
 
 /** Character workspace. onBack == null when shown as the right pane on the unfolded screen. */
-@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class, androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 fun EditorScreen(characterId: String, onBack: (() -> Unit)?, openField: (String) -> Unit, openPreset: (String) -> Unit = {}, openRoute: (String) -> Unit = {}) {
     val ctx = LocalContext.current
@@ -124,21 +124,8 @@ fun EditorScreen(characterId: String, onBack: (() -> Unit)?, openField: (String)
     val hitGroups = remember(hits) { hits.keys.map { BotSearch.groupOf(it) }.toSet() }
     val name = meta?.name ?: "(삭제된 캐릭터)"
 
-    // 작업실에서만: 대화를 밀어 올리면 상단바·탭 줄이 숨고, 살짝 내리면 다시 나옴. 키보드가 떠 있어도 숨김.
-    var scrollHidden by remember { mutableStateOf(false) }
-    LaunchedEffect(pager.currentPage) { scrollHidden = false }
-    val imeVisible = androidx.compose.foundation.layout.WindowInsets.isImeVisible
-    val hideChrome = pager.currentPage == 5 && !BotSearch.open && (scrollHidden || imeVisible)
-    val chromeScroll = remember(pager) {
-        object : androidx.compose.ui.input.nestedscroll.NestedScrollConnection {
-            override fun onPreScroll(available: androidx.compose.ui.geometry.Offset, source: androidx.compose.ui.input.nestedscroll.NestedScrollSource): androidx.compose.ui.geometry.Offset {
-                if (pager.currentPage == 5) {
-                    if (available.y < -6f) scrollHidden = true
-                    else if (available.y > 6f) scrollHidden = false
-                }
-                return androidx.compose.ui.geometry.Offset.Zero
-            }
-        }
+    // 작업실에서는 상단바·탭 줄을 항상 숨김 (탭 이동은 좌우로 밀어서). 봇 전체 검색 중엔 보임.
+    val hideChrome = pager.currentPage == 5 && !BotSearch.open
     }
 
     Scaffold(
@@ -175,7 +162,7 @@ fun EditorScreen(characterId: String, onBack: (() -> Unit)?, openField: (String)
                 },
             )
             }
-            if (hideChrome) Spacer(Modifier.windowInsetsTopHeight(androidx.compose.foundation.layout.WindowInsets.statusBars))
+            if (hideChrome) Spacer(Modifier.windowInsetsTopHeight(WindowInsets.statusBars))
           }
         },
     ) { pad ->
@@ -200,7 +187,7 @@ fun EditorScreen(characterId: String, onBack: (() -> Unit)?, openField: (String)
                 exit = androidx.compose.animation.shrinkVertically() + androidx.compose.animation.fadeOut()) {
                 PillTabs(imageTabs, (pager.currentPage - 1).coerceIn(0, 3), { sub -> scope.launch { pager.animateScrollToPage(sub + 1) } })
             }
-            HorizontalPager(state = pager, modifier = Modifier.weight(1f).nestedScroll(chromeScroll), beyondViewportPageCount = 1) { page ->
+            HorizontalPager(state = pager, modifier = Modifier.weight(1f), beyondViewportPageCount = 1) { page ->
                 when (page) {
                     0 -> GroupPage("character", characterId, card, openField, openRoute)
                     in 1..4 -> ImageSubPage(characterId, page - 1, { sub -> scope.launch { pager.animateScrollToPage(sub + 1) } }, openField, openPreset, openRoute, showTabs = false)
