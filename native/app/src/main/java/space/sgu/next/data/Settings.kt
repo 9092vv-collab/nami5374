@@ -108,6 +108,15 @@ object SettingsStore {
                 if (p.s("format") == "novelai-image" && (url.isBlank() || "text.novelai.net" in url)) p.with("baseUrl" to JsonPrimitive(Presets.NAI_IMAGE_URL)) else p
             })
         }
+        // 예전 기본 "JB" 블록(글을 고치지 않은 것)은 모든 프리셋에서 뺌 (사용자 요청, 0.9.2)
+        (merged["promptPresets"] as? JsonArray)?.let { list ->
+            merged["promptPresets"] = JsonArray(list.map { e ->
+                val p = e as? JsonObject ?: return@map e
+                val blocks = p.arr("blocks")
+                val kept = blocks.filterNot { it.s("type") == "text" && it.s("name") == "JB" && it.s("text") == PromptBlocks.JB_TEXT && it["risuItem"] == null }
+                if (kept.size == blocks.size) p else JsonObject(p + ("blocks" to JsonArray(kept)))
+            })
+        }
         return JsonObject(merged)
     }
 

@@ -173,7 +173,7 @@ object RisuPreset {
                 add(name, role, it.s("text"), role != "assistant", "text", it)
             } else { skipped++; add(name, "system", it.s("innerFormat"), true, "risu", it) }
         }
-        val sgu = PromptBlocks.defaults().filterNot { it.s("type") == "text" && it.s("name") == "JB" }
+        val sgu = PromptBlocks.defaults()
         return (out + sgu) to skipped
     }
 
