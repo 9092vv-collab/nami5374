@@ -27,6 +27,7 @@ import androidx.compose.material.icons.outlined.FileOpen
 import androidx.compose.material.icons.outlined.KeyboardArrowDown
 import androidx.compose.material.icons.outlined.KeyboardArrowUp
 import androidx.compose.material.icons.outlined.Save
+import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -77,6 +78,7 @@ fun RisuPresetScreen(onBack: () -> Unit) {
     var editing by remember { mutableStateOf<Int?>(null) }
     var removing by remember { mutableStateOf<Int?>(null) }
     var msg by remember { mutableStateOf("") }
+    var previewing by remember { mutableStateOf(false) }
     val saveRisup = rememberSaver("application/octet-stream")
     val saveJson = rememberSaver("application/json")
     val opener = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { u ->
@@ -99,6 +101,10 @@ fun RisuPresetScreen(onBack: () -> Unit) {
         InputBox(p.s("name"), { RisuPresetEditor.set(JsonObject(p + ("name" to JsonPrimitive(it)))) })
         val models = listOf(p.s("aiModel"), p.s("subModel")).filter { it.isNotBlank() }
         if (models.isNotEmpty()) Hint("RisuAI 모델 설정: ${models.joinToString(" / ")} (SGU에서는 쓰지 않고 그대로 보관만 해요)")
+        Spacer(Modifier.height(12.dp))
+        val toggleCount = remember(p) { space.sgu.next.data.RisuToggles.parse(p.s("customPromptTemplateToggle")).count { it.type in setOf("check", "select", "text", "textarea") } }
+        LineButton(if (toggleCount > 0) "토글 미리보기 · 토글 ${toggleCount}개" else "적용된 프롬프트 미리보기", onClick = { previewing = true },
+            modifier = Modifier.fillMaxWidth(), icon = Icons.Outlined.Visibility)
 
         // 옛 형식 프리셋의 메인 · 탈옥 · 글로벌 노트
         listOf("mainPrompt" to "메인 프롬프트 (옛 형식)", "jailbreak" to "탈옥 프롬프트 (옛 형식)", "globalNote" to "글로벌 노트 (옛 형식)").forEach { (k, label) ->
@@ -165,6 +171,7 @@ fun RisuPresetScreen(onBack: () -> Unit) {
         Hint("RisuAI에서는 설정 › 프롬프트 프리셋 › 가져오기로 저장한 .risup 파일을 불러와요. API 키 같은 칸은 RisuAI 내보내기처럼 비워서 저장해요.")
     }
 
+    if (previewing && p != null) RisuTogglePreviewDialog(p) { previewing = false }
     editing?.let { idx ->
         val legacyKey = if (idx < 0) listOf("mainPrompt", "jailbreak", "globalNote")[-1 - idx] else null
         val items = RisuPreset.items(p ?: JsonObject(emptyMap()))
