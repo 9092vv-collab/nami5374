@@ -155,26 +155,52 @@ object RisuPreset {
     fun toSguBlocks(p: JsonObject): Pair<List<JsonObject>, Int> {
         val out = mutableListOf<JsonObject>()
         var skipped = 0
-        fun add(name: String, role: String, text: String, enabled: Boolean) {
-            if (text.isBlank()) return
-            out.add(JsonObject(mapOf("id" to JsonPrimitive(Scripts.newId("blk")), "type" to JsonPrimitive("text"), "enabled" to JsonPrimitive(enabled),
-                "role" to JsonPrimitive(role), "name" to JsonPrimitive(name), "text" to JsonPrimitive(text))))
+        fun add(name: String, role: String, text: String, enabled: Boolean, type: String = "text", risu: JsonObject? = null) {
+            out.add(JsonObject(mapOf("id" to JsonPrimitive(Scripts.newId("blk")), "type" to JsonPrimitive(type), "enabled" to JsonPrimitive(enabled),
+                "role" to JsonPrimitive(role), "name" to JsonPrimitive(name), "text" to JsonPrimitive(text)) + (if (risu != null) mapOf("risuItem" to risu) else emptyMap())))
         }
         val list = items(p)
         if (list.isEmpty()) {
-            add("메인 프롬프트", "system", p.s("mainPrompt"), true)
-            add("탈옥 프롬프트", "system", p.s("jailbreak"), true)
-            add("글로벌 노트", "system", p.s("globalNote"), true)
+            if (p.s("mainPrompt").isNotBlank()) add("메인 프롬프트", "system", p.s("mainPrompt"), true)
+            if (p.s("jailbreak").isNotBlank()) add("탈옥 프롬프트", "system", p.s("jailbreak"), true)
+            if (p.s("globalNote").isNotBlank()) add("글로벌 노트", "system", p.s("globalNote"), true)
         }
+        // 템플릿 항목은 전부, 원래 순서대로 (원본 파일과 맞추려고). RisuAI 전용 칸은 type "risu" = 작업실 프롬프트에는 안 들어감.
         for (it in list) {
-            if (it.s("type") !in TEXT_TYPES) { skipped++; continue }
-            val role = when (it.s("role")) { "user" -> "user"; "bot" -> "assistant"; else -> "system" }
             val name = "Risu · " + it.s("name").ifBlank { typeLabel(it) }
-            if (it.s("text").isBlank()) { skipped++; continue }
-            add(name, role, it.s("text"), role != "assistant")
+            if (it.s("type") in TEXT_TYPES) {
+                val role = when (it.s("role")) { "user" -> "user"; "bot" -> "assistant"; else -> "system" }
+                add(name, role, it.s("text"), role != "assistant", "text", it)
+            } else { skipped++; add(name, "system", it.s("innerFormat"), true, "risu", it) }
         }
         val sgu = PromptBlocks.defaults().filterNot { it.s("type") == "text" && it.s("name") == "JB" }
         return (out + sgu) to skipped
+    }
+
+    /** 작업실 블록 → RisuAI 템플릿 항목 (risuItem이 달린 블록만, 작업실 순서대로). */
+    fun toRisuItems(blocks: List<JsonObject>): List<JsonObject> = blocks.mapNotNull { b ->
+        val it0 = b["risuItem"] as? JsonObject ?: return@mapNotNull null
+        val m = it0.toMutableMap()
+        val n = b.s("name").removePrefix("Risu · ").trim()
+        if (n.isBlank() || (it0.s("name").isBlank() && n == typeLabel(it0))) { if (it0.s("name").isBlank()) m.remove("name") } else m["name"] = JsonPrimitive(n)
+        val type = it0.s("type")
+        if (type in TEXT_TYPES) {
+            m["text"] = JsonPrimitive(b.s("text"))
+            if (type != "chatML") m["role"] = JsonPrimitive(when (b.s("role")) { "user" -> "user"; "assistant" -> "bot"; else -> "system" })
+        } else if (type in FORMAT_TYPES && (b.s("text").isNotBlank() || it0.containsKey("innerFormat"))) m["innerFormat"] = JsonPrimitive(b.s("text"))
+        JsonObject(m)
+    }
+
+    /** 작업실 프리셋(risuUri가 달린 것)의 블록을 원본 RisuAI 파일에 덮어씀. 나머지 설정은 파일 것 그대로. Returns the new preset object. */
+    fun syncBack(c: Context, sguPreset: JsonObject): JsonObject {
+        val u = Uri.parse(sguPreset.s("risuUri"))
+        val cur = read(c, u)
+        val out = JsonObject(cur + ("promptTemplate" to JsonArray(toRisuItems(sguPreset.arr("blocks")))))
+        val bytes = encodeFor(sguPreset.s("risuFile").ifBlank { nameOf(c, u) }, out)
+        val r = c.contentResolver
+        val os = runCatching { r.openOutputStream(u, "wt") }.getOrNull() ?: r.openOutputStream(u, "w")
+        (os ?: throw NotPreset("파일을 열 수 없어요")).use { it.write(bytes) }
+        return out
     }
 
     // ---------- MessagePack (msgpackr 기본 출력과 호환되는 표준 형식) ----------

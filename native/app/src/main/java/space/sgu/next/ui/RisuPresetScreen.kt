@@ -71,12 +71,14 @@ object RisuPresetEditor {
 }
 
 /** RisuAI 프리셋을 SGU 작업실 프리셋으로 추가. Returns a short result message. */
-fun importRisuToSgu(p: JsonObject): String {
-    val (blocks, skipped) = RisuPreset.toSguBlocks(p)
+fun importRisuToSgu(p: JsonObject, uri: android.net.Uri? = null, fileName: String = ""): String {
+    val (blocks, slots) = RisuPreset.toSguBlocks(p)
     val name = "Risu · " + p.s("name").ifBlank { "가져온 프리셋" }
-    addPreset(name, blocks)
-    val texts = blocks.count { it.s("name").startsWith("Risu · ") || it.s("name") in setOf("메인 프롬프트", "탈옥 프롬프트", "글로벌 노트") }
-    return "'$name' 프리셋을 만들었어요. RisuAI 텍스트 블록 ${texts}개를 넣었어요" + if (skipped > 0) " (롤플레이 전용 칸·빈 칸 ${skipped}개는 건너뜀)." else "."
+    val linked = uri != null && RisuPreset.items(p).isNotEmpty()
+    addPreset(name, blocks, if (linked) mapOf("risuUri" to JsonPrimitive(uri.toString()), "risuFile" to JsonPrimitive(fileName)) else emptyMap())
+    val texts = blocks.count { it.s("type") == "text" && (it["risuItem"] != null || it.s("name") in setOf("메인 프롬프트", "탈옥 프롬프트", "글로벌 노트")) }
+    return "'$name' 프리셋을 만들었어요. RisuAI 텍스트 블록 ${texts}개" + (if (slots > 0) ", RisuAI 전용 칸 ${slots}개(작업실 프롬프트에는 안 들어가요)" else "") + "를 넣었어요." +
+        if (linked) " 블록을 고치면 원본 파일($fileName)에도 저장돼요." else ""
 }
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -207,7 +209,7 @@ fun RisuPresetScreen(onBack: () -> Unit) {
                 val bytes = RisuPreset.encodeJson(p)
                 saveJson("${baseName}_preset.json") { it.write(bytes) }; RisuPresetEditor.dirty = false
             })
-            LineButton("SGU 작업실 프리셋으로", onClick = { msg = importRisuToSgu(p) })
+            LineButton("SGU 작업실 프리셋으로", onClick = { msg = importRisuToSgu(p, RisuPresetEditor.uri, RisuPresetEditor.sourceName) })
             LineButton("다른 파일 열기", onClick = { opener.launch(arrayOf("*/*")) }, icon = Icons.Outlined.FileOpen)
         }
         if (msg.isNotEmpty()) Hint(msg)

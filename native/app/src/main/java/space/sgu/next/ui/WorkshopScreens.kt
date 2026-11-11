@@ -50,6 +50,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
@@ -343,9 +344,9 @@ internal fun editPresets(f: (MutableList<JsonObject>) -> Unit) = SettingsStore.u
     f(l); m["promptPresets"] = JsonArray(l)
 }
 
-internal fun addPreset(name: String, blocks: List<JsonObject>): String {
+internal fun addPreset(name: String, blocks: List<JsonObject>, extra: Map<String, JsonElement> = emptyMap()): String {
     val id = Scripts.newId("preset")
-    editPresets { it.add(buildJsonObject { put("id", JsonPrimitive(id)); put("name", JsonPrimitive(name)); put("blocks", JsonArray(blocks)); put("createdAt", JsonPrimitive(System.currentTimeMillis())) }) }
+    editPresets { it.add(buildJsonObject { put("id", JsonPrimitive(id)); put("name", JsonPrimitive(name)); put("blocks", JsonArray(blocks)); put("createdAt", JsonPrimitive(System.currentTimeMillis())); extra.forEach { (k, v) -> put(k, v) } }) }
     return id
 }
 
@@ -378,7 +379,10 @@ fun PromptPresetsScreen(openRoute: (String) -> Unit, onBack: () -> Unit) {
     }).toByteArray(Charsets.UTF_8)
     val risuCtx = androidx.compose.ui.platform.LocalContext.current
     val risuPick = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.OpenDocument()) { u ->
-        if (u != null) msg = runCatching { importRisuToSgu(space.sgu.next.data.RisuPreset.read(risuCtx, u)) }.getOrElse { it.message ?: "가져오지 못했어요" }
+        if (u != null) msg = runCatching {
+            runCatching { risuCtx.contentResolver.takePersistableUriPermission(u, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION) }
+            importRisuToSgu(space.sgu.next.data.RisuPreset.read(risuCtx, u), u, space.sgu.next.data.RisuPreset.nameOf(risuCtx, u))
+        }.getOrElse { it.message ?: "가져오지 못했어요" }
     }
     val pick = rememberJsonPicker { o ->
         val found = parsePresets(o)
@@ -460,11 +464,30 @@ fun PromptPresetScreen(presetId: String, onBack: () -> Unit) {
     var editing by remember { mutableStateOf<JsonObject?>(null) }
     var adding by remember { mutableStateOf(false) }
     var restore by remember { mutableStateOf(false) }
-    fun setBlocks(f: (MutableList<JsonObject>) -> Unit) = editPresets { l ->
-        val i = l.indexOfFirst { it.s("id") == presetId }
-        if (i >= 0) { val b = l[i].arr("blocks").toMutableList(); f(b); l[i] = JsonObject(l[i] + ("blocks" to JsonArray(b))) }
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    val linked = p.s("risuUri").isNotBlank()
+    var sync by remember { mutableStateOf<Pair<Boolean?, String>>(null to "") }
+    fun setBlocks(f: (MutableList<JsonObject>) -> Unit) {
+        editPresets { l ->
+            val i = l.indexOfFirst { it.s("id") == presetId }
+            if (i >= 0) { val b = l[i].arr("blocks").toMutableList(); f(b); l[i] = JsonObject(l[i] + ("blocks" to JsonArray(b))) }
+        }
+        // 원본 RisuAI 파일과 연결된 프리셋이면 바뀔 때마다 파일에도 저장
+        val now = PromptBlocks.presets().firstOrNull { it.s("id") == presetId } ?: return
+        if (now.s("risuUri").isBlank()) return
+        scope.launch {
+            runCatching { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { space.sgu.next.data.RisuPreset.syncBack(ctx, now) } }
+                .onSuccess { out ->
+                    sync = true to "원본 파일(${now.s("risuFile")})에 저장했어요."
+                    if (RisuPresetEditor.uri?.toString() == now.s("risuUri")) { RisuPresetEditor.preset = out; RisuPresetEditor.dirty = false }
+                }
+                .onFailure { sync = false to "원본 파일에 저장하지 못했어요 (${it.message}). 파일이 옮겨졌거나 지워졌다면 다시 가져와 주세요." }
+        }
     }
     Page("블록 편집", p.s("name"), onBack) {
+        if (linked) Text(sync.second.ifEmpty { "RisuAI 파일 ${p.s("risuFile")}과 연결됨 · 블록을 고치면 원본 파일에도 저장돼요." }, style = MaterialTheme.typography.bodySmall,
+            color = if (sync.first == false) Sgu.Danger else Sgu.Accent, modifier = Modifier.padding(start = 6.dp, bottom = 6.dp))
         Hint("위에서 아래 순서로 메인 프로세서에 전달됩니다. 블록을 누르면 편집합니다.")
         blocks.forEachIndexed { i, b ->
             val on = b.b("enabled", true)
@@ -475,7 +498,7 @@ fun PromptPresetScreen(presetId: String, onBack: () -> Unit) {
             ) {
                 Column(Modifier.weight(1f).padding(vertical = 8.dp)) {
                     Text(b.s("name").ifBlank { b.s("type") }, style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.SemiBold), color = if (on) Sgu.Ink else Sgu.Sub)
-                    Text("${PromptBlocks.TYPE_LABELS[b.s("type")] ?: b.s("type")} · ${b.s("role").ifBlank { "system" }}" + if (!on) " · 꺼짐" else "", style = MaterialTheme.typography.bodySmall, color = Sgu.Sub)
+                    Text("${(b["risuItem"] as? JsonObject)?.let { space.sgu.next.data.RisuPreset.typeLabel(it) + if (b.s("type") == "risu") " · RisuAI 전용" else "" } ?: PromptBlocks.TYPE_LABELS[b.s("type")] ?: b.s("type")} · ${b.s("role").ifBlank { "system" }}" + if (!on) " · 꺼짐" else "", style = MaterialTheme.typography.bodySmall, color = Sgu.Sub)
                 }
                 SguSwitch(on) { v -> setBlocks { l -> l[i] = JsonObject(l[i] + ("enabled" to JsonPrimitive(v))) } }
                 IconButton(onClick = { setBlocks { l -> if (i > 0) { val t = l[i]; l[i] = l[i - 1]; l[i - 1] = t } } }, enabled = i > 0) { Icon(Icons.Outlined.KeyboardArrowUp, "위로", tint = Sgu.Sub) }
@@ -518,6 +541,12 @@ private fun BlockEditDialog(b: JsonObject, onSave: (JsonObject) -> Unit, onDelet
     var fmt by remember(b.s("id")) { mutableStateOf(b.s("fieldFormat").ifBlank { PromptBlocks.DEFAULT_FIELD_FORMAT }) }
     var limit by remember(b.s("id")) { mutableStateOf((b.d("historyLimit")?.toInt() ?: 6).toString()) }
     var type by remember(b.s("id")) { mutableStateOf(b.s("type")) }
+    // RisuAI 파일에서 온 블록: 타입 목록을 RisuAI 것으로 (원본 파일과 맞춤)
+    val RP = space.sgu.next.data.RisuPreset
+    val risu0 = b["risuItem"] as? JsonObject
+    var rtype by remember(b.s("id")) { mutableStateOf(risu0?.s("type") ?: "") }
+    var rtype2 by remember(b.s("id")) { mutableStateOf(risu0?.s("type2")?.ifBlank { "normal" } ?: "normal") }
+    fun risuNow(): JsonObject? = risu0?.let { RP.retype(it, it.s("name"), rtype, rtype2) }
     AlertDialog(
         onDismissRequest = onDismiss, title = { Text("블록 편집") }, containerColor = Sgu.Card,
         text = {
@@ -525,6 +554,29 @@ private fun BlockEditDialog(b: JsonObject, onSave: (JsonObject) -> Unit, onDelet
                 FieldLabel("이름")
                 InputBox(name, { name = it })
                 FieldLabel("타입")
+                if (risu0 != null) {
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        (RP.TYPES + if (risu0.s("type") == "cot") listOf("cot" to "생각의 사슬(CoT)") else emptyList()).forEach { (k, label) -> PillChip(label, rtype == k) {
+                            if (rtype != k) {
+                                val oldLabel = RP.typeLabel(risuNow()!!)
+                                rtype = k
+                                type = if (k in RP.TEXT_TYPES) "text" else "risu"
+                                if (name == "Risu · $oldLabel") name = "Risu · " + RP.typeLabel(risuNow()!!)
+                            }
+                        } }
+                    }
+                    if (rtype in setOf("plain", "jailbreak", "cot")) {
+                        FieldLabel("특수 타입")
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            RP.SPECIAL.forEach { (k, label) -> PillChip(label, rtype2 == k) {
+                                val oldLabel = RP.typeLabel(risuNow()!!); rtype2 = k
+                                if (name == "Risu · $oldLabel") name = "Risu · " + RP.typeLabel(risuNow()!!)
+                            } }
+                        }
+                    }
+                    Text(if (type == "risu") "RisuAI 전용 칸이에요. 작업실 프롬프트에는 들어가지 않고, 이름·타입·순서·감싸는 글만 원본 파일에 저장돼요."
+                        else "작업실 프롬프트에도 들어가고, 원본 RisuAI 파일에도 저장돼요.", style = MaterialTheme.typography.bodySmall, color = Sgu.Sub, modifier = Modifier.padding(start = 6.dp, top = 6.dp))
+                } else {
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     PromptBlocks.TYPE_LABELS.forEach { (k, label) -> PillChip(label, type == k) {
                         if (type != k) {
@@ -536,14 +588,17 @@ private fun BlockEditDialog(b: JsonObject, onSave: (JsonObject) -> Unit, onDelet
                     } }
                 }
                 Text(PromptBlocks.TYPE_DESCRIPTIONS[type] ?: "", style = MaterialTheme.typography.bodySmall, color = Sgu.Sub, modifier = Modifier.padding(start = 6.dp, top = 6.dp))
-                if (type != "cachePoint") {
+                }
+                if (type != "cachePoint" && type != "risu" && rtype != "chatML") {
                     FieldLabel("역할")
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) { listOf("system", "user", "assistant").forEach { r -> PillChip(r, role == r) { role = r } } }
                 }
                 Row(Modifier.padding(top = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text("사용", modifier = Modifier.weight(1f).padding(start = 6.dp)); SguSwitch(enabled) { enabled = it }
                 }
-                if (type != "cachePoint") {
+                if (type == "risu") {
+                    if (rtype in RP.FORMAT_TYPES) { FieldLabel("감싸는 글 (inner format, ${PromptBlocks.SLOT} 자리에 내용)"); InputBox(text, { text = it }, singleLine = false) }
+                } else if (type != "cachePoint") {
                     FieldLabel(if (type == "outputFormat") "outputFormat (비워 두면 내장 규칙)" else if (type in PromptBlocks.SLOT_TYPES) "텍스트 (${PromptBlocks.SLOT} 자리에 내용이 들어갑니다)" else "텍스트")
                     InputBox(text, { text = it }, singleLine = false)
                 }
@@ -553,6 +608,7 @@ private fun BlockEditDialog(b: JsonObject, onSave: (JsonObject) -> Unit, onDelet
         },
         confirmButton = { TextButton(onClick = {
             var nb = JsonObject(b + mapOf("type" to JsonPrimitive(type), "name" to JsonPrimitive(name), "role" to JsonPrimitive(role), "text" to JsonPrimitive(text), "enabled" to JsonPrimitive(enabled)))
+            risuNow()?.let { nb = JsonObject(nb + ("risuItem" to it)) }
             if (type == "fieldData") nb = JsonObject(nb + ("fieldFormat" to JsonPrimitive(fmt)))
             if (type == "history") nb = JsonObject(nb + ("historyLimit" to JsonPrimitive(limit.toIntOrNull() ?: 0)))
             onSave(nb)
