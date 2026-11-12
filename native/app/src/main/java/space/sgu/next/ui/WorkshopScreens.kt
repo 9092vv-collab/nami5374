@@ -545,7 +545,7 @@ fun PromptPresetScreen(presetId: String, onBack: () -> Unit) {
             Hint("RisuAI 글 블록의 토글 조건문은 여기서 고른 값대로 풀려서 작업실 프롬프트에 들어가요.")
             Spacer(Modifier.height(6.dp))
         }
-        Hint("위에서 아래 순서로 메인 프로세서에 전달됩니다. 블록을 누르면 편집합니다. 켜져 있는 맨 마지막 블록이 assistant 역할 글이면 프리필(모델이 그 글에 이어서 답함)로 전송돼요. 프리필을 받지 않는 모델(Claude 4.6 이후 등)에서는 오류가 나요.")
+        Hint("위에서 아래 순서로 메인 프로세서에 전달됩니다. 블록을 누르면 편집합니다. 켜져 있는 맨 마지막 블록이 assistant 역할 글이면 프리필(모델이 그 글에 이어서 답함)로 전송돼요. 프리필을 받지 않는 모델(Claude 4.6 이후 등)에는 프리필 뒤에 짧은 유저 메시지를 붙여서 보내요.")
         // 프리필 = 실제로 전송되는 블록 중 맨 끝이 assistant 글 블록일 때
         val prefillIndex = blocks.indexOfLast { it.b("enabled", true) && it.s("type") !in setOf("risu", "cachePoint") }
             .let { if (it >= 0 && blocks[it].s("type") == "text" && blocks[it].s("role") == "assistant" && blocks[it].s("text").isNotBlank()) it else -1 }

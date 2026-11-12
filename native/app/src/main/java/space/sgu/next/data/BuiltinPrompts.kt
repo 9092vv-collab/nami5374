@@ -75,6 +75,8 @@ object BuiltinPrompts {
             Item("main.imageLabel", "메인 프로세서", "첨부 이미지 표시 (이름 있음)", "[[label]] = 이미지 이름.", "[Attached image: [[label]]]"),
             Item("main.image", "메인 프로세서", "첨부 이미지 표시", "유저가 붙인 이미지 앞.", "[Attached image]"),
             Item("main.imagesMsg", "메인 프로세서", "이미지 묶음 안내", "유저 명령 블록의 역할이 user가 아닐 때 이미지를 따로 보내는 메시지.", "(Images attached by the user)"),
+            Item("main.prefillContinue", "메인 프로세서", "프리필 뒤에 붙이는 유저 메시지", "프리필을 받지 않는 모델(Claude 4.6 이후 등)에 보낼 때, 프리필 글 뒤에 이 한 줄을 유저 메시지로 붙여요.",
+                "(Continue from exactly where the assistant message above left off.)"),
             // ---- 웹 검색 ----
             Item("web.results", "웹 검색", "검색 결과 머리말", "[[query]] = 검색어, [[results]] = 결과 목록.",
                 "Web search results for \"[[query]]\" (retrieved just now). Use them when relevant and mention the source URL when you rely on one.\n\n[[results]]"),

@@ -121,6 +121,11 @@ object RisuToggles {
         val arg = { i: Int -> a.getOrElse(i + 1) { "" } }
         return when (a[0].trim().lowercase()) {
             "getglobalvar" -> gv(arg(0))
+            // RisuAI {{prefill_supported}}: 지금 메인 모델이 프리필을 받으면 1 (RisuAI처럼 Claude 계열만 1이 될 수 있음)
+            "prefillsupported", "prefill_supported", "prefill" -> {
+                val id = SettingsStore.model(SettingsStore.root.o("processors").o("main").sOrNull("modelId"))?.s("modelId") ?: ""
+                if (id.lowercase().contains("claude") && prefillSupported(id)) "1" else "0"
+            }
             "equal" -> if (arg(0) == arg(1)) "1" else "0"
             "notequal", "not_equal" -> if (arg(0) != arg(1)) "1" else "0"
             "and" -> if (arg(0) == "1" && arg(1) == "1") "1" else "0"
@@ -340,5 +345,18 @@ object RisuToggles {
         val resolved = render(header, values)
         val b = blockStart(resolved, ::gv) ?: return null
         return b.type == "parse" || b.type == "ifpure" || b.type == "newif"
+    }
+
+    /**
+     * 이 모델에 프리필(assistant로 끝나는 대화)을 보내도 되는지. Claude Opus/Sonnet 4.6 이후와 Mythos 계열은 400으로 거부.
+     * 이름만 보고 판단하므로 모르는 모델은 된다고 보고, 실제로 거부당하면 호출부가 다시 시도함.
+     */
+    fun prefillSupported(modelId: String): Boolean {
+        val id = modelId.lowercase()
+        if ("mythos" in id || "fable" in id) return false
+        if (Regex("claude[- ]?\\d(?:[-. ]\\d)?[- ](opus|sonnet|haiku)").containsMatchIn(id)) return true // 옛 이름 (claude-3-5-sonnet 등)
+        val m = Regex("(opus|sonnet|haiku)[- ]?(\\d{1,2})[-. ](\\d{1,2})(?!\\d)").find(id) ?: Regex("(opus|sonnet|haiku)[- ]?(\\d{1,2})(?!\\d)").find(id) ?: return true
+        val major = m.groupValues[2].toInt(); val minor = m.groupValues.getOrNull(3)?.toIntOrNull() ?: 0
+        return major < 4 || (major == 4 && minor < 6)
     }
 }

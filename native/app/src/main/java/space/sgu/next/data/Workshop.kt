@@ -418,20 +418,30 @@ object Processors {
     suspend fun runMain(doc: JsonObject, data: JsonObject, command: String, access: Access, instruction: Boolean, cb: Stream, onRestart: () -> Unit): MainOut {
         val (primary, fallback) = mainModels(doc)
         if (primary == null) throw ProviderError("메인 프로세서 모델이 설정되지 않았습니다. 설정 › 프로세서에서 모델을 지정하세요.")
-        suspend fun run(m: JsonObject, appSearch: Boolean): MainOut {
+        suspend fun run(m: JsonObject, appSearch: Boolean, noPrefill: Boolean = false): MainOut {
             val web = doc.b("webSearch")
             val native = web && !appSearch && WebSearch.hasNative(SettingsStore.provider(m.s("providerId")), m.s("modelId"))
             val refs = References.loadForPrompt(doc, access.viewRefs, Chat.effectiveVision(m)).toMutableList()
             if (web && !native) refs.add(RefText("Web search results", null, "text", WebSearch.context(command)))
             val prompt = Prompt.assemble(Prompt.Input(data, PromptBlocks.blocksFor(doc), access.viewFields, access.editFields, command, refs,
                 Workshop.historyTurns(doc), instruction, m.o("params").d("maxContext")?.toInt() ?: 150000, summary = Workshop.summaryText(doc)))
-            val req0 = Chat.buildRequest(m, prompt.messages, SguData.MAIN_OUTPUT_SCHEMA, webSearch = native)
-            // 프리필(맨 끝 assistant 메시지)이 있으면 답은 그 글의 이어 쓰기 → 답만으로 JSON이 안 되면 프리필을 앞에 붙여 다시 읽음
-            val prefill = prompt.messages.lastOrNull()?.takeIf { it.role == "assistant" }?.text
+            // 프리필(맨 끝 assistant 메시지)이 있으면 답은 그 글의 이어 쓰기 → 답만으로 JSON이 안 되면 프리필을 앞에 붙여 다시 읽음.
+            // 프리필을 받지 않는 모델(Claude 4.6 이후 — 대화가 assistant로 끝나면 400)이나 프리필로 보냈다가 거절당한 경우엔
+            // 프리필 글을 지우지 않고 그 뒤에 짧은 user 메시지를 붙여 "끝나지 않는 프리필"로 보냄.
+            var prefill = prompt.messages.lastOrNull()?.takeIf { it.role == "assistant" }?.text
+            var messages = prompt.messages
+            if (prefill != null && (noPrefill || !RisuToggles.prefillSupported(m.s("modelId")))) {
+                messages = messages + Msg("user", BuiltinPrompts.get("main.prefillContinue")); prefill = null
+            }
+            val req0 = Chat.buildRequest(m, messages, SguData.MAIN_OUTPUT_SCHEMA, webSearch = native)
             fun parseOut(text: String, pre: String?): JsonObject? = SguData.extractJson(text) ?: pre?.let { SguData.extractJson(it + text) }
             val req = req0.copy(cache = req0.cache?.copy(key = doc.s("id").ifBlank { null }))
             val t0 = System.currentTimeMillis()
             val r = try { Chat.chatWithModel(m, req, cb) } catch (e: CancellationException) { throw e } catch (e: Exception) {
+                if (prefill != null && Regex("prefill|400|invalid|end with a user|assistant", RegexOption.IGNORE_CASE).containsMatchIn(e.message ?: "")) {
+                    Logs.add("error", m.s("modelId"), error = "프리필 전송 실패, 프리필 뒤에 유저 메시지를 붙여 재시도: ${e.message}")
+                    onRestart(); return run(m, appSearch, noPrefill = true)
+                }
                 if (native && Regex("tool|search|unsupported|invalid|400", RegexOption.IGNORE_CASE).containsMatchIn(e.message ?: "")) {
                     Logs.add("error", m.s("modelId"), error = "네이티브 검색 실패, 앱 검색으로 재시도: ${e.message}")
                     onRestart(); return run(m, true)
