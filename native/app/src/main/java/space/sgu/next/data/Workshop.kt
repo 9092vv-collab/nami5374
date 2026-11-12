@@ -426,6 +426,9 @@ object Processors {
             val prompt = Prompt.assemble(Prompt.Input(data, PromptBlocks.blocksFor(doc), access.viewFields, access.editFields, command, refs,
                 Workshop.historyTurns(doc), instruction, m.o("params").d("maxContext")?.toInt() ?: 150000, summary = Workshop.summaryText(doc)))
             val req0 = Chat.buildRequest(m, prompt.messages, SguData.MAIN_OUTPUT_SCHEMA, webSearch = native)
+            // 프리필(맨 끝 assistant 메시지)이 있으면 답은 그 글의 이어 쓰기 → 답만으로 JSON이 안 되면 프리필을 앞에 붙여 다시 읽음
+            val prefill = prompt.messages.lastOrNull()?.takeIf { it.role == "assistant" }?.text
+            fun parseOut(text: String, pre: String?): JsonObject? = SguData.extractJson(text) ?: pre?.let { SguData.extractJson(it + text) }
             val req = req0.copy(cache = req0.cache?.copy(key = doc.s("id").ifBlank { null }))
             val t0 = System.currentTimeMillis()
             val r = try { Chat.chatWithModel(m, req, cb) } catch (e: CancellationException) { throw e } catch (e: Exception) {
@@ -438,9 +441,9 @@ object Processors {
             Logs.add("main", m.s("modelId"), m.s("providerId"), Logs.messagesJson(req.messages), js(r.text), System.currentTimeMillis() - t0, r.usage)
             if (r.finishReason in listOf("length", "max_tokens", "MAX_TOKENS")) {
                 val msg = "최대 출력 토큰(${m.o("params").d("maxTokens")?.toInt() ?: "기본값"})에 도달해 응답이 잘렸습니다. 설정 › 모델에서 최대 토큰을 늘리거나 명령 범위를 줄이세요."
-                if (r.text.isBlank() || SguData.extractJson(r.text) == null) throw ProviderError(msg)
+                if (r.text.isBlank() || parseOut(r.text, prefill) == null) throw ProviderError(msg)
             }
-            val j = SguData.extractJson(r.text) ?: return MainOut(r.text.trim(), emptyList(), r.text, r.usage, m, prompt)
+            val j = parseOut(r.text, prefill) ?: return MainOut(r.text.trim(), emptyList(), r.text, r.usage, m, prompt)
             val edits = ((j["edits"] as? JsonArray) ?: JsonArray(emptyList())).mapNotNull { it as? JsonObject }
                 .filter { (it["field"] as? JsonPrimitive)?.isString == true && (it["op"] as? JsonPrimitive)?.isString == true }
             return MainOut((j["message"] as? JsonPrimitive)?.takeIf { it.isString }?.content ?: "", edits, r.text, r.usage, m, prompt)

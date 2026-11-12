@@ -174,7 +174,17 @@ object RisuPreset {
             } else { skipped++; add(name, "system", it.s("innerFormat"), true, "risu", it) }
         }
         val sgu = PromptBlocks.defaults().filterNot { it.s("type") == "text" && it.s("name") == "JB" }
-        return (out + sgu) to skipped
+        return arrange(out, sgu) to skipped
+    }
+
+    /**
+     * RisuAI 블록 + SGU 블록 배치. RisuAI 템플릿의 마지막 블록이 봇 역할 글 블록이면 그게 프리필이므로,
+     * 켠 채로 맨 끝(SGU 블록 뒤)에 둬서 실제 프리필로 전송되게 함. 원본 파일로 저장할 때 RisuAI 블록끼리의 순서는 그대로.
+     */
+    fun arrange(risu: List<JsonObject>, sgu: List<JsonObject>): List<JsonObject> {
+        val last = risu.lastOrNull()
+        if (last == null || last["risuItem"] == null || last.s("type") != "text" || last.s("role") != "assistant") return risu + sgu
+        return risu.dropLast(1) + sgu + JsonObject(last + ("enabled" to JsonPrimitive(true)))
     }
 
     /** 작업실 블록 → RisuAI 템플릿 항목 (risuItem이 달린 블록만, 작업실 순서대로). */

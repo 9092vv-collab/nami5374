@@ -856,7 +856,10 @@ object Prompt {
             if (imgs.isEmpty() && last != null && !last.cacheAfter && last.role == role && last.text != null) msgs[msgs.size - 1] = last.copy(text = "${last.text}\n\n$text")
             else msgs.add(if (imgs.isNotEmpty()) Msg(role, parts = listOf(Part(text = text)) + imgs) else Msg(role, text))
         }
-        if (pending.isNotEmpty()) msgs.add(Msg("user", parts = listOf(Part(text = "(Images attached by the user)")) + pending))
+        // 프리필: 맨 끝이 assistant 메시지면 모델이 그 글에 이어서 답함. 끝 공백은 일부 API가 거부하므로 잘라 냄.
+        val prefill = msgs.lastOrNull()?.takeIf { it.role == "assistant" && it.text != null }
+        if (prefill != null) msgs[msgs.size - 1] = prefill.copy(text = prefill.text!!.trimEnd())
+        if (pending.isNotEmpty()) msgs.add(if (prefill != null) msgs.size - 1 else msgs.size, Msg("user", parts = listOf(Part(text = BuiltinPrompts.get("main.imagesMsg"))) + pending))
         return Assembled(msgs, parts, parts.sumOf { it.tokens })
     }
 
