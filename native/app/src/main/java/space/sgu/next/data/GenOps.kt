@@ -33,9 +33,9 @@ object GenOps {
             "add_character" to "{name, size?, freePrompt?, freeNegative?, blocks?:[{name,type:\"prompt\"|\"negative\",text}]}",
             "update_character" to "with id (character id); partial {name, size, freePrompt, freeNegative}",
             "remove_character" to "none, with id (also detaches it from presets)",
-            "add_block" to "with id (character id); {name, type:\"prompt\"|\"negative\", text}",
-            "update_block" to "with id (character id); {blockId, name?, type?, text?}",
-            "remove_block" to "with id (character id); {blockId}")
+            "add_block" to "with id (character id); {name, type:\"prompt\"|\"negative\"|\"folder\", text, folderId?}. type \"folder\" makes a folder that groups blocks (no text). folderId puts the new block inside a folder: give the folder's id, or the exact name of a folder (use the name for a folder created earlier in the same response)",
+            "update_block" to "with id (character id); {blockId, name?, type?, text?, folderId?}. folderId moves the block into that folder (folder id or exact folder name); folderId: null or \"\" takes it out of its folder. A folder cannot be put inside a folder, and a block cannot change to or from type \"folder\"",
+            "remove_block" to "with id (character id); {blockId}. Removing a folder keeps its blocks and takes them out of the folder")
     }
 
     private val pretty = kotlinx.serialization.json.Json { prettyPrint = true }
@@ -58,12 +58,15 @@ object GenOps {
             }
             "genCharacters" -> JsonArray(chars.map { c -> buildJsonObject {
                 put("id", c.s("id")); put("name", c.s("name")); put("size", c.o("size") ?: ImageGenStore.size())
-                put("blocks", JsonArray(c.arr("blocks").map { b -> buildJsonObject { put("id", b.s("id")); put("name", b.s("name")); put("type", b.s("type")); put("text", b.s("text")) } }))
+                put("blocks", JsonArray(c.arr("blocks").map { b -> buildJsonObject {
+                    put("id", b.s("id")); put("name", b.s("name")); put("type", b.s("type"))
+                    if (b.s("type") != "folder") { put("text", b.s("text")); b.sOrNull("folderId")?.let { put("folderId", it) } }
+                } }))
             } })
             else -> buildJsonObject {
                 put("availableCharacters", JsonArray(chars.map { c -> buildJsonObject {
                     put("id", c.s("id")); put("name", c.s("name"))
-                    put("blocks", JsonArray(c.arr("blocks").map { b -> buildJsonObject { put("id", b.s("id")); put("name", b.s("name")); put("type", b.s("type")) } }))
+                    put("blocks", JsonArray(c.arr("blocks").map { b -> buildJsonObject { put("id", b.s("id")); put("name", b.s("name")); put("type", b.s("type")); b.sOrNull("folderId")?.let { put("folderId", it) } } }))
                 } }))
                 put("presets", JsonArray(presets.map { p -> buildJsonObject {
                     put("id", p.s("id")); put("name", p.s("name")); put("imageName", p.s("imageName")); put("imageType", p.s("imageType").ifBlank { "asset" })
@@ -82,12 +85,25 @@ object GenOps {
     data class Action(val kind: String, val id: String = "", val imageId: String = "", val n: Int = 1, val flag: Boolean = false, val format: String = "webp", val quality: Int = 80)
     data class Result(val g: JsonObject, val summary: String, val action: Action? = null)
 
-    private fun block(v: JsonObject, old: JsonObject? = null) = buildJsonObject {
+    /** [siblings] = the character's current blocks (to resolve folderId by id or by folder name). */
+    private fun block(v: JsonObject, old: JsonObject? = null, siblings: List<JsonObject> = emptyList()) = buildJsonObject {
+        val isFolder = if (old != null) old.s("type") == "folder" else str(v["type"]) == "folder"
         put("id", old?.s("id")?.ifBlank { null } ?: Scripts.newId("gb"))
         put("name", if (v.containsKey("name")) str(v["name"]) else old?.s("name") ?: "")
-        put("type", when (str(v["type"])) { "negative" -> "negative"; "prompt" -> "prompt"; else -> old?.s("type")?.ifBlank { null } ?: "prompt" })
-        put("text", if (v.containsKey("text")) str(v["text"]) else old?.s("text") ?: "")
-        old?.get("keep")?.let { put("keep", it) }; old?.get("free")?.let { put("free", it) }; old?.get("folderId")?.let { put("folderId", it) }
+        put("type", if (isFolder) "folder" else when (str(v["type"])) { "negative" -> "negative"; "prompt" -> "prompt"; else -> old?.s("type")?.ifBlank { null } ?: "prompt" })
+        put("text", if (isFolder) "" else if (v.containsKey("text")) str(v["text"]) else old?.s("text") ?: "")
+        old?.get("keep")?.let { put("keep", it) }; old?.get("free")?.let { put("free", it) }
+        if (!isFolder) {
+            if (v.containsKey("folderId")) {
+                val want = str(v["folderId"]).trim()
+                if (want.isNotEmpty() && want != "null") {
+                    val folders = siblings.filter { it.s("type") == "folder" }
+                    val f = folders.firstOrNull { it.s("id") == want } ?: folders.firstOrNull { it.s("name") == want } ?: folders.firstOrNull { it.s("name").trim().equals(want, ignoreCase = true) }
+                        ?: error("폴더 '$want' 없음")
+                    put("folderId", f.s("id"))
+                }
+            } else old?.get("folderId")?.let { put("folderId", it) }
+        }
     }
 
     private fun presetChars(g: JsonObject, list: JsonElement?, prev: List<JsonObject>): List<JsonObject> {
@@ -180,7 +196,13 @@ object GenOps {
                     if (h.containsKey("size")) c = JsonObject(c + ("size" to ImageGenStore.normalizeSize(h["size"] as? JsonObject)))
                     if (h.containsKey("freePrompt")) c = JsonObject(c + ("freePrompt" to JsonPrimitive(str(h["freePrompt"]))))
                     if (h.containsKey("freeNegative")) c = JsonObject(c + ("freeNegative" to JsonPrimitive(str(h["freeNegative"]))))
-                    (h["blocks"] as? JsonArray)?.let { bl -> c = c.withList("blocks", bl.mapNotNull { it as? JsonObject }.map { block(it) }) }
+                    (h["blocks"] as? JsonArray)?.let { bl ->
+                        // 폴더를 먼저 만들고, 나머지는 그 폴더들을 보고 folderId를 맞춤
+                        val raw = bl.mapNotNull { it as? JsonObject }
+                        val folders = raw.filter { str(it["type"]) == "folder" }.map { block(it) }
+                        var fi = 0
+                        c = c.withList("blocks", raw.map { if (str(it["type"]) == "folder") folders[fi++] else block(it, null, folders) })
+                    }
                     val out = g.withList("characters", chars + c)
                     return Result(if (g.sOrNull("selectedCharacterId") == null) JsonObject(out + ("selectedCharacterId" to JsonPrimitive(c.s("id")))) else out, "이미지 캐릭터 추가: ${c.s("name")}")
                 }
@@ -201,14 +223,23 @@ object GenOps {
                         if (g.sOrNull("selectedCharacterId") == id) out = JsonObject(out + ("selectedCharacterId" to (rest.firstOrNull()?.let { JsonPrimitive(it.s("id")) } ?: JsonNull)))
                         Result(out, "이미지 캐릭터 삭제: ${c.s("name")}")
                     }
-                    "add_block" -> { val b = block(h); Result(with(c.withList("blocks", c.arr("blocks") + b)), "캐릭터 블록 추가: ${c.s("name")} / ${b.s("name")}") }
+                    "add_block" -> {
+                        val b = block(h, null, c.arr("blocks"))
+                        var out = with(c.withList("blocks", c.arr("blocks") + b))
+                        // 새 폴더는 기존 프리셋에서 켜진 채로 시작 (꺼져 있으면 그 안으로 옮긴 블록이 프리셋에서 조용히 빠짐)
+                        if (b.s("type") == "folder") out = out.withList("presets", presets.map { p -> p.withList("chars", p.arr("chars").map { pc ->
+                            if (pc.s("characterId") == id && pc["blockIds"] is JsonArray) JsonObject(pc + ("blockIds" to JsonArray((ImageGenStore.blockIdList(pc) + b.s("id")).map { JsonPrimitive(it) }))) else pc
+                        }) })
+                        Result(out, (if (b.s("type") == "folder") "캐릭터 블록 폴더 추가: " else "캐릭터 블록 추가: ") + "${c.s("name")} / ${b.s("name")}")
+                    }
                     "update_block" -> {
                         val b = c.arr("blocks").firstOrNull { it.s("id") == str(h["blockId"]) } ?: error("블록 없음")
-                        Result(with(c.withList("blocks", c.arr("blocks").map { if (it.s("id") == b.s("id")) block(h, b) else it })), "캐릭터 블록 수정: ${c.s("name")} / ${b.s("name")}")
+                        Result(with(c.withList("blocks", c.arr("blocks").map { if (it.s("id") == b.s("id")) block(h, b, c.arr("blocks")) else it })), "캐릭터 블록 수정: ${c.s("name")} / ${b.s("name")}")
                     }
                     "remove_block" -> {
                         val b = c.arr("blocks").firstOrNull { it.s("id") == str(h["blockId"]) } ?: error("블록 없음")
-                        val out = with(c.withList("blocks", c.arr("blocks").filter { it.s("id") != b.s("id") }))
+                        // 폴더를 지우면 안의 블록은 남기고 폴더 밖으로 꺼냄
+                        val out = with(c.withList("blocks", c.arr("blocks").filter { it.s("id") != b.s("id") }.map { if (it.sOrNull("folderId") == b.s("id")) JsonObject(it - "folderId") else it }))
                         Result(out.withList("presets", presets.map { p -> p.withList("chars", p.arr("chars").map { pc ->
                             if (pc.s("characterId") == id) JsonObject(pc + ("blockIds" to JsonArray(ImageGenStore.blockIdList(pc).filter { it != b.s("id") }.map { JsonPrimitive(it) }))) else pc
                         }) }), "캐릭터 블록 삭제: ${c.s("name")} / ${b.s("name")}")
