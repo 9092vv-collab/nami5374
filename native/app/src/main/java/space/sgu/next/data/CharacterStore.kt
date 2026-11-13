@@ -305,7 +305,9 @@ object CharacterStore {
     fun setLoreSettings(id: String, s: LoreSettings) = editData(id) { data -> replaceAll(data, withLoreSettings(JsonObject(data), s)) }
 
     private fun replaceAll(target: MutableMap<String, JsonElement>, with: Map<String, JsonElement>) {
-        target.clear(); target.putAll(with)
+        // with가 target을 그대로 감싼 것일 수 있어서(바뀐 게 없을 때) 먼저 복사해 둠 — 안 그러면 clear()가 내용까지 지움
+        val copy = LinkedHashMap(with)
+        target.clear(); target.putAll(copy)
     }
 
     fun addAltGreeting(id: String): Int {
