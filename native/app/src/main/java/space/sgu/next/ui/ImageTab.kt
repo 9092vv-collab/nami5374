@@ -1,6 +1,7 @@
 package space.sgu.next.ui
 
 import androidx.compose.material.icons.outlined.PersonAdd
+import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 
 import androidx.compose.material.icons.outlined.Check
 
@@ -354,7 +355,9 @@ private fun GenCharacterTab(cid: String, openField: (String) -> Unit) {
     var editBlock by remember { mutableStateOf<JsonObject?>(null) }
     var rename by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
-    val collapsed = collapsedBlockFolders // 블록 편집에 다녀와도 접어 둔 폴더가 그대로 있게 화면 밖에 보관
+    // 폴더 안에 있을 때 뒤로 가기 = 폴더 밖으로
+    val insideFolder = c != null && c.arr("blocks").any { it.s("type") == "folder" && it.s("id") == openBlockFolder[c.s("id")] }
+    androidx.activity.compose.BackHandler(enabled = insideFolder) { c?.let { openBlockFolder.remove(it.s("id")) } }
     val cols = (androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp / 118).coerceIn(3, 6)
     var generating by remember { mutableStateOf<Job?>(null) }
     var addedIcon by remember { mutableStateOf<String?>(null) }
@@ -384,7 +387,7 @@ private fun GenCharacterTab(cid: String, openField: (String) -> Unit) {
                 TextButton(onClick = { confirmDelete = true }) { Text("삭제", color = Sgu.Danger) }
             }
             Text("블록 (위에서 아래 순서로 NovelAI에 전달됩니다)", style = MaterialTheme.typography.bodySmall, color = Sgu.Sub, modifier = Modifier.padding(start = 4.dp))
-            Text("체크한 블록만 아래 '생성'에 들어가요. 블록을 누르면 내용 편집, 길게 누르면 이름·종류·폴더·삭제 메뉴가 열려요. 폴더 체크는 안의 블록을 한꺼번에 켜고 꺼요. 템플릿 프리셋은 프리셋마다 따로 골라요.",
+            Text("체크한 블록만 아래 '생성'에 들어가요. 블록을 누르면 내용 편집, 폴더를 누르면 폴더 안으로 들어가요. 길게 누르면 이름·종류·폴더 이동·삭제 메뉴가 열려요. 폴더 체크는 안의 블록을 한꺼번에 켜고 꺼요. 템플릿 프리셋은 프리셋마다 따로 골라요.",
                 style = MaterialTheme.typography.bodySmall, color = Sgu.Sub, modifier = Modifier.padding(start = 4.dp, bottom = 4.dp))
         }
         val blocks = c.arr("blocks")
@@ -394,42 +397,41 @@ private fun GenCharacterTab(cid: String, openField: (String) -> Unit) {
         fun toggle(b: JsonObject) = ImageGenStore.patchBlocks(cid, charId) { l ->
             val i = l.indexOfFirst { it.s("id") == b.s("id") }; if (i >= 0) l[i] = l[i].with("free" to JsonPrimitive(!on(l[i])))
         }
-        items(loose.chunked(cols), key = { "row-" + it.first().s("id") }) { row ->
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                row.forEach { b -> BlockTile(b, checked = on(b), enabled = true, modifier = Modifier.weight(1f), onToggle = { toggle(b) }, onClick = { openField("gen:block:$charId:${b.s("id")}") }, onMenu = { editBlock = b }) }
-                repeat(cols - row.size) { Spacer(Modifier.weight(1f)) }
-            }
+        // 폴더 켜기/끄기 = 안의 블록까지 한꺼번에
+        fun toggleFolder(f: JsonObject) = ImageGenStore.patchBlocks(cid, charId) { l ->
+            val turnOn = !on(l.firstOrNull { it.s("id") == f.s("id") } ?: f)
+            for (j in l.indices) if (l[j].s("id") == f.s("id") || l[j].sOrNull("folderId") == f.s("id")) l[j] = l[j].with("free" to JsonPrimitive(turnOn))
         }
-        folders.forEach { f ->
-            val open = collapsed[f.s("id")] != true
-            val kids = blocks.filter { it.sOrNull("folderId") == f.s("id") }
-            item(key = f.s("id")) {
-                val angle by androidx.compose.animation.core.animateFloatAsState(if (open) 0f else -90f, label = "fold")
-                Row(
-                    Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(Sgu.Bubble)
-                        .clickable { collapsed[f.s("id")] = open }.padding(horizontal = 14.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    val fOn = on(f)
-                    // 폴더 체크 = 안의 블록까지 한꺼번에 켜기/끄기 (켜면 전부 체크, 끄면 전부 해제)
-                    IconButton(onClick = {
-                        ImageGenStore.patchBlocks(cid, charId) { l ->
-                            val turnOn = !on(l.firstOrNull { it.s("id") == f.s("id") } ?: f)
-                            for (j in l.indices) if (l[j].s("id") == f.s("id") || l[j].sOrNull("folderId") == f.s("id")) l[j] = l[j].with("free" to JsonPrimitive(turnOn))
-                        }
-                    }, modifier = Modifier.size(32.dp)) {
-                        Icon(if (fOn) Icons.Outlined.CheckBox else Icons.Outlined.CheckBoxOutlineBlank, if (fOn) "폴더 켜짐" else "폴더 꺼짐", tint = Sgu.Ink)
+        val inFolder = folders.firstOrNull { it.s("id") == openBlockFolder[charId] }
+        if (inFolder == null) {
+            // 메인 화면처럼: 블록과 폴더가 같은 크기의 칸. 폴더 칸을 누르면 그 안으로 들어감
+            items((loose + folders).chunked(cols), key = { "row-" + it.first().s("id") }) { row ->
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    row.forEach { b ->
+                        if (b.s("type") == "folder") FolderTile(b, blocks.count { it.sOrNull("folderId") == b.s("id") }, on(b), Modifier.weight(1f),
+                            onToggle = { toggleFolder(b) }, onClick = { openBlockFolder[charId] = b.s("id") }, onMenu = { editBlock = b })
+                        else BlockTile(b, checked = on(b), enabled = true, modifier = Modifier.weight(1f), onToggle = { toggle(b) }, onClick = { openField("gen:block:$charId:${b.s("id")}") }, onMenu = { editBlock = b })
                     }
-                    Spacer(Modifier.width(4.dp))
-                    Icon(Icons.Outlined.Folder, null, tint = if (fOn) Sgu.Ink else Sgu.Sub)
-                    Text("  ${f.s("name").ifBlank { "폴더" }}", style = MaterialTheme.typography.titleSmall, color = if (fOn) Sgu.Ink else Sgu.Sub, modifier = Modifier.weight(1f))
-                    Text("${kids.size}개 ", style = MaterialTheme.typography.bodySmall, color = Sgu.Sub)
-                    Icon(Icons.Outlined.KeyboardArrowDown, null, Modifier.rotate(angle), tint = Sgu.Sub)
-                    IconButton(onClick = { editBlock = f }, modifier = Modifier.size(32.dp)) { Icon(Icons.Outlined.MoreVert, "폴더 메뉴", tint = Sgu.Sub) }
+                    repeat(cols - row.size) { Spacer(Modifier.weight(1f)) }
                 }
             }
-            if (open) items(kids.chunked(cols), key = { "row-" + it.first().s("id") }) { row ->
-                Row(Modifier.padding(start = 10.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        } else {
+            val f = inFolder
+            val kids = blocks.filter { it.sOrNull("folderId") == f.s("id") }
+            item(key = "folder-head") {
+                Row(Modifier.fillMaxWidth().padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(onClick = { openBlockFolder.remove(charId) }) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "폴더 밖으로", tint = Sgu.Ink) }
+                    Icon(Icons.Outlined.Folder, null, tint = Sgu.Sub)
+                    Text("  ${f.s("name").ifBlank { "폴더" }} · ${kids.size}개", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    IconButton(onClick = { toggleFolder(f) }) {
+                        Icon(if (on(f)) Icons.Outlined.CheckBox else Icons.Outlined.CheckBoxOutlineBlank, if (on(f)) "폴더 켜짐" else "폴더 꺼짐", tint = Sgu.Ink)
+                    }
+                    IconButton(onClick = { editBlock = f }) { Icon(Icons.Outlined.MoreVert, "폴더 메뉴", tint = Sgu.Sub) }
+                }
+            }
+            if (kids.isEmpty()) item(key = "folder-empty") { Hint("폴더가 비어 있어요. 아래 '블록 추가'로 여기에 바로 만들거나, 밖의 블록을 길게 눌러 이 폴더로 옮기세요.") }
+            items(kids.chunked(cols), key = { "row-" + it.first().s("id") }) { row ->
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     row.forEach { b -> BlockTile(b, checked = on(b), enabled = on(f), modifier = Modifier.weight(1f), onToggle = { toggle(b) }, onClick = { openField("gen:block:$charId:${b.s("id")}") }, onMenu = { editBlock = b }) }
                     repeat(cols - row.size) { Spacer(Modifier.weight(1f)) }
                 }
@@ -437,8 +439,8 @@ private fun GenCharacterTab(cid: String, openField: (String) -> Unit) {
         }
         item(key = "add") {
             Row(Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                LineButton("블록 추가", onClick = { ImageGenStore.patchBlocks(cid, charId) { it.add(ImageGenStore.block("새 블록", "prompt")) } }, icon = Icons.Outlined.Add)
-                LineButton("폴더 추가", onClick = { ImageGenStore.patchBlocks(cid, charId) { it.add(ImageGenStore.block("새 폴더", "folder")) } }, icon = Icons.Outlined.CreateNewFolder)
+                LineButton("블록 추가", onClick = { ImageGenStore.patchBlocks(cid, charId) { it.add(ImageGenStore.block("새 블록", "prompt", inFolder?.s("id"))) } }, icon = Icons.Outlined.Add)
+                if (inFolder == null) LineButton("폴더 추가", onClick = { ImageGenStore.patchBlocks(cid, charId) { it.add(ImageGenStore.block("새 폴더", "folder")) } }, icon = Icons.Outlined.CreateNewFolder)
             }
         }
         item(key = "size") {
@@ -498,8 +500,29 @@ private fun GenCharacterTab(cid: String, openField: (String) -> Unit) {
     }
 }
 
-/** 캐릭터 설정 탭에서 접어 둔 블록 폴더 (폴더 id → 접힘). 화면을 나갔다 와도 유지. */
-private val collapsedBlockFolders = mutableStateMapOf<String, Boolean>()
+/** 캐릭터 설정 탭에서 지금 들어가 있는 블록 폴더 (이미지 캐릭터 id → 폴더 id). 블록 편집에 다녀와도 유지. */
+private val openBlockFolder = mutableStateMapOf<String, String>()
+
+/** 폴더 칸: 블록 칸과 같은 크기. 탭 = 폴더 안으로, 길게 = 메뉴, 체크 = 안의 블록까지 한꺼번에 켜고 끔. */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+@Composable
+private fun FolderTile(f: JsonObject, count: Int, checked: Boolean, modifier: Modifier = Modifier, onToggle: () -> Unit, onClick: () -> Unit, onMenu: () -> Unit) {
+    Column(
+        modifier.height(84.dp).clip(RoundedCornerShape(16.dp)).background(Sgu.Bubble)
+            .combinedClickable(onClick = onClick, onLongClick = onMenu).padding(start = 2.dp, end = 8.dp, bottom = 6.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onToggle, modifier = Modifier.size(36.dp)) {
+                Icon(if (checked) Icons.Outlined.CheckBox else Icons.Outlined.CheckBoxOutlineBlank, if (checked) "폴더 켜짐" else "폴더 꺼짐", tint = Sgu.Ink, modifier = Modifier.size(22.dp))
+            }
+            Spacer(Modifier.weight(1f))
+            Icon(Icons.Outlined.Folder, null, tint = Sgu.Sub, modifier = Modifier.size(18.dp))
+            Text(" $count", style = MaterialTheme.typography.bodySmall, color = Sgu.Sub)
+        }
+        Text(f.s("name").ifBlank { "폴더" }, style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold), color = Sgu.Ink, maxLines = 2, overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(start = 8.dp).alpha(if (checked) 1f else 0.45f))
+    }
+}
 
 /** 네모 칸: 체크박스 + 이름만. 탭 = 내용 편집, 길게 = 메뉴. 네거티브 블록은 이름이 붉은 갈색. */
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
