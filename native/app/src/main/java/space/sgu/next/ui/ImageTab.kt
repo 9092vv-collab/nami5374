@@ -405,7 +405,13 @@ private fun GenCharacterTab(cid: String, openField: (String) -> Unit) {
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     val fOn = on(f)
-                    IconButton(onClick = { toggle(f) }, modifier = Modifier.size(32.dp)) {
+                    // 폴더 체크 = 안의 블록까지 한꺼번에 켜기/끄기 (켜면 전부 체크, 끄면 전부 해제)
+                    IconButton(onClick = {
+                        ImageGenStore.patchBlocks(cid, charId) { l ->
+                            val turnOn = !on(l.firstOrNull { it.s("id") == f.s("id") } ?: f)
+                            for (j in l.indices) if (l[j].s("id") == f.s("id") || l[j].sOrNull("folderId") == f.s("id")) l[j] = l[j].with("free" to JsonPrimitive(turnOn))
+                        }
+                    }, modifier = Modifier.size(32.dp)) {
                         Icon(if (fOn) Icons.Outlined.CheckBox else Icons.Outlined.CheckBoxOutlineBlank, if (fOn) "폴더 켜짐" else "폴더 꺼짐", tint = Sgu.Ink)
                     }
                     Spacer(Modifier.width(4.dp))
