@@ -213,7 +213,8 @@ object CharacterStore {
 
     /** Replaces card.data with transform(card.data). */
     fun updateData(id: String, transform: (JsonObject) -> JsonObject) = editData(id) { m ->
-        val next = transform(JsonObject(m)); m.clear(); m.putAll(next)
+        // transform이 받은 값을 그대로 돌려주면(바꿀 게 없을 때) next는 m을 감싼 것 → 복사 없이 clear()하면 카드 내용이 전부 지워짐
+        val next = LinkedHashMap(transform(JsonObject(m))); m.clear(); m.putAll(next)
     }
 
     private fun editData(id: String, change: (MutableMap<String, JsonElement>) -> Unit) {
