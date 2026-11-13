@@ -19,7 +19,7 @@ object GenOps {
     private const val POS = "pos: {mode:\"auto\"} or {mode:\"custom\",col:0-4,row:0-4}. If any character of a preset is custom, all are (cells are unique)"
 
     fun ops(id: String): List<Pair<String, String>> = when (id) {
-        "genFree" -> listOf("update" to "with id (character id); partial {freePrompt?: string, freeNegative?: string, blockIds?: string[] (blocks that take part when the free prompt runs; all other blocks are switched off)}")
+        "genFree" -> listOf("update" to "with id (character id); partial {freePrompt?: string, freeNegative?: string, blockIds?: string[] (blocks that take part when the free prompt runs; all other blocks are switched off. A block inside a folder takes part only while its folder is on: a folder is switched on when its id or any of its blocks is listed, and switched off otherwise — so list only what should be on and leave out folders the user turned off)}")
         "genFreeRun" -> listOf("run" to "with id (character id); optional {n: 1-2, addAsIcon: boolean (default false)}. Generates with the NovelAI provider after the edits are applied (costs Anlas)")
         "genCompress" -> listOf("compress" to "optional {format: \"webp\"|\"jpeg\" (default webp), quality: 5-100 (default 80)}. Compresses all generated images of the image template; use the defaults unless the user asks otherwise")
         "genTemplate" -> listOf(
@@ -150,7 +150,14 @@ object GenOps {
                 var nc = c
                 if (h.containsKey("freePrompt")) nc = JsonObject(nc + ("freePrompt" to JsonPrimitive(str(h["freePrompt"]))))
                 if (h.containsKey("freeNegative")) nc = JsonObject(nc + ("freeNegative" to JsonPrimitive(str(h["freeNegative"]))))
-                if (ids != null) nc = nc.withList("blocks", nc.arr("blocks").map { JsonObject(it + ("free" to JsonPrimitive(it.s("id") in ids || it.s("type") == "folder"))) })
+                if (ids != null) {
+                    // 폴더는 무조건 켜지 않음: 목록에 폴더 id가 있거나 그 안의 블록이 하나라도 있으면 켜고, 아니면 끔 (전에는 항상 켜져서 꺼 둔 폴더가 전부 켜졌음)
+                    val all = nc.arr("blocks")
+                    nc = nc.withList("blocks", all.map { b ->
+                        val on = if (b.s("type") == "folder") b.s("id") in ids || all.any { it.sOrNull("folderId") == b.s("id") && it.s("id") in ids } else b.s("id") in ids
+                        JsonObject(b + ("free" to JsonPrimitive(on)))
+                    })
+                }
                 return Result(g.withList("characters", chars.map { if (it.s("id") == id) nc else it }), "자유 프롬프트 수정: ${c.s("name")}")
             }
             "genFreeRun" -> {

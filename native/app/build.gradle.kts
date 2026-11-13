@@ -12,8 +12,8 @@ android {
         applicationId = "space.sgu.next"
         minSdk = 31
         targetSdk = 36
-        versionCode = 45
-        versionName = "0.9.8"
+        versionCode = 46
+        versionName = "0.9.9"
     }
 
     // Personal sideload key (kept in the repo so updates install over the old version).
