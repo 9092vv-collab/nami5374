@@ -747,10 +747,11 @@ fun GenPresetScreen(cid: String, presetId: String, openField: (String) -> Unit, 
                                         val loose = blocks.filter { it.s("type") != "folder" && (it.sOrNull("folderId") == null || folders.none { f -> f.s("id") == it.s("folderId") }) }
                                         loose.forEach { b -> BlockChip(b, b.s("id") in ids, true) { ImageGenStore.toggleBlock(cid, presetId, pc.s("id"), b.s("id")) } }
                                         folders.forEach { f ->
-                                            val fOn = f.s("id") in ids
+                                            val kids = blocks.filter { it.sOrNull("folderId") == f.s("id") }
+                                            val fOn = f.s("id") in ids && kids.any { it.s("id") in ids }
                                             BlockChip(f, fOn, true, folder = true) { ImageGenStore.toggleBlock(cid, presetId, pc.s("id"), f.s("id")) }
-                                            blocks.filter { it.sOrNull("folderId") == f.s("id") }.forEach { b ->
-                                                BlockChip(b, b.s("id") in ids, fOn) { ImageGenStore.toggleBlock(cid, presetId, pc.s("id"), b.s("id")) }
+                                            kids.forEach { b ->
+                                                BlockChip(b, fOn && b.s("id") in ids, true) { ImageGenStore.toggleBlock(cid, presetId, pc.s("id"), b.s("id")) }
                                             }
                                         }
                                     }

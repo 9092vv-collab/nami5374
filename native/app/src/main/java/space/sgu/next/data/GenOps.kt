@@ -32,7 +32,7 @@ object GenOps {
         "genCompress" -> listOf("compress" to "optional {format: \"webp\"|\"jpeg\" (default webp), quality: 5-100 (default 80)}. Compresses all generated images of the image template; use the defaults unless the user asks otherwise")
         "genTemplate" -> listOf(
             "add" to "new preset {name, imageName, imageType:\"asset\"|\"emotion\", size:{kind:\"portrait\"|\"landscape\"|\"square\"|\"custom\",w?,h?}, assetPrompt, assetNegative, chars:[{characterId, blockIds:[], prompt, negative, pos}]}; $POS",
-            "update" to "with id (preset id); partial preset (same keys as add). \"chars\" replaces the whole attached-character list",
+            "update" to "with id (preset id); partial preset (same keys as add). \"chars\" replaces the whole attached-character list. characterId = the character's id (or exact name); blockIds = block ids (or exact block names) to switch on; a block inside a folder also switches its folder on",
             "remove" to "none, with id (deletes the preset and its images)",
             "remove_images" to "none, with id (deletes every generated image of the preset)",
             "image" to "with id (preset id); {imageId, action:\"remove\"|\"use\"|\"unuse\"} — use = upload the image to the bot",
@@ -116,12 +116,19 @@ object GenOps {
 
     private fun presetChars(g: JsonObject, list: JsonElement?, prev: List<JsonObject>): List<JsonObject> {
         val out = mutableListOf<JsonObject>()
+        val all = g.arr("characters")
         for (o in (list as? JsonArray)?.mapNotNull { it as? JsonObject } ?: emptyList()) {
-            val c = g.arr("characters").firstOrNull { it.s("id") == str(o["characterId"]) } ?: continue
+            // characterId에 id 대신 이름을 쓰는 경우가 많아서 이름도 받음. 못 찾으면 조용히 빼지 않고 오류로 알림
+            val want = str(o["characterId"] ?: o["characterName"] ?: o["character"] ?: o["name"] ?: o["id"]).trim()
+            val c = all.firstOrNull { it.s("id") == want } ?: all.firstOrNull { it.s("name") == want } ?: all.firstOrNull { it.s("name").trim().equals(want, ignoreCase = true) }
+                ?: error("캐릭터 '$want' 없음 (있는 캐릭터: ${all.joinToString { "${it.s("name")}=${it.s("id")}" }})")
             if (out.any { it.s("characterId") == c.s("id") }) continue
             val u = prev.firstOrNull { it.s("characterId") == c.s("id") }
-            val blockIds = (o["blockIds"] as? JsonArray)?.map { str(it) }?.filter { b -> c.arr("blocks").any { it.s("id") == b } }
-                ?: u?.let { ImageGenStore.blockIdList(it) } ?: c.arr("blocks").map { it.s("id") }
+            val blocks = c.arr("blocks")
+            val blockIds = (o["blockIds"] as? JsonArray)?.map { str(it).trim() }?.mapNotNull { b ->
+                (blocks.firstOrNull { it.s("id") == b } ?: blocks.firstOrNull { it.s("name") == b } ?: blocks.firstOrNull { it.s("name").trim().equals(b, ignoreCase = true) })?.s("id")
+            }?.let { ids -> ids + ids.mapNotNull { id -> blocks.firstOrNull { it.s("id") == id }?.sOrNull("folderId") } }?.let { ImageGenStore.tidyIds(c, it) }
+                ?: u?.let { ImageGenStore.blockIdList(it) } ?: ImageGenStore.defaultBlockIds(c)
             out.add(buildJsonObject {
                 put("id", u?.s("id") ?: Scripts.newId("pc")); put("characterId", c.s("id")); put("blockIds", JsonArray(blockIds.map { JsonPrimitive(it) }))
                 put("prompt", if (o.containsKey("prompt")) str(o["prompt"]) else u?.s("prompt") ?: "")
@@ -132,7 +139,12 @@ object GenOps {
         return ImageGenStore.normalizePositions(out)
     }
 
-    private fun patchPreset(g: JsonObject, p: JsonObject, v: JsonObject): JsonObject {
+    private fun patchPreset(g: JsonObject, p: JsonObject, v0: JsonObject): JsonObject {
+        // AI가 쓰는 다른 모양도 받음: {preset:{…}}로 감싸기, prompt/negative, characters
+        var v = (v0["preset"] as? JsonObject)?.let { JsonObject(v0 - "preset" + it) } ?: v0
+        if (!v.containsKey("assetPrompt")) (v["prompt"] ?: v["asset_prompt"])?.let { v = JsonObject(v + ("assetPrompt" to it)) }
+        if (!v.containsKey("assetNegative")) (v["negative"] ?: v["asset_negative"])?.let { v = JsonObject(v + ("assetNegative" to it)) }
+        if (!v.containsKey("chars")) v["characters"]?.let { v = JsonObject(v + ("chars" to it)) }
         val m = p.toMutableMap()
         if (v.containsKey("name")) m["name"] = JsonPrimitive(str(v["name"]))
         if (v.containsKey("imageName")) m["imageName"] = JsonPrimitive(str(v["imageName"]))
@@ -183,7 +195,10 @@ object GenOps {
             }
             "genTemplate" -> {
                 if (op == "add") {
-                    val p = patchPreset(g, ImageGenStore.newPreset(str(h["name"]).ifBlank { "프리셋 ${presets.size + 1}" }, null).let { JsonObject(it + ("chars" to JsonArray(emptyList()))) }, h)
+                    // 캐릭터를 안 붙였고 이미지 캐릭터가 하나뿐이면 그 캐릭터를 붙임 (체크된 블록으로)
+                    val only = chars.singleOrNull()
+                    val base = ImageGenStore.newPreset(str(h["name"] ?: (h["preset"] as? JsonObject)?.get("name")).ifBlank { "프리셋 ${presets.size + 1}" }, only)
+                    val p = patchPreset(g, base, h)
                     return Result(g.withList("presets", presets + p), "이미지 프리셋 추가: ${p.s("name")}")
                 }
                 val p = presets.firstOrNull { it.s("id") == id } ?: error("프리셋 $id 없음")
@@ -240,16 +255,21 @@ object GenOps {
                     }
                     "add_block" -> {
                         val b = block(h, null, c.arr("blocks"))
-                        var out = with(c.withList("blocks", c.arr("blocks") + b))
-                        // 새 폴더는 기존 프리셋에서 켜진 채로 시작 (꺼져 있으면 그 안으로 옮긴 블록이 프리셋에서 조용히 빠짐)
-                        if (b.s("type") == "folder") out = out.withList("presets", presets.map { p -> p.withList("chars", p.arr("chars").map { pc ->
-                            if (pc.s("characterId") == id && pc["blockIds"] is JsonArray) JsonObject(pc + ("blockIds" to JsonArray((ImageGenStore.blockIdList(pc) + b.s("id")).map { JsonPrimitive(it) }))) else pc
-                        }) })
+                        val out = with(c.withList("blocks", c.arr("blocks") + b))
                         Result(out, (if (b.s("type") == "folder") "캐릭터 블록 폴더 추가: " else "캐릭터 블록 추가: ") + "${c.s("name")} / ${b.s("name")}")
                     }
                     "update_block" -> {
                         val b = c.arr("blocks").firstOrNull { it.s("id") == str(h["blockId"]) } ?: error("블록 없음")
-                        Result(with(c.withList("blocks", c.arr("blocks").map { if (it.s("id") == b.s("id")) block(h, b, c.arr("blocks")) else it })), "캐릭터 블록 수정: ${c.s("name")} / ${b.s("name")}")
+                        val nb = block(h, b, c.arr("blocks"))
+                        var out = with(c.withList("blocks", c.arr("blocks").map { if (it.s("id") == b.s("id")) nb else it }))
+                        // 프리셋에서 켜져 있던 블록을 폴더로 옮기면 그 폴더도 켬 (안 그러면 프리셋에서 조용히 빠짐)
+                        nb.sOrNull("folderId")?.takeIf { it != b.sOrNull("folderId") }?.let { f ->
+                            out = out.withList("presets", presets.map { p -> p.withList("chars", p.arr("chars").map { pc ->
+                                val ids = ImageGenStore.blockIdList(pc)
+                                if (pc.s("characterId") == id && b.s("id") in ids && f !in ids) JsonObject(pc + ("blockIds" to JsonArray((ids + f).map { JsonPrimitive(it) }))) else pc
+                            }) })
+                        }
+                        Result(out, "캐릭터 블록 수정: ${c.s("name")} / ${b.s("name")}")
                     }
                     "remove_block" -> {
                         val b = c.arr("blocks").firstOrNull { it.s("id") == str(h["blockId"]) } ?: error("블록 없음")

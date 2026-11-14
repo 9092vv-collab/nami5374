@@ -104,7 +104,7 @@ object ImageGenStore {
 
     fun presetChar(character: JsonObject): JsonObject = buildJsonObject {
         put("id", JsonPrimitive(newId("pc"))); put("characterId", JsonPrimitive(character.s("id")))
-        put("blockIds", JsonArray(character.arr("blocks").map { JsonPrimitive(it.s("id")) }))
+        put("blockIds", JsonArray(defaultBlockIds(character).map { JsonPrimitive(it) }))
         put("prompt", JsonPrimitive("")); put("negative", JsonPrimitive(""))
         put("pos", buildJsonObject { put("mode", JsonPrimitive("auto")) })
     }
@@ -132,7 +132,8 @@ object ImageGenStore {
     fun load(cid: String): JsonObject = cache.getOrPut(cid) {
         runCatching { CardIO.json.parseToJsonElement(file(cid).readText()).jsonObject }.getOrNull()?.let { t ->
             val d = defaults()
-            JsonObject(d + t + ("style" to JsonObject(d.o("style").orEmpty() + t.o("style").orEmpty())))
+            // 켜진 블록이 없는데 켜져 있는 폴더는 끔 (생성 결과는 같음, 화면에서만 헷갈렸음)
+            tidyAll(JsonObject(d + t + ("style" to JsonObject(d.o("style").orEmpty() + t.o("style").orEmpty()))))
         } ?: newProject(cid)
     }
 
@@ -213,15 +214,60 @@ object ImageGenStore {
     fun removePreset(cid: String, presetId: String) = removePresetFull(cid, presetId)
 
     /** Toggles one id (block or folder) in a preset character's blockIds. */
+    /** 폴더를 누르면 폴더와 안의 블록을 한꺼번에 켜고 끔. 폴더 안 블록을 켜면 폴더도 켜짐. */
     fun toggleBlock(cid: String, presetId: String, pcharId: String, blockId: String) = patchPreset(cid, presetId) { p ->
+        val g = load(cid)
         p.mapList("chars") { l ->
             val i = l.indexOfFirst { it.s("id") == pcharId }
             if (i >= 0) {
-                val ids = (l[i]["blockIds"] as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.content }?.toMutableList() ?: mutableListOf()
-                if (blockId in ids) ids.remove(blockId) else ids.add(blockId)
-                l[i] = l[i].with("blockIds" to JsonArray(ids.map { JsonPrimitive(it) }))
+                val c = character(g, l[i].s("characterId")) ?: return@mapList
+                val blocks = c.arr("blocks")
+                val ids = blockIdList(l[i]).toMutableList()
+                val b = blocks.firstOrNull { it.s("id") == blockId } ?: return@mapList
+                if (b.s("type") == "folder") {
+                    val kids = blocks.filter { it.sOrNull("folderId") == blockId }.map { it.s("id") }
+                    val on = blockId in ids && kids.any { it in ids }
+                    if (on) ids.removeAll(kids + blockId) else ids.addAll(kids + blockId)
+                } else {
+                    if (blockId in ids) ids.remove(blockId) else { ids.add(blockId); b.sOrNull("folderId")?.let { ids.add(it) } }
+                }
+                l[i] = l[i].with("blockIds" to JsonArray(tidyIds(c, ids).map { JsonPrimitive(it) }))
             }
         }
+    }
+
+    /**
+     * 프리셋에 캐릭터를 새로 붙일 때 켜 둘 블록 = 캐릭터 설정 화면에서 체크된 블록(free != false).
+     * 전에는 모든 블록·폴더를 켜서, 의상 폴더가 여러 개면 전부 켜진 채로 시작했음.
+     */
+    fun defaultBlockIds(character: JsonObject): List<String> {
+        val blocks = character.arr("blocks")
+        fun on(b: JsonObject) = b["free"]?.toString() != "false"
+        val folders = blocks.filter { it.s("type") == "folder" }
+        val picked = blocks.filter { b -> b.s("type") != "folder" && on(b) && (b.sOrNull("folderId")?.let { f -> folders.firstOrNull { it.s("id") == f }?.let(::on) } ?: true) }.map { it.s("id") }
+        return tidyIds(character, picked)
+    }
+
+    /** 폴더 id는 그 안의 블록이 하나라도 켜져 있을 때만 남기고, 켜진 블록이 든 폴더는 켬 (폴더만 켜지고 안은 비어 보이던 문제). */
+    fun tidyIds(character: JsonObject, ids: List<String>): List<String> {
+        val blocks = character.arr("blocks")
+        val folderIds = blocks.filter { it.s("type") == "folder" }.map { it.s("id") }.toSet()
+        val kids = ids.filter { it !in folderIds }
+        val keepFolders = folderIds.filter { f -> f in ids && blocks.any { it.sOrNull("folderId") == f && it.s("id") in kids } }
+        return (kids + keepFolders).distinct()
+    }
+
+    private fun tidyAll(g: JsonObject): JsonObject {
+        val chars = g.arr("characters").associateBy { it.s("id") }
+        var changed = false
+        val presets = g.arr("presets").map { p ->
+            p.with("chars" to JsonArray(p.arr("chars").map { pc ->
+                val c = chars[pc.s("characterId")]
+                val ids = (pc["blockIds"] as? JsonArray)?.let { blockIdList(pc) }
+                if (c == null || ids == null) pc else tidyIds(c, ids).let { t -> if (t.toSet() != ids.toSet()) { changed = true; pc.with("blockIds" to JsonArray(t.map { JsonPrimitive(it) })) } else pc }
+            }))
+        }
+        return if (changed) g.with("presets" to JsonArray(presets)) else g
     }
 
     fun blockIdList(pc: JsonObject?): List<String> = (pc?.get("blockIds") as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.content } ?: emptyList()

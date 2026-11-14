@@ -645,7 +645,8 @@ object Workshop {
                 if (res.actions.isNotEmpty()) withContext(Dispatchers.Main) { GenOps.runActions(cid, res.actions) }
                 updateTurn(cid, turnId, mapOf(
                     "status" to js("done"), "response" to js(out.message),
-                    "edits" to JsonArray(res.applied.map { buildJsonObject { put("field", it.field); put("op", it.op); put("summary", it.summary) } }),
+                    "edits" to JsonArray(res.applied.map { buildJsonObject { put("field", it.field); put("op", it.op); put("summary", it.summary) } } +
+                        res.rejected.map { (e, why) -> buildJsonObject { put("field", e.s("field")); put("op", e.s("op")); put("summary", "적용 안 됨 (${e.s("field")}/${e.s("op")}): $why"); put("rejected", true) } }),
                     "snapshot" to snapshot,
                     "usage" to out.usage?.let { u -> buildJsonObject { u.inputTokens?.let { put("inputTokens", it) }; u.outputTokens?.let { put("outputTokens", it) } } },
                     "model" to js(out.model.s("name").ifBlank { out.model.s("modelId") }),
