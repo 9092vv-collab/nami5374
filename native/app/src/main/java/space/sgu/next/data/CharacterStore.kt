@@ -77,38 +77,57 @@ object CharacterStore {
     private fun cardFile(id: String) = File(dir(id), "card.json")
     private fun metaFile(id: String) = File(dir(id), "meta.json")
 
-    fun readCard(id: String): JsonObject =
-        runCatching { CardIO.json.parseToJsonElement(cardFile(id).readText()).jsonObject }.getOrDefault(CardIO.normalize(JsonObject(emptyMap())))
+    // 최근에 연 카드는 메모리에 둠: 화면 여러 곳이 version이 바뀔 때마다 readCard를 부르는데,
+    // 그때마다 파일을 읽고 JSON을 다시 풀면 편집 한 번에 같은 파일을 여러 번 읽게 됨. 파일은 writeCard로만 바뀜.
+    private val cardCache = object : LinkedHashMap<String, JsonObject>(8, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, JsonObject>?) = size > 4
+    }
+
+    fun readCard(id: String): JsonObject {
+        synchronized(cardCache) { cardCache[id] }?.let { return it }
+        val read = runCatching { CardIO.json.parseToJsonElement(cardFile(id).readText()).jsonObject }.getOrNull()
+        if (read != null) synchronized(cardCache) { cardCache[id] = read }
+        return read ?: CardIO.normalize(JsonObject(emptyMap()))
+    }
 
     private fun readMetaJson(id: String): JsonObject =
         runCatching { CardIO.json.parseToJsonElement(metaFile(id).readText()).jsonObject }.getOrDefault(JsonObject(emptyMap()))
 
+    private val spaces = Regex("\\s+")
+    private fun tagline(data: JsonObject?) = CardIO.str(data, "description").take(2000).replace(spaces, " ").trim().take(80)
+
     private fun loadMeta(id: String): CharMeta {
-        val card = readCard(id)
-        val data = card["data"] as? JsonObject
         val meta = readMetaJson(id)
         val icon = File(dir(id), "icon.png").takeIf { it.exists() }
-        val desc = CardIO.str(data, "description").replace(Regex("\\s+"), " ").trim()
+        // meta.json에 목록용 요약(sum)이 있으면 카드 전체를 읽지 않음 → 앱을 켤 때 캐릭터마다 큰 card.json을 풀지 않아도 됨
+        val hasSum = meta["sum"] != null
+        val data = if (hasSum) null else readCard(id)["data"] as? JsonObject
         return CharMeta(
             id = id,
-            name = CardIO.str(data, "name").ifBlank { "이름 없는 캐릭터" },
-            creator = CardIO.str(data, "creator"),
+            name = (if (hasSum) CardIO.str(meta, "name") else CardIO.str(data, "name")).ifBlank { "이름 없는 캐릭터" },
+            creator = if (hasSum) CardIO.str(meta, "creator") else CardIO.str(data, "creator"),
             folder = CardIO.str(meta, "folder").ifBlank { null },
             updated = (meta["updated"] as? JsonPrimitive)?.longOrNull ?: cardFile(id).lastModified(),
-            tagline = desc.take(80),
+            tagline = if (hasSum) CardIO.str(meta, "tagline") else tagline(data),
             icon = icon,
         )
     }
 
     private fun writeMeta(id: String, folder: String?) {
+        val data = readCard(id)["data"] as? JsonObject
         val obj = buildJsonObject {
             if (folder != null) put("folder", JsonPrimitive(folder))
             put("updated", JsonPrimitive(System.currentTimeMillis()))
+            put("sum", JsonPrimitive(1))
+            put("name", JsonPrimitive(CardIO.str(data, "name")))
+            put("creator", JsonPrimitive(CardIO.str(data, "creator")))
+            put("tagline", JsonPrimitive(tagline(data)))
         }
         metaFile(id).writeText(CardIO.json.encodeToString(JsonElement.serializer(), obj))
     }
 
     private fun writeCard(id: String, card: JsonObject) {
+        synchronized(cardCache) { cardCache[id] = card }
         cardFile(id).writeText(CardIO.json.encodeToString(JsonElement.serializer(), card))
     }
 
@@ -162,6 +181,7 @@ object CharacterStore {
 
     fun delete(id: String) {
         Workshop.forget(id)
+        synchronized(cardCache) { cardCache.remove(id) }
         dir(id).deleteRecursively()
         items.removeAll { it.id == id }
         Thumbs.forget(id)
@@ -387,6 +407,7 @@ object CharacterStore {
             withContext(Dispatchers.Main) { refresh(id) }
             id
         } catch (e: Throwable) {
+            synchronized(cardCache) { cardCache.remove(id) }
             d.deleteRecursively()
             throw e
         }

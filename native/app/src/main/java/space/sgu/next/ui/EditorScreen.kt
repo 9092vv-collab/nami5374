@@ -110,7 +110,7 @@ fun EditorScreen(characterId: String, onBack: (() -> Unit)?, openField: (String)
     // 이미지 데이터 · 그림체 설정 · 이미지 템플릿은 이미지 탭 위쪽 버튼을 눌러서 들어감 (side = "img0"/"img1"/"img3").
     // 스크립트 + 기타는 잘 안 써서 탭에서 빼고 한 화면으로 합침 (상단 바 아이콘 / ⋮ 메뉴에서 열기).
     // so swiping from an image sub tab on to the next big tab is one smooth swipe (no pager inside a pager).
-    val pager = rememberPagerState(initialPage = 0) { 3 }
+    val pager = rememberPagerState(initialPage = 1) { 3 }  // 봇을 열면 작업실부터
     // rememberSaveable: 필드 편집 화면에 다녀와도 열린 채로 유지
     // "" = 탭 화면, "extra" = 스크립트 · 기타, "img0"/"img1"/"img3" = 이미지 데이터 / 그림체 설정 / 이미지 템플릿
     var side by rememberSaveable(characterId) { mutableStateOf("") }
@@ -215,7 +215,7 @@ fun EditorScreen(characterId: String, onBack: (() -> Unit)?, openField: (String)
             }
             if (extra) Box(Modifier.weight(1f)) { GroupPage(listOf("script", "etc"), characterId, card, openField, openRoute) }
             else if (sideOpen) Box(Modifier.weight(1f)) { ImageSubPage(characterId, side.removePrefix("img").toIntOrNull() ?: 0, {}, openField, openPreset, openRoute, showTabs = false) }
-            else HorizontalPager(state = pager, modifier = Modifier.weight(1f), beyondViewportPageCount = 1) { page ->
+            else HorizontalPager(state = pager, modifier = Modifier.weight(1f), beyondViewportPageCount = 0) { page ->
                 when (page) {
                     2 -> GroupPage(listOf("character"), characterId, card, openField, openRoute)
                     0 -> ImageSubPage(characterId, 2, {}, openField, openPreset, openRoute, showTabs = false)
