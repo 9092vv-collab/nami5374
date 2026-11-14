@@ -93,7 +93,7 @@ import space.sgu.next.data.arr
 import space.sgu.next.data.o
 import space.sgu.next.data.WFields
 
-private val editorTabs = listOf("캐릭터", "이미지", "작업실")
+private val editorTabs = listOf("이미지", "작업실", "캐릭터")
 private const val EXTRA_TITLE = "스크립트 · 기타"
 
 fun fieldLabel(key: String): String = Fields.label(key)
@@ -106,7 +106,7 @@ fun EditorScreen(characterId: String, onBack: (() -> Unit)?, openField: (String)
     val scope = rememberCoroutineScope()
     val meta = CharacterStore.items.firstOrNull { it.id == characterId }
     val card = remember(characterId, CharacterStore.version) { CharacterStore.readCard(characterId) }
-    // Pager: 캐릭터 | 이미지(캐릭터 설정만) | 작업실.
+    // Pager: 0 이미지(캐릭터 설정만) | 1 작업실 | 2 캐릭터. 이미지·캐릭터 탭에서 뒤로 가기 = 작업실 탭으로.
     // 이미지 데이터 · 그림체 설정 · 이미지 템플릿은 이미지 탭 위쪽 버튼을 눌러서 들어감 (side = "img0"/"img1"/"img3").
     // 스크립트 + 기타는 잘 안 써서 탭에서 빼고 한 화면으로 합침 (상단 바 아이콘 / ⋮ 메뉴에서 열기).
     // so swiping from an image sub tab on to the next big tab is one smooth swipe (no pager inside a pager).
@@ -118,6 +118,7 @@ fun EditorScreen(characterId: String, onBack: (() -> Unit)?, openField: (String)
     val sideOpen = side.isNotEmpty()
     val sideTitle = when (side) { "extra" -> EXTRA_TITLE; "" -> ""; else -> imageTabs[side.removePrefix("img").toIntOrNull() ?: 0] }
     val wideBar = androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp >= 480
+    androidx.activity.compose.BackHandler(!sideOpen && pager.currentPage != 1) { scope.launch { pager.animateScrollToPage(1) } }
     androidx.activity.compose.BackHandler(sideOpen) { side = "" }
     var menu by remember { mutableStateOf(false) }
     var newSession by remember { mutableStateOf(false) }
@@ -133,7 +134,7 @@ fun EditorScreen(characterId: String, onBack: (() -> Unit)?, openField: (String)
     val name = meta?.name ?: "(삭제된 캐릭터)"
 
     // 작업실에서는 상단바·탭 줄을 항상 숨김 (탭 이동은 좌우로 밀어서). 봇 전체 검색 중엔 보임.
-    val hideChrome = pager.currentPage == 2 && !BotSearch.open && !sideOpen
+    val hideChrome = pager.currentPage == 1 && !BotSearch.open && !sideOpen
 
     Scaffold(
         containerColor = Sgu.Bg,
@@ -182,7 +183,7 @@ fun EditorScreen(characterId: String, onBack: (() -> Unit)?, openField: (String)
                 exit = androidx.compose.animation.shrinkVertically() + androidx.compose.animation.fadeOut()) {
                 Column {
                     if (SettingsStore.root.b("undoUnderTitle")) UndoUnderTitle(characterId, busy)
-                    val groupKeys = listOf("character", "image", "chat")
+                    val groupKeys = listOf("image", "chat", "character")
                     if (sideOpen) Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                         IconButton(onClick = { side = "" }) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "닫기") }
                         Text(sideTitle, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
@@ -199,7 +200,7 @@ fun EditorScreen(characterId: String, onBack: (() -> Unit)?, openField: (String)
                 }
             }
             // 이미지 탭: 캐릭터 설정만 바로 보이고, 나머지 셋은 이 버튼 줄을 눌러서 들어감
-            androidx.compose.animation.AnimatedVisibility(pager.currentPage == 1 && !sideOpen,
+            androidx.compose.animation.AnimatedVisibility(pager.currentPage == 0 && !sideOpen,
                 enter = androidx.compose.animation.expandVertically() + androidx.compose.animation.fadeIn(),
                 exit = androidx.compose.animation.shrinkVertically() + androidx.compose.animation.fadeOut()) {
                 Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -216,13 +217,13 @@ fun EditorScreen(characterId: String, onBack: (() -> Unit)?, openField: (String)
             else if (sideOpen) Box(Modifier.weight(1f)) { ImageSubPage(characterId, side.removePrefix("img").toIntOrNull() ?: 0, {}, openField, openPreset, openRoute, showTabs = false) }
             else HorizontalPager(state = pager, modifier = Modifier.weight(1f), beyondViewportPageCount = 1) { page ->
                 when (page) {
-                    0 -> GroupPage(listOf("character"), characterId, card, openField, openRoute)
-                    1 -> ImageSubPage(characterId, 2, {}, openField, openPreset, openRoute, showTabs = false)
+                    2 -> GroupPage(listOf("character"), characterId, card, openField, openRoute)
+                    0 -> ImageSubPage(characterId, 2, {}, openField, openPreset, openRoute, showTabs = false)
                     else -> WorkshopPage(characterId, openFieldTab = { fid ->
                         when (WFields.map[fid]?.group ?: Fields.byId[fid]?.group) {
                             "script", "etc" -> side = "extra"
                             "image" -> side = "img0"
-                            else -> scope.launch { pager.animateScrollToPage(0) }
+                            else -> scope.launch { pager.animateScrollToPage(2) }
                         }
                     }, openRoute = openRoute)
                 }
