@@ -128,7 +128,7 @@ object GenOps {
             val blockIds = (o["blockIds"] as? JsonArray)?.map { str(it).trim() }?.mapNotNull { b ->
                 (blocks.firstOrNull { it.s("id") == b } ?: blocks.firstOrNull { it.s("name") == b } ?: blocks.firstOrNull { it.s("name").trim().equals(b, ignoreCase = true) })?.s("id")
             }?.let { ids -> ids + ids.mapNotNull { id -> blocks.firstOrNull { it.s("id") == id }?.sOrNull("folderId") } }?.let { ImageGenStore.tidyIds(c, it) }
-                ?: u?.let { ImageGenStore.blockIdList(it) } ?: ImageGenStore.defaultBlockIds(c)
+                ?: u?.let { ImageGenStore.blockIdList(it) } ?: c.arr("blocks").map { it.s("id") }
             out.add(buildJsonObject {
                 put("id", u?.s("id") ?: Scripts.newId("pc")); put("characterId", c.s("id")); put("blockIds", JsonArray(blockIds.map { JsonPrimitive(it) }))
                 put("prompt", if (o.containsKey("prompt")) str(o["prompt"]) else u?.s("prompt") ?: "")

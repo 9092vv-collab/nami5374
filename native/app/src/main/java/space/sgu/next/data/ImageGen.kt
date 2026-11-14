@@ -104,7 +104,7 @@ object ImageGenStore {
 
     fun presetChar(character: JsonObject): JsonObject = buildJsonObject {
         put("id", JsonPrimitive(newId("pc"))); put("characterId", JsonPrimitive(character.s("id")))
-        put("blockIds", JsonArray(defaultBlockIds(character).map { JsonPrimitive(it) }))
+        put("blockIds", JsonArray(character.arr("blocks").map { JsonPrimitive(it.s("id")) }))  // 예전 방식: 모든 블록 켜짐 (사용자 요청으로 되돌림)
         put("prompt", JsonPrimitive("")); put("negative", JsonPrimitive(""))
         put("pos", buildJsonObject { put("mode", JsonPrimitive("auto")) })
     }
