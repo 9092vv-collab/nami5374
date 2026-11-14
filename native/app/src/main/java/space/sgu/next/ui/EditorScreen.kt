@@ -190,7 +190,7 @@ fun EditorScreen(characterId: String, onBack: (() -> Unit)?, openField: (String)
                     if (BotSearch.query.isNotBlank() && ("script" in hitGroups || "etc" in hitGroups))
                         Text("$EXTRA_TITLE 에도 검색 결과가 있어요 ›", style = MaterialTheme.typography.bodySmall, color = Sgu.Sub,
                             modifier = Modifier.fillMaxWidth().clickable { side = "extra" }.padding(horizontal = 18.dp, vertical = 6.dp))
-                    PillTabs(
+                    WideTabs(
                         options = if (BotSearch.query.isBlank()) editorTabs else editorTabs.mapIndexed { i, l -> if (groupKeys[i] in hitGroups) "$l ●" else l },
                         selected = pager.currentPage,
                         onSelect = { scope.launch { pager.animateScrollToPage(it) } },
@@ -204,7 +204,7 @@ fun EditorScreen(characterId: String, onBack: (() -> Unit)?, openField: (String)
                 exit = androidx.compose.animation.shrinkVertically() + androidx.compose.animation.fadeOut()) {
                 Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     listOf(0, 1, 3).forEach { sub ->
-                        Row(Modifier.weight(1f).clip(RoundedCornerShape(14.dp)).background(Sgu.Card).clickable { side = "img$sub" }.padding(horizontal = 10.dp, vertical = 10.dp),
+                        Row(Modifier.weight(1f).clip(RoundedCornerShape(14.dp)).background(Sgu.Card).clickable { side = "img$sub" }.padding(horizontal = 10.dp, vertical = 14.dp),
                             verticalAlignment = Alignment.CenterVertically) {
                             Text(imageTabs[sub], style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                             Text("›", color = Sgu.Sub)

@@ -98,6 +98,25 @@ fun SguTopBar(
 
 // ---------- Pills ----------
 
+/** 화면 너비를 똑같이 나눠 쓰는 큰 탭 (편집 화면의 캐릭터 · 이미지 · 작업실). */
+@Composable
+fun WideTabs(options: List<String>, selected: Int, onSelect: (Int) -> Unit, modifier: Modifier = Modifier) {
+    Row(modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        options.forEachIndexed { i, label ->
+            val on = i == selected
+            val bg by animateColorAsState(if (on) Sgu.Ink else Sgu.Card, tween(220), label = "wideBg")
+            val fg by animateColorAsState(if (on) Color.White else Sgu.Sub, tween(220), label = "wideFg")
+            val lift by animateDpAsState(if (on) 6.dp else 0.dp, tween(220), label = "wideLift")
+            Box(
+                Modifier.weight(1f)
+                    .shadow(lift, CircleShape, ambientColor = Sgu.Ink.copy(alpha = 0.2f), spotColor = Sgu.Ink.copy(alpha = 0.3f))
+                    .clip(CircleShape).background(bg).clickable { onSelect(i) }.padding(vertical = 13.dp),
+                contentAlignment = Alignment.Center,
+            ) { Text(label, color = fg, style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold), maxLines = 1) }
+        }
+    }
+}
+
 /** Separated rounded tabs. Selected = ink pill with a soft shadow; others = plain grey text. */
 @Composable
 fun PillTabs(
