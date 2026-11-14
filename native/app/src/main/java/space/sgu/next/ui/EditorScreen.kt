@@ -47,6 +47,7 @@ import androidx.compose.material.icons.outlined.CheckCircleOutline
 import androidx.compose.material.icons.automirrored.outlined.Assignment
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Search
+import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
@@ -92,7 +93,8 @@ import space.sgu.next.data.arr
 import space.sgu.next.data.o
 import space.sgu.next.data.WFields
 
-private val editorTabs = listOf("캐릭터", "이미지", "작업실", "스크립트", "기타")
+private val editorTabs = listOf("캐릭터", "이미지", "작업실")
+private const val EXTRA_TITLE = "스크립트 · 기타"
 
 fun fieldLabel(key: String): String = Fields.label(key)
 
@@ -104,13 +106,18 @@ fun EditorScreen(characterId: String, onBack: (() -> Unit)?, openField: (String)
     val scope = rememberCoroutineScope()
     val meta = CharacterStore.items.firstOrNull { it.id == characterId }
     val card = remember(characterId, CharacterStore.version) { CharacterStore.readCard(characterId) }
-    // One flat pager: 캐릭터 | 이미지 데이터 · 그림체 · 캐릭터 설정 · 템플릿 | 작업실 | 스크립트 | 기타,
+    // One flat pager: 캐릭터 | 이미지 데이터 · 그림체 · 캐릭터 설정 · 템플릿 | 작업실.
+    // 스크립트 + 기타는 잘 안 써서 탭에서 빼고 한 화면으로 합침 (상단 바 아이콘 / ⋮ 메뉴에서 열기).
     // so swiping from an image sub tab on to the next big tab is one smooth swipe (no pager inside a pager).
-    val pager = rememberPagerState(initialPage = 0) { 8 }
+    val pager = rememberPagerState(initialPage = 0) { 6 }
     var lastImage by rememberSaveable(characterId) { mutableStateOf(4) }
     LaunchedEffect(pager.currentPage) { if (pager.currentPage in 1..4) lastImage = pager.currentPage }
-    val bigOf = { p: Int -> when (p) { 0 -> 0; in 1..4 -> 1; 5 -> 2; 6 -> 3; else -> 4 } }
-    val pageOfBig = { b: Int -> when (b) { 0 -> 0; 1 -> lastImage; 2 -> 5; 3 -> 6; else -> 7 } }
+    val bigOf = { p: Int -> when (p) { 0 -> 0; in 1..4 -> 1; else -> 2 } }
+    val pageOfBig = { b: Int -> when (b) { 0 -> 0; 1 -> lastImage; else -> 5 } }
+    // rememberSaveable: 필드 편집 화면에 다녀와도 열린 채로 유지
+    var extra by rememberSaveable(characterId) { mutableStateOf(false) }
+    val wideBar = androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp >= 480
+    androidx.activity.compose.BackHandler(extra) { extra = false }
     var menu by remember { mutableStateOf(false) }
     var newSession by remember { mutableStateOf(false) }
     var sessions by remember { mutableStateOf(false) }
@@ -125,7 +132,7 @@ fun EditorScreen(characterId: String, onBack: (() -> Unit)?, openField: (String)
     val name = meta?.name ?: "(삭제된 캐릭터)"
 
     // 작업실에서는 상단바·탭 줄을 항상 숨김 (탭 이동은 좌우로 밀어서). 봇 전체 검색 중엔 보임.
-    val hideChrome = pager.currentPage == 5 && !BotSearch.open
+    val hideChrome = pager.currentPage == 5 && !BotSearch.open && !extra
 
     Scaffold(
         containerColor = Sgu.Bg,
@@ -139,6 +146,7 @@ fun EditorScreen(characterId: String, onBack: (() -> Unit)?, openField: (String)
                 subtitle = "${Workshop.currentSessionName(wdoc)} · ${wdoc.o("session").arr("turns").size}턴",
                 onBack = onBack,
                 actions = {
+                    if (wideBar) IconButton(onClick = { extra = !extra }) { Icon(Icons.Outlined.Tune, EXTRA_TITLE, tint = if (extra) Sgu.Accent else Sgu.Ink) }
                     IconButton(onClick = { openRoute("perms/$characterId") }) { Icon(Icons.Outlined.CheckCircleOutline, "권한") }
                     IconButton(onClick = { openRoute("prompt/$characterId") }) { Icon(Icons.AutoMirrored.Outlined.Assignment, "프롬프트 설정") }
                     IconButton(onClick = { if (BotSearch.open) BotSearch.close() else BotSearch.open = true }) { Icon(Icons.Outlined.Search, "봇 전체 검색") }
@@ -146,6 +154,7 @@ fun EditorScreen(characterId: String, onBack: (() -> Unit)?, openField: (String)
                     Box {
                         IconButton(onClick = { menu = true }) { Icon(Icons.Outlined.MoreVert, "더보기") }
                         DropdownMenu(expanded = menu, onDismissRequest = { menu = false }, containerColor = Sgu.Card, shape = RoundedCornerShape(16.dp)) {
+                            if (!wideBar) DropdownMenuItem(text = { Text(if (extra) "$EXTRA_TITLE 닫기" else EXTRA_TITLE) }, onClick = { menu = false; extra = !extra })
                             DropdownMenuItem(text = { Text("새로운 세션 추가") }, enabled = !busy, onClick = { menu = false; newSession = true })
                             DropdownMenuItem(text = { Text("세션 이동") }, onClick = { menu = false; sessions = true })
                             DropdownMenuItem(text = { Text("세션 요약하기") }, enabled = !busy && Workshop.summarizing[characterId] != true, onClick = { menu = false; Workshop.summarizeNow(characterId) })
@@ -172,30 +181,40 @@ fun EditorScreen(characterId: String, onBack: (() -> Unit)?, openField: (String)
                 exit = androidx.compose.animation.shrinkVertically() + androidx.compose.animation.fadeOut()) {
                 Column {
                     if (SettingsStore.root.b("undoUnderTitle")) UndoUnderTitle(characterId, busy)
-                    val groupKeys = listOf("character", "image", "chat", "script", "etc")
+                    val groupKeys = listOf("character", "image", "chat")
+                    if (extra) Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        IconButton(onClick = { extra = false }) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "닫기") }
+                        Text(EXTRA_TITLE, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                    } else {
+                    if (BotSearch.query.isNotBlank() && ("script" in hitGroups || "etc" in hitGroups))
+                        Text("$EXTRA_TITLE 에도 검색 결과가 있어요 ›", style = MaterialTheme.typography.bodySmall, color = Sgu.Sub,
+                            modifier = Modifier.fillMaxWidth().clickable { extra = true }.padding(horizontal = 18.dp, vertical = 6.dp))
                     PillTabs(
                         options = if (BotSearch.query.isBlank()) editorTabs else editorTabs.mapIndexed { i, l -> if (groupKeys[i] in hitGroups) "$l ●" else l },
                         selected = bigOf(pager.currentPage),
                         onSelect = { scope.launch { pager.animateScrollToPage(pageOfBig(it)) } },
                     )
+                    }
                 }
             }
             // 이미지 하위 탭 줄은 pager 밖에 고정: 페이지를 넘겨도 줄은 그대로, 선택만 바뀜
-            androidx.compose.animation.AnimatedVisibility(pager.currentPage in 1..4,
+            androidx.compose.animation.AnimatedVisibility(pager.currentPage in 1..4 && !extra,
                 enter = androidx.compose.animation.expandVertically() + androidx.compose.animation.fadeIn(),
                 exit = androidx.compose.animation.shrinkVertically() + androidx.compose.animation.fadeOut()) {
                 PillTabs(imageTabs, (pager.currentPage - 1).coerceIn(0, 3), { sub -> scope.launch { pager.animateScrollToPage(sub + 1) } })
             }
-            HorizontalPager(state = pager, modifier = Modifier.weight(1f), beyondViewportPageCount = 1) { page ->
+            if (extra) Box(Modifier.weight(1f)) { GroupPage(listOf("script", "etc"), characterId, card, openField, openRoute) }
+            else HorizontalPager(state = pager, modifier = Modifier.weight(1f), beyondViewportPageCount = 1) { page ->
                 when (page) {
-                    0 -> GroupPage("character", characterId, card, openField, openRoute)
+                    0 -> GroupPage(listOf("character"), characterId, card, openField, openRoute)
                     in 1..4 -> ImageSubPage(characterId, page - 1, { sub -> scope.launch { pager.animateScrollToPage(sub + 1) } }, openField, openPreset, openRoute, showTabs = false)
-                    5 -> WorkshopPage(characterId, openFieldTab = { fid ->
-                        val target = when (WFields.map[fid]?.group ?: Fields.byId[fid]?.group) { "image" -> 1; "script" -> 6; "etc" -> 7; else -> 0 }
-                        scope.launch { pager.animateScrollToPage(target) }
+                    else -> WorkshopPage(characterId, openFieldTab = { fid ->
+                        when (WFields.map[fid]?.group ?: Fields.byId[fid]?.group) {
+                            "script", "etc" -> extra = true
+                            "image" -> scope.launch { pager.animateScrollToPage(1) }
+                            else -> scope.launch { pager.animateScrollToPage(0) }
+                        }
                     }, openRoute = openRoute)
-                    6 -> GroupPage("script", characterId, card, openField, openRoute)
-                    else -> GroupPage("etc", characterId, card, openField, openRoute)
                 }
             }
         }
@@ -226,16 +245,22 @@ private fun UndoUnderTitle(cid: String, busy: Boolean) {
 // ---------- 캐릭터 / 스크립트 / 기타 tabs: the original's field groups ----------
 
 @Composable
-private fun GroupPage(group: String, id: String, card: JsonObject, openField: (String) -> Unit, openRoute: (String) -> Unit) {
+private fun GroupPage(groups: List<String>, id: String, card: JsonObject, openField: (String) -> Unit, openRoute: (String) -> Unit) {
     val data = card["data"] as? JsonObject
-    val fields = Fields.inGroup(group)
     val expanded = remember(id) { mutableStateOf(setOf<String>()) }
     androidx.compose.runtime.CompositionLocalProvider(LocalGroupInset provides 0.dp) {
     val searching = BotSearch.query.isNotBlank()
     val sgu = remember(card, searching) { if (searching) SguData.from(data) else null }
     LazyColumn(contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 40.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        if (sgu != null) searchResults(group, sgu, openField)
-        fields.forEach { f ->
+        if (sgu != null) {
+            // searchResults는 결과가 없으면 같은 key의 안내문을 넣으므로, 합친 화면에선 결과 있는 묶음만 호출
+            val q = BotSearch.query.trim()
+            val withHits = groups.filter { g -> WFields.all.any { it.group == g && BotSearch.countMatches(BotSearch.fieldText(sgu, it.id), q) > 0 } }
+            (if (withHits.isEmpty()) groups.take(1) else withHits).forEach { searchResults(it, sgu, openField) }
+        }
+        groups.forEach { group ->
+        if (groups.size > 1) item(key = "head-$group") { SectionLabel(if (group == "script") "스크립트" else "기타", Modifier.padding(top = 8.dp)) }
+        Fields.inGroup(group).forEach { f ->
             when (f.kind) {
                 FieldKind.Text, FieldKind.LongText -> item(key = f.id) {
                     FieldCard(f.label, CharacterStore.getField(card, f.id), maxLines = if (f.kind == FieldKind.Text) 1 else 4) { openField(f.id) }
@@ -271,6 +296,7 @@ private fun GroupPage(group: String, id: String, card: JsonObject, openField: (S
                 FieldKind.Onboarding -> item(key = f.id) { OnboardingCard(id, data, openRoute) }
                 FieldKind.Bias -> item(key = f.id) { BiasCard(id, data, openRoute) }
             }
+        }
         }
     }
     }
