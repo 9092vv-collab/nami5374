@@ -106,18 +106,19 @@ fun EditorScreen(characterId: String, onBack: (() -> Unit)?, openField: (String)
     val scope = rememberCoroutineScope()
     val meta = CharacterStore.items.firstOrNull { it.id == characterId }
     val card = remember(characterId, CharacterStore.version) { CharacterStore.readCard(characterId) }
-    // One flat pager: 캐릭터 | 이미지 데이터 · 그림체 · 캐릭터 설정 · 템플릿 | 작업실.
+    // Pager: 캐릭터 | 이미지(캐릭터 설정만) | 작업실.
+    // 이미지 데이터 · 그림체 설정 · 이미지 템플릿은 이미지 탭 위쪽 버튼을 눌러서 들어감 (side = "img0"/"img1"/"img3").
     // 스크립트 + 기타는 잘 안 써서 탭에서 빼고 한 화면으로 합침 (상단 바 아이콘 / ⋮ 메뉴에서 열기).
     // so swiping from an image sub tab on to the next big tab is one smooth swipe (no pager inside a pager).
-    val pager = rememberPagerState(initialPage = 0) { 6 }
-    var lastImage by rememberSaveable(characterId) { mutableStateOf(4) }
-    LaunchedEffect(pager.currentPage) { if (pager.currentPage in 1..4) lastImage = pager.currentPage }
-    val bigOf = { p: Int -> when (p) { 0 -> 0; in 1..4 -> 1; else -> 2 } }
-    val pageOfBig = { b: Int -> when (b) { 0 -> 0; 1 -> lastImage; else -> 5 } }
+    val pager = rememberPagerState(initialPage = 0) { 3 }
     // rememberSaveable: 필드 편집 화면에 다녀와도 열린 채로 유지
-    var extra by rememberSaveable(characterId) { mutableStateOf(false) }
+    // "" = 탭 화면, "extra" = 스크립트 · 기타, "img0"/"img1"/"img3" = 이미지 데이터 / 그림체 설정 / 이미지 템플릿
+    var side by rememberSaveable(characterId) { mutableStateOf("") }
+    val extra = side == "extra"
+    val sideOpen = side.isNotEmpty()
+    val sideTitle = when (side) { "extra" -> EXTRA_TITLE; "" -> ""; else -> imageTabs[side.removePrefix("img").toIntOrNull() ?: 0] }
     val wideBar = androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp >= 480
-    androidx.activity.compose.BackHandler(extra) { extra = false }
+    androidx.activity.compose.BackHandler(sideOpen) { side = "" }
     var menu by remember { mutableStateOf(false) }
     var newSession by remember { mutableStateOf(false) }
     var sessions by remember { mutableStateOf(false) }
@@ -132,7 +133,7 @@ fun EditorScreen(characterId: String, onBack: (() -> Unit)?, openField: (String)
     val name = meta?.name ?: "(삭제된 캐릭터)"
 
     // 작업실에서는 상단바·탭 줄을 항상 숨김 (탭 이동은 좌우로 밀어서). 봇 전체 검색 중엔 보임.
-    val hideChrome = pager.currentPage == 5 && !BotSearch.open && !extra
+    val hideChrome = pager.currentPage == 2 && !BotSearch.open && !sideOpen
 
     Scaffold(
         containerColor = Sgu.Bg,
@@ -146,7 +147,7 @@ fun EditorScreen(characterId: String, onBack: (() -> Unit)?, openField: (String)
                 subtitle = "${Workshop.currentSessionName(wdoc)} · ${wdoc.o("session").arr("turns").size}턴",
                 onBack = onBack,
                 actions = {
-                    if (wideBar) IconButton(onClick = { extra = !extra }) { Icon(Icons.Outlined.Tune, EXTRA_TITLE, tint = if (extra) Sgu.Accent else Sgu.Ink) }
+                    if (wideBar) IconButton(onClick = { side = if (extra) "" else "extra" }) { Icon(Icons.Outlined.Tune, EXTRA_TITLE, tint = if (extra) Sgu.Accent else Sgu.Ink) }
                     IconButton(onClick = { openRoute("perms/$characterId") }) { Icon(Icons.Outlined.CheckCircleOutline, "권한") }
                     IconButton(onClick = { openRoute("prompt/$characterId") }) { Icon(Icons.AutoMirrored.Outlined.Assignment, "프롬프트 설정") }
                     IconButton(onClick = { if (BotSearch.open) BotSearch.close() else BotSearch.open = true }) { Icon(Icons.Outlined.Search, "봇 전체 검색") }
@@ -154,7 +155,7 @@ fun EditorScreen(characterId: String, onBack: (() -> Unit)?, openField: (String)
                     Box {
                         IconButton(onClick = { menu = true }) { Icon(Icons.Outlined.MoreVert, "더보기") }
                         DropdownMenu(expanded = menu, onDismissRequest = { menu = false }, containerColor = Sgu.Card, shape = RoundedCornerShape(16.dp)) {
-                            if (!wideBar) DropdownMenuItem(text = { Text(if (extra) "$EXTRA_TITLE 닫기" else EXTRA_TITLE) }, onClick = { menu = false; extra = !extra })
+                            if (!wideBar) DropdownMenuItem(text = { Text(if (extra) "$EXTRA_TITLE 닫기" else EXTRA_TITLE) }, onClick = { menu = false; side = if (extra) "" else "extra" })
                             DropdownMenuItem(text = { Text("새로운 세션 추가") }, enabled = !busy, onClick = { menu = false; newSession = true })
                             DropdownMenuItem(text = { Text("세션 이동") }, onClick = { menu = false; sessions = true })
                             DropdownMenuItem(text = { Text("세션 요약하기") }, enabled = !busy && Workshop.summarizing[characterId] != true, onClick = { menu = false; Workshop.summarizeNow(characterId) })
@@ -182,36 +183,45 @@ fun EditorScreen(characterId: String, onBack: (() -> Unit)?, openField: (String)
                 Column {
                     if (SettingsStore.root.b("undoUnderTitle")) UndoUnderTitle(characterId, busy)
                     val groupKeys = listOf("character", "image", "chat")
-                    if (extra) Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                        IconButton(onClick = { extra = false }) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "닫기") }
-                        Text(EXTRA_TITLE, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                    if (sideOpen) Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        IconButton(onClick = { side = "" }) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "닫기") }
+                        Text(sideTitle, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
                     } else {
                     if (BotSearch.query.isNotBlank() && ("script" in hitGroups || "etc" in hitGroups))
                         Text("$EXTRA_TITLE 에도 검색 결과가 있어요 ›", style = MaterialTheme.typography.bodySmall, color = Sgu.Sub,
-                            modifier = Modifier.fillMaxWidth().clickable { extra = true }.padding(horizontal = 18.dp, vertical = 6.dp))
+                            modifier = Modifier.fillMaxWidth().clickable { side = "extra" }.padding(horizontal = 18.dp, vertical = 6.dp))
                     PillTabs(
                         options = if (BotSearch.query.isBlank()) editorTabs else editorTabs.mapIndexed { i, l -> if (groupKeys[i] in hitGroups) "$l ●" else l },
-                        selected = bigOf(pager.currentPage),
-                        onSelect = { scope.launch { pager.animateScrollToPage(pageOfBig(it)) } },
+                        selected = pager.currentPage,
+                        onSelect = { scope.launch { pager.animateScrollToPage(it) } },
                     )
                     }
                 }
             }
-            // 이미지 하위 탭 줄은 pager 밖에 고정: 페이지를 넘겨도 줄은 그대로, 선택만 바뀜
-            androidx.compose.animation.AnimatedVisibility(pager.currentPage in 1..4 && !extra,
+            // 이미지 탭: 캐릭터 설정만 바로 보이고, 나머지 셋은 이 버튼 줄을 눌러서 들어감
+            androidx.compose.animation.AnimatedVisibility(pager.currentPage == 1 && !sideOpen,
                 enter = androidx.compose.animation.expandVertically() + androidx.compose.animation.fadeIn(),
                 exit = androidx.compose.animation.shrinkVertically() + androidx.compose.animation.fadeOut()) {
-                PillTabs(imageTabs, (pager.currentPage - 1).coerceIn(0, 3), { sub -> scope.launch { pager.animateScrollToPage(sub + 1) } })
+                Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf(0, 1, 3).forEach { sub ->
+                        Row(Modifier.weight(1f).clip(RoundedCornerShape(14.dp)).background(Sgu.Card).clickable { side = "img$sub" }.padding(horizontal = 10.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically) {
+                            Text(imageTabs[sub], style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                            Text("›", color = Sgu.Sub)
+                        }
+                    }
+                }
             }
             if (extra) Box(Modifier.weight(1f)) { GroupPage(listOf("script", "etc"), characterId, card, openField, openRoute) }
+            else if (sideOpen) Box(Modifier.weight(1f)) { ImageSubPage(characterId, side.removePrefix("img").toIntOrNull() ?: 0, {}, openField, openPreset, openRoute, showTabs = false) }
             else HorizontalPager(state = pager, modifier = Modifier.weight(1f), beyondViewportPageCount = 1) { page ->
                 when (page) {
                     0 -> GroupPage(listOf("character"), characterId, card, openField, openRoute)
-                    in 1..4 -> ImageSubPage(characterId, page - 1, { sub -> scope.launch { pager.animateScrollToPage(sub + 1) } }, openField, openPreset, openRoute, showTabs = false)
+                    1 -> ImageSubPage(characterId, 2, {}, openField, openPreset, openRoute, showTabs = false)
                     else -> WorkshopPage(characterId, openFieldTab = { fid ->
                         when (WFields.map[fid]?.group ?: Fields.byId[fid]?.group) {
-                            "script", "etc" -> extra = true
-                            "image" -> scope.launch { pager.animateScrollToPage(1) }
+                            "script", "etc" -> side = "extra"
+                            "image" -> side = "img0"
                             else -> scope.launch { pager.animateScrollToPage(0) }
                         }
                     }, openRoute = openRoute)
