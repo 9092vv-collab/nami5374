@@ -18,7 +18,15 @@ object GenOps {
     val IDS = setOf("genTemplate", "genCharacters", "genFree", "genFreeRun", "genCompress")
     private const val POS = "pos: {mode:\"auto\"} or {mode:\"custom\",col:0-4,row:0-4}. If any character of a preset is custom, all are (cells are unique)"
 
-    fun ops(id: String): List<Pair<String, String>> = when (id) {
+    val OP_KEYS = listOf("genFree", "genFreeRun", "genCompress", "genTemplate", "genCharacters")
+
+    /** 작업실 AI가 보는 op 값 설명: 내장 프롬프트에서 고친 값이 있으면 그걸 씀. */
+    fun ops(id: String): List<Pair<String, String>> {
+        val k = if (id in OP_KEYS) id else "genCharacters"
+        return defaultOps(id).map { (op, v) -> op to BuiltinPrompts.get("op.$k.$op").ifBlank { v } }
+    }
+
+    fun defaultOps(id: String): List<Pair<String, String>> = when (id) {
         "genFree" -> listOf("update" to "with id (character id); partial {freePrompt?: string, freeNegative?: string, blockIds?: string[] (blocks that take part when the free prompt runs; all other blocks are switched off. A block inside a folder takes part only while its folder is on: a folder is switched on when its id or any of its blocks is listed, and switched off otherwise — so list only what should be on and leave out folders the user turned off)}")
         "genFreeRun" -> listOf("run" to "with id (character id); optional {n: 1-2, addAsIcon: boolean (default false)}. Generates with the NovelAI provider after the edits are applied (costs Anlas)")
         "genCompress" -> listOf("compress" to "optional {format: \"webp\"|\"jpeg\" (default webp), quality: 5-100 (default 80)}. Compresses all generated images of the image template; use the defaults unless the user asks otherwise")

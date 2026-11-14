@@ -318,14 +318,14 @@ object Processors {
     private fun describe(data: JsonObject, id: String) = BuiltinPrompts.t("sub.fieldLine", "label" to BuiltinPrompts.label(id), "id" to id, "description" to WFields.description(id),
         "state" to BuiltinPrompts.get(if (SguData.isEmpty(data, id)) "sub.stateEmpty" else "sub.stateFilled"))
 
-    private val SUB_SCHEMA = JsonSchema("sgu_sub_decision", buildJsonObject {
+    private val SUB_SCHEMA get() = JsonSchema("sgu_sub_decision", buildJsonObject {
         put("type", "object")
         put("properties", buildJsonObject {
-            put("instruction", buildJsonObject { put("type", "boolean"); put("description", "true if the user's intent is an instruction/command for the assistant to work on the character; false if it is ordinary conversation.") })
-            put("task", buildJsonObject { put("type", "string"); put("description", "One-sentence restatement of what the main processor must do.") })
-            put("view", buildJsonObject { put("type", "array"); put("items", buildJsonObject { put("type", "string") }); put("description", "Field ids whose current content must be read.") })
-            put("edit", buildJsonObject { put("type", "array"); put("items", buildJsonObject { put("type", "string") }); put("description", "Field ids that must be modified.") })
-            put("reasons", buildJsonObject { put("type", "object"); put("additionalProperties", buildJsonObject { put("type", "string") }); put("description", "Optional short reason per field id.") })
+            put("instruction", buildJsonObject { put("type", "boolean"); put("description", BuiltinPrompts.get("schema.sub.instruction")) })
+            put("task", buildJsonObject { put("type", "string"); put("description", BuiltinPrompts.get("schema.sub.task")) })
+            put("view", buildJsonObject { put("type", "array"); put("items", buildJsonObject { put("type", "string") }); put("description", BuiltinPrompts.get("schema.sub.view")) })
+            put("edit", buildJsonObject { put("type", "array"); put("items", buildJsonObject { put("type", "string") }); put("description", BuiltinPrompts.get("schema.sub.edit")) })
+            put("reasons", buildJsonObject { put("type", "object"); put("additionalProperties", buildJsonObject { put("type", "string") }); put("description", BuiltinPrompts.get("schema.sub.reasons")) })
         })
         put("required", buildJsonArray { listOf("instruction", "task", "view", "edit").forEach { add(js(it)) } })
     })

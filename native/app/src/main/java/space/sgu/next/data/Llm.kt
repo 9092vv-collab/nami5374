@@ -194,7 +194,7 @@ object Llm {
         val r = resolve(p)
         val id = model.s("modelId")
         val maxTokens = (model.o("params").d("maxTokens")?.toInt() ?: 64).coerceIn(16, 256)
-        val prompt = "Reply with the single word: OK"
+        val prompt = BuiltinPrompts.get("test.prompt")
         fun enc(o: JsonObject) = CardIO.json.encodeToString(JsonElement.serializer(), JsonObject(r.extraBody + o))
         return when (p.s("format")) {
             "openai-chat" -> {

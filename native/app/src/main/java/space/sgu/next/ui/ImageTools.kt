@@ -369,7 +369,7 @@ fun TemplateManagerScreen(cid: String, onBack: () -> Unit) {
         }
     }
 
-    Page("프리셋", CharacterStore.items.firstOrNull { it.id == cid }?.name, onBack) {
+    Page("프리셋 템플릿", CharacterStore.items.firstOrNull { it.id == cid }?.name, onBack) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             LineButton("새 템플릿", onClick = { TemplateLibrary.add("이미지 템플릿 ${TemplateLibrary.items.size + 1}", Templates.exportTemplate(ImageGenStore.blankState())) }, icon = Icons.Outlined.Add)
             LineButton("업로드", onClick = pick, icon = Icons.Outlined.FileUpload)

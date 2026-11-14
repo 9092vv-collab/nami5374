@@ -315,8 +315,9 @@ object References {
         val start = if (r.s("kind") == "text" || r.s("kind") == "persona")
             ((if (id.startsWith(XC)) xcTexts[id] else readText(id)) ?: "").replace(Regex("\\s+"), " ").take(160) else ""
         val bits = listOf(when (r.s("kind")) { "image" -> "image"; "persona" -> "persona of {{user}}"; "text" -> "text"; else -> "file" }, r.s("note"),
-            if (start.isNotEmpty()) "starts with: \"$start\"" else "").filter { it.isNotEmpty() && it != r.s("note") }
-        return "ref:$id — name: \"${r.s("name")}\"; memo: ${if (r.s("note").isNotEmpty()) "\"${r.s("note")}\"" else "(none)"} (${bits.joinToString("; ")})"
+            if (start.isNotEmpty()) BuiltinPrompts.t("ref.starts", "text" to start) else "").filter { it.isNotEmpty() && it != r.s("note") }
+        return BuiltinPrompts.t("ref.line", "id" to id, "name" to r.s("name"),
+            "memo" to (if (r.s("note").isNotEmpty()) BuiltinPrompts.t("ref.memo", "note" to r.s("note")) else BuiltinPrompts.get("ref.memoNone")), "bits" to bits.joinToString("; "))
     }
 
     fun subCandidates(doc: JsonObject): List<JsonObject> = all(doc).filter { state(doc, it) == "sub" }

@@ -39,7 +39,7 @@ object WFields {
         WField("alternateGreetings", "character", "textList", "추가 첫 메세지", "Alternate greetings", "Additional opening messages the user can pick instead of the first message.", true, 2, 2),
         WField("lorebook", "character", "lorebook", "로어북", "Lorebook", "Keyword-triggered world/character info entries (key, content, insertion order, always-active flag) inserted into the prompt when keys appear in chat. Efficient for organizing a large amount of information systematically: split settings by topic (places, factions, NPCs, rules) so only the relevant parts are loaded.", true, 3, 2),
         WField("loreSettings", "character", "loreSettings", "로어북 설정", "Lorebook settings", "Lorebook scanning options: token budget, scan depth, recursive scanning, full-word matching. Each is a number/boolean, or null to use the global setting (default).", true, 1, 1),
-        WField("genTemplate", "image", "gen", "프리셋", "Image template (asset presets)", "The whole set of image-generation asset presets (name, image name/type, size, asset prompt/negative, attached characters with block checklist, positions, per-character prompt/negative) and generation. Generated images are listed by id only; the AI cannot see them. One permission covers everything.", true, 1, 1),
+        WField("genTemplate", "image", "gen", "프리셋 템플릿", "Image template (asset presets)", "The whole set of image-generation asset presets (name, image name/type, size, asset prompt/negative, attached characters with block checklist, positions, per-character prompt/negative) and generation. Generated images are listed by id only; the AI cannot see them. One permission covers everything.", true, 1, 1),
         WField("genCharacters", "image", "gen", "이미지 캐릭터 설정", "Image character setup", "Characters used for image generation: their prompt/negative blocks (name, type, text) and generation size. Blocks can be grouped in folders: a folder is a block with type \"folder\", and a block inside it carries that folder's id as folderId. One permission covers viewing/adding/removing/moving blocks and folders and size. The free prompt has its own permission (see Image character free prompt).", true, 1, 1),
         WField("genFree", "image", "gen", "캐릭터 자유 프롬프트", "Image character free prompt", "Per-character free prompt and free negative, plus which of the character's blocks take part when the free prompt is run. Memo: the free prompt is used only to test whether a character's prompt produces good images and to make images for the character icon. It is NOT used by asset presets.", true, 1, 1),
         WField("genFreeRun", "image", "gen", "자유 프롬프트 실행", "Run image character free prompt", "Runs a character's free prompt with the NovelAI provider (costs Anlas) and shows the result in the character setup preview. Optionally adds the result to the character icons. Memo: free-prompt images are for prompt testing and character icons only; request this only when the user asks for it.", true, 1, 1),
@@ -276,7 +276,11 @@ object SguData {
         }
     }
 
-    fun opsFor(kind: String): List<Pair<String, String>> = when (kind) {
+    /** 작업실 AI가 보는 op 값 설명: 내장 프롬프트(설정 › 내장 프롬프트 › 편집 방법)에서 고친 값이 있으면 그걸 씀. */
+    fun opKey(kind: String) = if (kind == "longtext") "text" else kind
+    fun opsFor(kind: String): List<Pair<String, String>> = defaultOpsFor(kind).map { (op, v) -> op to BuiltinPrompts.get("op.${opKey(kind)}.$op").ifBlank { v } }
+
+    fun defaultOpsFor(kind: String): List<Pair<String, String>> = when (kind) {
         "text", "longtext" -> listOf("set" to "string (full new text)", "append" to "string (text appended at the end)")
         "toggle" -> listOf("set" to "boolean")
         "textList" -> listOf("set" to "string[] (entire list)", "add" to "string", "update" to "string, with index", "remove" to "none, with index")
@@ -306,10 +310,10 @@ object SguData {
 
     val EDIT_OPS = listOf("set", "append", "add", "update", "remove", "rename", "duplicate", "move", "remove_images", "image", "generate", "add_character", "update_character", "remove_character", "add_block", "update_block", "remove_block")
 
-    val MAIN_OUTPUT_SCHEMA = JsonSchema("sgu_edit_output", buildJsonObject {
+    val MAIN_OUTPUT_SCHEMA get() = JsonSchema("sgu_edit_output", buildJsonObject {
         put("type", "object")
         put("properties", buildJsonObject {
-            put("message", buildJsonObject { put("type", "string"); put("description", "Short summary for the user, in the user's language.") })
+            put("message", buildJsonObject { put("type", "string"); put("description", BuiltinPrompts.get("schema.message")) })
             put("edits", buildJsonObject {
                 put("type", "array")
                 put("items", buildJsonObject {
@@ -319,7 +323,7 @@ object SguData {
                         put("op", buildJsonObject { put("type", "string"); put("enum", JsonArray(EDIT_OPS.map { s(it) })) })
                         put("id", buildJsonObject { put("type", "string") })
                         put("index", buildJsonObject { put("type", "integer") })
-                        put("value", buildJsonObject { put("description", "New value. Type depends on the field and op.") })
+                        put("value", buildJsonObject { put("description", BuiltinPrompts.get("schema.value")) })
                     })
                     put("required", buildJsonArray { add(s("field")); add(s("op")) })
                 })

@@ -88,7 +88,41 @@ object BuiltinPrompts {
             Item("chat.jsonOnly", "공통", "JSON으로만 답하라는 문구", "JSON 형식 지정을 직접 지원하지 않는 방식(Anthropic 형식)에서 마지막 유저 메시지에 붙어요. [[schema]] = JSON 스키마.",
                 "Respond with a single JSON object only (no prose, no code fences) matching this JSON schema:\n[[schema]]",
                 "지우면 모델이 JSON이 아닌 글로 답해서 앱이 읽지 못할 수 있어요."),
-        ) + WFields.all.map { Item("label." + it.id, "항목 영어 이름", it.label, "AI에게 '${it.label}' 항목을 알려줄 때 쓰는 이름 (id: ${it.id}).", it.aiLabel) }
+        ) + WFields.all.map { Item("label." + it.id, "항목 영어 이름", it.label, "AI에게 '${it.label}' 항목을 알려줄 때 쓰는 이름 (id: ${it.id}).", it.aiLabel) } + extraItems()
+    }
+
+    private val kindNames = mapOf(
+        "text" to "텍스트 항목", "toggle" to "스위치 항목", "textList" to "목록(첫 메시지 등)", "lorebook" to "로어북", "regexList" to "정규식 스크립트",
+        "trigger" to "트리거 스크립트", "biasList" to "Bias", "loreSettings" to "로어북 설정", "onboarding" to "온보딩",
+        "genFree" to "캐릭터 자유 프롬프트", "genFreeRun" to "자유 프롬프트 실행", "genCompress" to "이미지 압축", "genTemplate" to "프리셋 템플릿", "genCharacters" to "이미지 캐릭터 설정",
+    )
+
+    /** 예전에는 코드에 박혀 있던 것들: AI가 보는 편집 방법(op) 설명, JSON 스키마 설명, 참고 자료 한 줄, 모델 테스트 문장. */
+    private fun extraItems(): List<Item> {
+        val g = "편집 방법 (AI가 보는 값 형식)"
+        val warnOp = "op 이름(set, add …)은 앱이 알아보는 이름이라 그대로 두고, 값이 어떤 모양인지 설명하는 글만 고치세요. 모양을 바꾸면 앱이 읽지 못해 편집이 거부돼요."
+        val ops = listOf("text", "toggle", "textList", "lorebook", "regexList", "trigger", "biasList", "loreSettings", "onboarding").flatMap { k ->
+            SguData.defaultOpsFor(k).map { (op, v) -> Item("op.$k.$op", g, "${kindNames[k]} · $op", "AI가 '${kindNames[k]}'을(를) 고칠 때 op \"$op\"의 값(value) 설명으로 보여요.", v, warnOp) }
+        } + GenOps.OP_KEYS.flatMap { k ->
+            GenOps.defaultOps(k).map { (op, v) -> Item("op.$k.$op", g, "${kindNames[k]} · $op", "AI가 '${kindNames[k]}'을(를) 고칠 때 op \"$op\"의 값(value) 설명으로 보여요.", v, warnOp) }
+        }
+        val gs = "JSON 형식 설명 (API에 같이 보내는 스키마)"
+        val warnS = "칸의 이름이 아니라 설명 글만 고치는 곳이에요."
+        return ops + listOf(
+            Item("schema.message", gs, "메인 답: message 칸", "메인 프로세서 답의 message 칸 설명.", "Short summary for the user, in the user's language.", warnS),
+            Item("schema.value", gs, "메인 답: value 칸", "메인 프로세서 답의 편집 value 칸 설명.", "New value. Type depends on the field and op.", warnS),
+            Item("schema.sub.instruction", gs, "서브 답: instruction 칸", "서브 프로세서(LLM 방식) 답의 instruction 칸 설명.", "true if the user's intent is an instruction/command for the assistant to work on the character; false if it is ordinary conversation.", warnS),
+            Item("schema.sub.task", gs, "서브 답: task 칸", "", "One-sentence restatement of what the main processor must do.", warnS),
+            Item("schema.sub.view", gs, "서브 답: view 칸", "", "Field ids whose current content must be read.", warnS),
+            Item("schema.sub.edit", gs, "서브 답: edit 칸", "", "Field ids that must be modified.", warnS),
+            Item("schema.sub.reasons", gs, "서브 답: reasons 칸", "", "Optional short reason per field id.", warnS),
+            Item("ref.line", "참고 자료 설명", "서브에게 보이는 참고 자료 한 줄", "서브 판단 때 참고 자료 목록의 각 줄. [[id]] 참고 자료 id, [[name]] 이름, [[memo]] 메모 부분, [[bits]] 종류·메모·앞부분.",
+                "ref:[[id]] — name: \"[[name]]\"; memo: [[memo]] ([[bits]])", "ref:[[id]] 부분을 지우면 서브가 참고 자료를 고르지 못해요."),
+            Item("ref.memo", "참고 자료 설명", "메모가 있을 때 [[memo]] 자리", "[[note]] = 메모 내용.", "\"[[note]]\""),
+            Item("ref.memoNone", "참고 자료 설명", "메모가 없을 때 [[memo]] 자리", "", "(none)"),
+            Item("ref.starts", "참고 자료 설명", "글 자료의 앞부분 표시", "텍스트·페르소나 자료의 시작 160자. [[text]] = 앞부분.", "starts with: \"[[text]]\""),
+            Item("test.prompt", "모델 테스트", "모델 테스트 문장", "설정 › 모델에서 '테스트'를 누르면 모델에 이 문장을 보내요."  , "Reply with the single word: OK"),
+        )
     }
 
     private val byKey by lazy { items.associateBy { it.key } }
