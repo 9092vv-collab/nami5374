@@ -128,8 +128,10 @@ fun EditorScreen(characterId: String, onBack: (() -> Unit)?, openField: (String)
     val busy = Workshop.isActive(characterId)
 
     DisposableEffect(characterId) { onDispose { BotSearch.close() } }
-    val sguData = remember(card) { SguData.from(card["data"] as? JsonObject) }
-    val hits = remember(sguData, BotSearch.query) { BotSearch.searchAll(sguData, BotSearch.query.trim()) }
+    // 검색 중일 때만 카드 전체를 검색용 형식으로 바꿈 (전에는 카드가 바뀔 때마다 항상 변환)
+    val hits = remember(card, BotSearch.query) {
+        if (BotSearch.query.isBlank()) emptyMap() else BotSearch.searchAll(SguData.from(card["data"] as? JsonObject), BotSearch.query.trim())
+    }
     val hitGroups = remember(hits) { hits.keys.map { BotSearch.groupOf(it) }.toSet() }
     val name = meta?.name ?: "(삭제된 캐릭터)"
 
@@ -358,7 +360,7 @@ private fun FieldCard(label: String, value: String, maxLines: Int = 4, onClick: 
             if (value.isBlank()) {
                 Text("비어 있음 · 눌러서 작성", style = MaterialTheme.typography.bodyMedium, color = Sgu.Sub.copy(alpha = 0.7f))
             } else {
-                Text(value, style = MaterialTheme.typography.bodyMedium, maxLines = maxLines, overflow = TextOverflow.Ellipsis)
+                Text(value.previewText(maxLines), style = MaterialTheme.typography.bodyMedium, maxLines = maxLines, overflow = TextOverflow.Ellipsis)
             }
         }
     }

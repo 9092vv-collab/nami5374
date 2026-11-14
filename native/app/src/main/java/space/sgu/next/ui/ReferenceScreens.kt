@@ -371,7 +371,7 @@ private fun PersonaImportDialog(p: References.Persona, onPersona: () -> Unit, on
                 LineCard {
                     Column {
                         Text(p.name, style = MaterialTheme.typography.bodyMedium.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold))
-                        Text(p.prompt.ifBlank { "(내용 없음)" }, style = MaterialTheme.typography.bodySmall, color = Sgu.Sub, maxLines = 5, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                        Text(p.prompt.previewText(5).ifBlank { "(내용 없음)" }, style = MaterialTheme.typography.bodySmall, color = Sgu.Sub, maxLines = 5, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
                     }
                 }
                 InkButton(if (p.png) "페르소나로 가져오기" else "페르소나로 등록", onPersona, Modifier.fillMaxWidth())

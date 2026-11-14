@@ -753,7 +753,7 @@ fun LogsScreen(onBack: () -> Unit) {
                     if (open) {
                         listOf("request" to "요청", "response" to "응답").forEach { (k, label) ->
                             val el = e[k] ?: return@forEach
-                            val t = pretty.encodeToString(JsonElement.serializer(), el)
+                            val t = remember(el) { pretty.encodeToString(JsonElement.serializer(), el) }
                             Row(Modifier.padding(top = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                                 Text(label, style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold), modifier = Modifier.weight(1f))
                                 IconButton(onClick = { copyText(ctx, t) }, modifier = Modifier.size(32.dp)) { Icon(Icons.Outlined.ContentCopy, "복사", tint = Sgu.Sub, modifier = Modifier.size(16.dp)) }

@@ -96,6 +96,12 @@ fun SguTopBar(
     )
 }
 
+/**
+ * 미리보기용 앞부분. Text는 maxLines가 있어도 글 전체를 먼저 재기 때문에(모든 문단을 측정한 뒤 줄을 나눔)
+ * 몇 줄만 보일 긴 글(디스크립션, 트리거 코드, 백그라운드 HTML…)은 앞부분만 넘긴다. 줄당 300자면 펼친 화면에서도 남는다.
+ */
+fun String.previewText(lines: Int): String = if (length <= lines * 300) this else substring(0, lines * 300)
+
 // ---------- Pills ----------
 
 /** 화면 너비를 똑같이 나눠 쓰는 큰 탭 (편집 화면의 캐릭터 · 이미지 · 작업실). */
@@ -261,9 +267,9 @@ fun GroupRow(
             Spacer(Modifier.width(16.dp))
         }
         Column(Modifier.weight(1f)) {
-            Text(title, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(title.previewText(1), style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
             if (!subtitle.isNullOrEmpty()) {
-                Text(subtitle, style = MaterialTheme.typography.bodyMedium, color = Sgu.Sub, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text(subtitle.previewText(2), style = MaterialTheme.typography.bodyMedium, color = Sgu.Sub, maxLines = 2, overflow = TextOverflow.Ellipsis)
             }
         }
         if (trailing != null) {

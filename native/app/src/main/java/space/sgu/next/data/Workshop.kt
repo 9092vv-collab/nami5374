@@ -137,8 +137,20 @@ object Logs {
     fun init(ctx: Context) {
         if (::file.isInitialized) return
         file = File(ctx.filesDir, "logs.json")
-        runCatching { (CardIO.json.parseToJsonElement(file.readText()) as JsonArray).mapNotNull { it as? JsonObject } }.getOrNull()?.let { entries.addAll(it) }
+        // 기록 파일에는 요청·응답 전문이 들어 있어 수 MB가 될 수 있음 → 앱을 켤 때 메인 스레드에서 읽지 않고 뒤에서 읽어 붙임
+        CharacterStore.io.launch {
+            val old = runCatching { (CardIO.json.parseToJsonElement(file.readText()) as JsonArray).mapNotNull { it as? JsonObject } }.getOrNull().orEmpty()
+            withContext(Dispatchers.Main) {
+                val had = entries.isNotEmpty()   // 읽는 동안 새로 쌓인 기록(더 최신)은 앞에 그대로 둠
+                if (!dropOld) entries.addAll(old)
+                loaded = true
+                if (had || dropOld) save()
+            }
+        }
     }
+
+    private var loaded = false   // false인 동안은 저장하지 않음 (아직 못 읽은 옛 기록을 덮어쓰지 않게)
+    private var dropOld = false
 
     private fun redact(e: JsonElement?): JsonElement {
         if (e == null) return JsonNull
@@ -165,10 +177,10 @@ object Logs {
         }
     }
 
-    fun clear() { entries.clear(); save() }
+    fun clear() { entries.clear(); if (!loaded) dropOld = true; save() }
 
     private fun save() {
-        if (!::file.isInitialized) return
+        if (!::file.isInitialized || !loaded) return
         saveJob?.cancel()
         val snap = entries.toList()
         saveJob = CharacterStore.io.launch { delay(500); runCatching { file.writeText(CardIO.json.encodeToString(JsonElement.serializer(), JsonArray(snap))) } }

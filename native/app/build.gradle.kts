@@ -12,8 +12,9 @@ android {
         applicationId = "space.sgu.next"
         minSdk = 31
         targetSdk = 36
-        versionCode = 53
-        versionName = "0.9.16"
+        versionCode = 54
+        versionName = "0.9.17"
+        ndk { abiFilters.add("arm64-v8a") }
     }
 
     // Personal sideload key (kept in the repo so updates install over the old version).

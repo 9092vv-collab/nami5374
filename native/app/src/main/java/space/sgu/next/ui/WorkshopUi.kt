@@ -119,7 +119,7 @@ fun WorkshopPage(cid: String, openFieldTab: (String) -> Unit, openRoute: (String
     val ctx = LocalContext.current
     val v = Workshop.version
     val doc = remember(cid, v) { Workshop.doc(cid) }
-    val turns = doc.o("session").arr("turns")
+    val turns = remember(doc) { doc.o("session").arr("turns") }
     val job = Workshop.jobs[cid]
     val busy = job?.active == true
     val listState = rememberLazyListState()

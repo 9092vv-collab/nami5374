@@ -169,9 +169,9 @@ fun TriggerCard(cid: String, data: JsonObject?, openField: (String) -> Unit) {
             Spacer(Modifier.height(10.dp))
             LineCard(onClick = { openField("trig:code") }) {
                 if (t.code.isBlank()) Text(if (t.mode == Scripts.TriggerMode.Lua) "-- RisuAI Lua 트리거 코드 · 눌러서 작성" else "V2 트리거 JSON · 눌러서 작성", color = Sgu.Sub.copy(alpha = 0.7f), style = MaterialTheme.typography.bodyMedium)
-                else Text(t.code, style = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace), maxLines = 6, overflow = TextOverflow.Ellipsis)
+                else Text(t.code.previewText(6), style = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace), maxLines = 6, overflow = TextOverflow.Ellipsis)
             }
-            if (t.code.isNotBlank()) Text("${t.code.lines().size}줄", style = MaterialTheme.typography.bodySmall, color = Sgu.Sub, modifier = Modifier.padding(top = 6.dp, start = 4.dp))
+            if (t.code.isNotBlank()) Text("${remember(t.code) { t.code.lines().size }}줄", style = MaterialTheme.typography.bodySmall, color = Sgu.Sub, modifier = Modifier.padding(top = 6.dp, start = 4.dp))
         }
     }
     switchTo?.let { m ->
@@ -248,7 +248,7 @@ private fun ChoiceRow(options: List<Pair<String, String>>, selected: String?, on
 private fun LongTextCard(text: String, empty: String, mono: Boolean = false, onClick: () -> Unit) {
     LineCard(onClick = onClick) {
         if (text.isBlank()) Text(empty, style = MaterialTheme.typography.bodyMedium, color = Sgu.Sub.copy(alpha = 0.7f))
-        else Text(text, style = MaterialTheme.typography.bodyMedium.let { if (mono) it.copy(fontFamily = FontFamily.Monospace) else it }, maxLines = 8, overflow = TextOverflow.Ellipsis)
+        else Text(text.previewText(8), style = MaterialTheme.typography.bodyMedium.let { if (mono) it.copy(fontFamily = FontFamily.Monospace) else it }, maxLines = 8, overflow = TextOverflow.Ellipsis)
     }
 }
 
