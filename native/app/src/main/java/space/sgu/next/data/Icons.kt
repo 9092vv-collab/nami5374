@@ -41,6 +41,8 @@ object CharIcons {
         // A CHARX-imported card keeps its main icon inside x/: keep that file in step.
         CardIO.assets(CharacterStore.readCard(cid)).firstOrNull { CardIO.str(it, "type") == "icon" && CardIO.str(it, "name") == "main" }
             ?.let { CardIO.assetFile(x(cid), CardIO.str(it, "uri")) }?.let { dst.copyTo(it, true) }
+        // 카드 글이 안 바뀌면 updateData가 저장을 건너뛰어서 목록 썸네일이 안 바뀌었음 → 직접 새로 고침
+        CharacterStore.touch(cid)
     }
 
     /** Decode → (shrink to [maxPx] if > 0) → PNG. */
@@ -100,7 +102,7 @@ object CharIcons {
             if (next != null) {
                 writeMain(cid, next.file); next.file.delete()
                 CharacterStore.updateData(cid) { d -> d.withAssets(remove = setOf(next.id)) }
-            } else { mainFile(cid).delete(); CharacterStore.updateData(cid) { it } }
+            } else { mainFile(cid).delete(); CharacterStore.touch(cid) }
         } else {
             icon.file.delete()
             CharacterStore.updateData(cid) { d -> d.withAssets(remove = setOf(id)) }

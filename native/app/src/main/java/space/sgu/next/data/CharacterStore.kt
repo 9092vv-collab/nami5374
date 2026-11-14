@@ -237,6 +237,13 @@ object CharacterStore {
         val next = LinkedHashMap(transform(JsonObject(m))); m.clear(); m.putAll(next)
     }
 
+    /** 카드 글은 그대로인데 파일(대표 아이콘 등)만 바뀌었을 때: 목록 항목과 썸네일 키(updated)를 새로 고침. */
+    fun touch(id: String) {
+        if (items.none { it.id == id }) return
+        writeMeta(id, items.firstOrNull { it.id == id }?.folder)
+        refresh(id)
+    }
+
     private fun editData(id: String, change: (MutableMap<String, JsonElement>) -> Unit) {
         val card = readCard(id)
         val before = (card["data"] as? JsonObject) ?: JsonObject(emptyMap())
