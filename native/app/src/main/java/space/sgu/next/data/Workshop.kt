@@ -630,8 +630,10 @@ object Workshop {
                 }
                 access = Perms.finalize(access, approved)
                 setJob(cid) { it.copy(access = access, phase = "generating", stream = "", reasoning = "") }
+                // "한 번에 불러오기": 서버와는 계속 스트리밍으로 받지만 화면 갱신은 하지 않음 (결과는 끝나고 한 번에 반영됨)
+                val atOnce = SettingsStore.model(Processors.mainModelId(doc(cid)))?.b("streamAtOnce") == true
                 val out = Processors.runMain(doc(cid), sguData(cid), command, access, r.instruction,
-                    Stream(onDelta = { d -> setJob(cid) { it.copy(stream = it.stream + d) } }, onReasoning = { d -> setJob(cid) { it.copy(reasoning = it.reasoning + d) } }),
+                    if (atOnce) Stream() else Stream(onDelta = { d -> setJob(cid) { it.copy(stream = it.stream + d) } }, onReasoning = { d -> setJob(cid) { it.copy(reasoning = it.reasoning + d) } }),
                     onRestart = { setJob(cid) { it.copy(stream = "", reasoning = "") } })
                 setJob(cid) { it.copy(phase = "applying") }
                 val before = cardData(cid)
