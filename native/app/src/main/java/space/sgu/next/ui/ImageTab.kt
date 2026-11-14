@@ -113,7 +113,7 @@ import space.sgu.next.data.str
 import space.sgu.next.data.with
 import java.io.File
 
-val imageTabs = listOf("이미지 데이터", "그림체 설정", "캐릭터 설정", "이미지 템플릿")
+val imageTabs = listOf("이미지 데이터", "그림체 설정", "캐릭터 설정", "프리셋")
 
 /** Image tab: one row of four tabs (no nested "이미지 생성" level). No inner swiping — the editor pager swipes. */
 /** One image sub tab as a page of the editor's flat pager; the sub tab row slides along with its page. */
@@ -158,7 +158,7 @@ private fun ImageDataTab(cid: String) {
             val list = assets.filter { CardIO.str(it, "type") == type }
             item(key = type) { AssetSection(cid, type, label, list, x) }
         }
-        item { Hint("이미지 템플릿에서 체크한 이미지가 여기(감정·추가 에셋)에 이미지 이름(2장째부터 .2, .3 …)으로 들어가요. 파일을 직접 추가할 수도 있어요(RisuAI 에셋 형식).") }
+        item { Hint("프리셋에서 체크한 이미지가 여기(감정·추가 에셋)에 이미지 이름(2장째부터 .2, .3 …)으로 들어가요. 파일을 직접 추가할 수도 있어요(RisuAI 에셋 형식).") }
     }
 }
 

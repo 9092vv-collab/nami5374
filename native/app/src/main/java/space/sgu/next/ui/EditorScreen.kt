@@ -107,7 +107,7 @@ fun EditorScreen(characterId: String, onBack: (() -> Unit)?, openField: (String)
     val meta = CharacterStore.items.firstOrNull { it.id == characterId }
     val card = remember(characterId, CharacterStore.version) { CharacterStore.readCard(characterId) }
     // Pager: 0 이미지(캐릭터 설정만) | 1 작업실 | 2 캐릭터. 이미지·캐릭터 탭에서 뒤로 가기 = 작업실 탭으로.
-    // 이미지 데이터 · 그림체 설정 · 이미지 템플릿은 이미지 탭 위쪽 버튼을 눌러서 들어감 (side = "img0"/"img1"/"img3").
+    // 이미지 데이터 · 그림체 설정 · 프리셋은 이미지 탭 위쪽 버튼을 눌러서 들어감 (side = "img0"/"img1"/"img3").
     // 스크립트 + 기타는 잘 안 써서 탭에서 빼고 한 화면으로 합침 (상단 바 아이콘 / ⋮ 메뉴에서 열기).
     // so swiping from an image sub tab on to the next big tab is one smooth swipe (no pager inside a pager).
     val pager = rememberPagerState(initialPage = 1) { 3 }  // 봇을 열면 작업실부터
