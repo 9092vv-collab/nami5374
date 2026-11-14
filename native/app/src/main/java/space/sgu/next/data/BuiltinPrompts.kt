@@ -121,6 +121,23 @@ object BuiltinPrompts {
             Item("ref.memo", "참고 자료 설명", "메모가 있을 때 [[memo]] 자리", "[[note]] = 메모 내용.", "\"[[note]]\""),
             Item("ref.memoNone", "참고 자료 설명", "메모가 없을 때 [[memo]] 자리", "", "(none)"),
             Item("ref.starts", "참고 자료 설명", "글 자료의 앞부분 표시", "텍스트·페르소나 자료의 시작 160자. [[text]] = 앞부분.", "starts with: \"[[text]]\""),
+            Item("guide.image", "이미지 작성 규칙", "이미지 탭 작성 규칙 (그림체 · 캐릭터 블록 · 프리셋 템플릿의 경계)",
+                "AI가 프리셋 템플릿·이미지 캐릭터 설정·자유 프롬프트 중 하나라도 고칠 수 있는 턴에, 편집 방법 설명 바로 뒤에 붙어요. 나만의 규칙은 여기에 더하세요.",
+                "## Image prompt rules (SGU image tab)\n" +
+                "The app builds the final NovelAI prompt from three layers. Each kind of tag has exactly one home; never repeat a tag in another layer.\n" +
+                "\n" +
+                "1. Art style (그림체 설정) — you cannot see or edit it. It already adds the quality tags, the art-style/artist tags and the general-purpose negative prompt to EVERY image. So NEVER write quality tags (masterpiece, best quality, very aesthetic, absurdres, highres ...), art-style or artist tags, or general-purpose negatives (lowres, worst quality, bad anatomy, bad hands, jpeg artifacts, watermark, text ...) anywhere: not in character blocks, free prompts, presets, or any negative field.\n" +
+                "2. Character blocks (genCharacters) — APPEARANCE ONLY: gender, hair, face, eyes, body, and outfit or state variants as separate blocks/folders. No pose, action, expression, camera or background here.\n" +
+                "3. Preset templates (genTemplate) — ACTION ONLY: pose, gesture, action, expression, camera angle/framing, scene/background, interaction between characters. A preset NEVER describes appearance (no hair, eyes, body, outfit tags in assetPrompt or chars[].prompt).\n" +
+                "   - Appearance enters a preset only by attaching a character (chars[].characterId) and listing that character's EXISTING blocks in chars[].blockIds. Choose the blocks that fit the scene; when unsure, use the character's basic appearance blocks and leave optional variant blocks/folders out.\n" +
+                "   - assetPrompt = what is shared by the whole picture (head count such as 1girl / 2girls / solo unless a character block already carries it, composition, background). chars[].prompt = only that character's own pose/action/expression.\n" +
+                "   - Negative fields of a preset hold only what is specific to that pose (e.g. a wrong pose to avoid), never general negatives.\n" +
+                "   - If the scene needs an appearance block that does not exist (e.g. an outfit), do NOT write that appearance into the preset and do NOT create the block yourself: finish the preset with the existing blocks and tell the user in \"message\" which block is missing.\n" +
+                "\n" +
+                "Protecting the user's existing work:\n" +
+                "- \"Make a template / preset\" means genTemplate ONLY. While making or editing presets, do not add, change, rename, move or remove character blocks or folders, and do not touch free prompts, unless the user explicitly asked for that.\n" +
+                "- You cannot restore overwritten text (the session history keeps no previous text). Never rewrite the text of an existing block or an existing preset unless the user explicitly told you to change that specific one. When in doubt, add a new one instead of overwriting, or ask in \"message\".\n" +
+                "- The free prompt (genFree) follows the same rules: no quality/style tags, no general negatives."),
             Item("test.prompt", "모델 테스트", "모델 테스트 문장", "설정 › 모델에서 '테스트'를 누르면 모델에 이 문장을 보내요."  , "Reply with the single word: OK"),
         )
     }
