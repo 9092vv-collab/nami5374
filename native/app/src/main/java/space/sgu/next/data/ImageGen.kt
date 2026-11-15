@@ -322,7 +322,7 @@ object ImageGenStore {
     fun label(cid: String, key: String): String {
         val g = load(cid); val p = parts(key)
         return when (p[0]) {
-            "style" -> if (p.getOrNull(1) == "negative") "그림체 네거티브" else "그림체 프롬프트"
+            "style" -> when (p.getOrNull(1)) { "negative" -> "그림체 네거티브"; "quality" -> "퀄리티 태그"; else -> "그림체 프롬프트" }
             "block" -> character(g, p[1])?.arr("blocks")?.firstOrNull { it.s("id") == p[2] }?.s("name")?.ifBlank { "블록" } ?: "블록"
             "free" -> if (p.getOrNull(2) == "freeNegative") "자유 네거티브" else "자유 프롬프트"
             "preset" -> if (p.getOrNull(2) == "assetNegative") "에셋 네거티브" else "에셋 프롬프트"
@@ -392,7 +392,8 @@ object ImageGenStore {
             CharJob(pp, nn, center)
         }
         val (w, h) = sizeDims(preset.o("size"))
-        return Job(joinSections(style.s("prompt"), preset.s("assetPrompt")), joinTags(style.s("negative"), preset.s("assetNegative")), w, h, chars)
+        return Job(joinSections(style.s("prompt"), preset.s("assetPrompt"), style.s("quality")),  // 그림체 → 동작(에셋) → 퀄리티 태그
+            joinTags(style.s("negative"), preset.s("assetNegative")), w, h, chars)
     }
 
     fun jobForCharacter(g: JsonObject, c: JsonObject): Job {
@@ -400,7 +401,7 @@ object ImageGenStore {
         val freeIds = c.arr("blocks").filter { !(it["free"]?.toString() == "false") }.map { it.s("id") }.toSet()
         val (pp, nn) = charPrompts(c, freeIds, c.s("freePrompt"), c.s("freeNegative"))
         val (w, h) = sizeDims(c.o("size"))
-        return Job(joinTags(style.s("prompt")), joinTags(style.s("negative")), w, h, listOf(CharJob(pp, nn, null)))
+        return Job(joinSections(style.s("prompt"), style.s("quality")), joinTags(style.s("negative")), w, h, listOf(CharJob(pp, nn, null)))
     }
 
     // ---------- NovelAI request (module 951 buildNaiBody) ----------

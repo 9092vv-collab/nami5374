@@ -326,6 +326,8 @@ private fun StyleTab(cid: String, openField: (String) -> Unit) {
         FieldLabel("그림체 (기본 프롬프트 / Undesired Content)")
         PromptCard("Art style prompt (그림체 프롬프트)", style.s("prompt"), "예: best quality, masterpiece, soft lighting") { openField("gen:style:prompt") }
         Spacer(Modifier.height(8.dp))
+        PromptCard("퀄리티 태그 (공통 프롬프트 맨 끝)", style.s("quality"), "예: very aesthetic, masterpiece, no text") { openField("gen:style:quality") }
+        Spacer(Modifier.height(8.dp))
         PromptCard("Art style negative (그림체 네거티브)", style.s("negative"), "예: lowres, bad anatomy, text, watermark") { openField("gen:style:negative") }
         StyleLibrarySection(cid)
     }
