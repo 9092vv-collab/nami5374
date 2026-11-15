@@ -356,6 +356,10 @@ object ImageGenStore {
 
     // ---------- prompt building (module 904 joinTags / characterPrompts / jobForPreset) ----------
 
+    /** 외형(블록·그림체)과 행동(에셋·자유·캐릭터 프롬프트) 사이를 한 줄 띄워 보냄. 쉼표는 남겨서 태그가 붙지 않게. */
+    fun joinSections(vararg parts: String?): String =
+        parts.map { (it ?: "").trim().replace(Regex("[,\\s]+$"), "") }.filter { it.isNotEmpty() }.joinToString(",\n\n")
+
     fun joinTags(vararg parts: String?): String =
         parts.map { (it ?: "").trim().replace(Regex("[,\\s]+$"), "") }.filter { it.isNotEmpty() }.joinToString(", ")
 
@@ -374,7 +378,7 @@ object ImageGenStore {
 
     private fun charPrompts(character: JsonObject, ids: Set<String>?, extraP: String, extraN: String): Pair<String, String> {
         val active = activeBlocks(character, ids)
-        return joinTags(*active.filter { it.s("type") == "prompt" }.map { it.s("text") }.toTypedArray(), extraP) to
+        return joinSections(joinTags(*active.filter { it.s("type") == "prompt" }.map { it.s("text") }.toTypedArray()), extraP) to
             joinTags(*active.filter { it.s("type") == "negative" }.map { it.s("text") }.toTypedArray(), extraN)
     }
 
@@ -388,7 +392,7 @@ object ImageGenStore {
             CharJob(pp, nn, center)
         }
         val (w, h) = sizeDims(preset.o("size"))
-        return Job(joinTags(style.s("prompt"), preset.s("assetPrompt")), joinTags(style.s("negative"), preset.s("assetNegative")), w, h, chars)
+        return Job(joinSections(style.s("prompt"), preset.s("assetPrompt")), joinTags(style.s("negative"), preset.s("assetNegative")), w, h, chars)
     }
 
     fun jobForCharacter(g: JsonObject, c: JsonObject): Job {
