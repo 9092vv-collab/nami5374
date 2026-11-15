@@ -716,7 +716,7 @@ fun StyleLibrarySection(cid: String) {
             Hint("저장한 그림체는 어느 캐릭터에서든 불러올 수 있습니다. ★로 지정한 그림체는 새 프로젝트의 기본 그림체가 됩니다. 이미지 모델 프로바이더는 포함되지 않습니다.")
             Row(Modifier.padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 InputBox(name, { name = it }, placeholder = "저장할 그림체 이름", modifier = Modifier.weight(1f))
-                LineButton("현재 그림체 저장", onClick = { StyleLibrary.add(name.ifBlank { "그림체" }, StyleLibrary.fromStyle(g.o("style"))); name = "" })
+                LineButton("현재 그림체 저장", onClick = { StyleLibrary.saveAs(name, StyleLibrary.fromStyle(ImageGenStore.load(cid).o("style"))); msg = "'${name.trim().ifBlank { "그림체" }}' 저장됨"; name = "" })
             }
             if (StyleLibrary.items.isEmpty()) Text("저장된 그림체가 없습니다.", style = MaterialTheme.typography.bodySmall, color = Sgu.Sub, modifier = Modifier.padding(start = 6.dp, top = 8.dp))
             StyleLibrary.items.forEach { st ->

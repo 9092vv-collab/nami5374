@@ -300,6 +300,15 @@ object StyleLibrary : JsonLibrary("art-styles.json", "sty") {
         put("model name", JsonPrimitive(style.s("model"))); put("Steps", num(style.d("steps") ?: 28.0))
         put("Prompt Guidance", num(style.d("guidance") ?: 5.0)); put("Prompt Guidance Rescale", num(style.d("rescale") ?: 0.0))
         put("Sampler", JsonPrimitive(style.s("sampler"))); put("Art style prompt", JsonPrimitive(style.s("prompt"))); put("Art style negative", JsonPrimitive(style.s("negative")))
+        put("Quality tags", JsonPrimitive(style.s("quality")))  // SGU 전용 (0.9.31 퀄리티 태그 칸)
+    }
+
+    /** 같은 이름이 있으면 그걸 덮어씀 (같은 이름이 여러 개 생겨 엉뚱한 걸 불러오던 문제). */
+    fun saveAs(name: String, data: JsonObject) {
+        load()
+        val n = name.trim().ifBlank { "그림체" }
+        val same = items.firstOrNull { it.s("name") == n }
+        if (same != null) setData(same.s("id"), data) else add(n, data)
     }
 
     /** Fields to put into style (only the ones present and valid), like the original apply / favoriteStylePatch. */
@@ -314,6 +323,8 @@ object StyleLibrary : JsonLibrary("art-styles.json", "sty") {
             data.s("Sampler").takeIf { s -> NaiModels.samplers.any { it.first == s } }?.let { add("sampler" to JsonPrimitive(it)) }
             (data["Art style prompt"] as? JsonPrimitive)?.let { if (it.isString) add("prompt" to it) }
             (data["Art style negative"] as? JsonPrimitive)?.let { if (it.isString) add("negative" to it) }
+            // 예전에 저장한 그림체엔 이 칸이 없음 → 그때는 지금 퀄리티 태그를 그대로 둠
+            (data["Quality tags"] as? JsonPrimitive)?.let { if (it.isString) add("quality" to it) }
         }
     }
 }
