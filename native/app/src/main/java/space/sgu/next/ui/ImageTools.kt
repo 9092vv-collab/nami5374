@@ -1,5 +1,7 @@
 package space.sgu.next.ui
 
+import space.sgu.next.data.NaiMeta
+import androidx.compose.runtime.produceState
 import androidx.compose.material.icons.outlined.Check
 
 import androidx.compose.foundation.layout.navigationBarsPadding
@@ -516,14 +518,59 @@ fun PresetImages(cid: String, preset: JsonObject) {
     removing?.let { iid -> ConfirmDialog("이미지 삭제", "이 이미지를 삭제하시겠습니까?", "삭제", onConfirm = { ImageGenStore.deleteImage(cid, pid, iid) }, onDismiss = { removing = null }) }
 }
 
-/** 원본 보기: the image at full size, tap anywhere to close. */
+/** 원본 보기: the image at full size, tap anywhere to close. 아래 "생성 정보"로 NAI 메타데이터를 봄. */
 @Composable
 fun ZoomDialog(file: File, onDismiss: () -> Unit) {
+    var info by remember { mutableStateOf(false) }
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.92f)).clickable(onClick = onDismiss), contentAlignment = Alignment.Center) {
             val bmp = remember(file.path) { runCatching { android.graphics.BitmapFactory.decodeFile(file.path)?.asImageBitmap() }.getOrNull() }
             if (bmp != null) androidx.compose.foundation.Image(bmp, "원본", contentScale = androidx.compose.ui.layout.ContentScale.Fit, modifier = Modifier.fillMaxSize().padding(8.dp))
             else Text("이미지 파일이 없습니다.", color = Color.White)
+            if (bmp != null) Text("생성 정보", color = Sgu.Ink, style = MaterialTheme.typography.labelLarge,
+                modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 28.dp).clip(RoundedCornerShape(50)).background(Color.White)
+                    .clickable { info = true }.padding(horizontal = 20.dp, vertical = 10.dp))
+        }
+        if (info) NaiMetaDialog(file) { info = false }
+    }
+}
+
+@Composable
+private fun NaiMetaDialog(file: File, onDismiss: () -> Unit) {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val rows by produceState<List<NaiMeta.Row>?>(null, file.path) { value = withContext(Dispatchers.IO) { NaiMeta.rows(file) } }
+    fun copy(t: String) {
+        (ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager)
+            .setPrimaryClip(android.content.ClipData.newPlainText("NAI", t))
+        android.widget.Toast.makeText(ctx, "복사했어요", android.widget.Toast.LENGTH_SHORT).show()
+    }
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Column(Modifier.fillMaxWidth(0.94f).fillMaxSize(0.88f).clip(RoundedCornerShape(24.dp)).background(Sgu.Bg)) {
+            Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("생성 정보", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                IconButton(onClick = onDismiss) { Icon(Icons.Outlined.Close, "닫기") }
+            }
+            val list = rows
+            when {
+                list == null -> Text("읽는 중…", color = Sgu.Sub, modifier = Modifier.padding(20.dp))
+                list.isEmpty() -> Text("이 이미지에는 NovelAI 생성 정보가 없어요. (압축했거나 다른 곳에서 만든 이미지일 수 있어요)", color = Sgu.Sub, modifier = Modifier.padding(20.dp))
+                else -> androidx.compose.foundation.lazy.LazyColumn(Modifier.fillMaxSize(), contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    items(list.size) { i ->
+                        val r = list[i]
+                        Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(Sgu.Card).padding(14.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(r.label, style = MaterialTheme.typography.labelLarge, color = Sgu.Sub, modifier = Modifier.weight(1f))
+                                Text("복사", style = MaterialTheme.typography.labelLarge, modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable { copy(r.value) }.padding(horizontal = 8.dp, vertical = 4.dp))
+                            }
+                            androidx.compose.foundation.text.selection.SelectionContainer {
+                                Text(r.value, style = MaterialTheme.typography.bodyMedium.let { if (r.label.startsWith("원본")) it.copy(fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace) else it },
+                                    maxLines = if (r.label.startsWith("원본")) 12 else Int.MAX_VALUE, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, modifier = Modifier.padding(top = 6.dp))
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }
