@@ -299,7 +299,16 @@ private fun StyleTab(cid: String, openField: (String) -> Unit) {
         FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             NaiModels.list.forEach { (id, label) -> PillChip(label, style.s("model").ifBlank { NaiModels.list[0].first } == id) { ImageGenStore.patchStyle(cid, "model" to JsonPrimitive(id)) } }
         }
-        if (medium) Hint("V5 Full Medium은 고정 설정으로 생성돼요: 스텝 14, Euler Ancestral, 네거티브·CFG 리스케일 미사용")
+        if (medium) {
+            Hint("V5 Full Medium은 고정 설정으로 생성돼요: 스텝 14, Euler Ancestral, CFG 리스케일 미사용. 네거티브 칸은 받지 않아서, 네거티브(배제 태그 포함)를 음수 강조로 바꿔 프롬프트 끝에 붙여요.")
+            FieldLabel("네거티브 → 음수 강조")
+            val nw = (style.d("mediumNegWeight") ?: 2.0).toInt()
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                listOf(0 to "끄기", 1 to "-1", 2 to "-2", 3 to "-3", 4 to "-4").forEach { (v, label) ->
+                    PillChip(label, nw == v) { ImageGenStore.patchStyle(cid, "mediumNegWeight" to JsonPrimitive(v)) }
+                }
+            }
+        }
 
         FieldLabel("샘플러")
         FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {

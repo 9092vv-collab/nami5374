@@ -411,13 +411,18 @@ object ImageGenStore {
         val steps = if (medium) 14 else (style.d("steps") ?: 28.0).toInt()
         val sampler = if (medium) "k_euler_ancestral" else style.s("sampler").ifBlank { "k_euler_ancestral" }
         val baseNeg = if (medium) "" else job.baseNegative
-        val chars = job.chars.map { if (medium) it.copy(negative = "") else it }
+        // V5M은 네거티브 칸을 안 받음 → NAI가 권하는 음수 강조(-2::태그::)로 바꿔 프롬프트 뒤에 붙임 (그림체 설정에서 강도, 0이면 끔)
+        val negW = (style.d("mediumNegWeight") ?: 2.0).toInt()
+        fun asNeg(p: String, n: String) = if (!medium || negW <= 0 || n.isBlank()) p
+            else joinSections(p, "-$negW::${n.trim().replace(Regex("[,\\s]+$"), "")}::")
+        val basePrompt = asNeg(job.basePrompt, job.baseNegative)
+        val chars = job.chars.map { if (medium) it.copy(prompt = asNeg(it.prompt, it.negative), negative = "") else it }
         val useCoords = chars.any { it.center != null }
         fun center(c: CharJob) = buildJsonObject {
             put("x", JsonPrimitive(c.center?.first ?: 0.5)); put("y", JsonPrimitive(c.center?.second ?: 0.5))
         }
         return buildJsonObject {
-            put("input", JsonPrimitive(job.basePrompt)); put("model", JsonPrimitive(model)); put("action", JsonPrimitive("generate"))
+            put("input", JsonPrimitive(basePrompt)); put("model", JsonPrimitive(model)); put("action", JsonPrimitive("generate"))
             put("parameters", buildJsonObject {
                 put("params_version", JsonPrimitive(3)); put("width", JsonPrimitive(job.w)); put("height", JsonPrimitive(job.h))
                 put("scale", JsonPrimitive(style.d("guidance") ?: 5.0))
@@ -430,7 +435,7 @@ object ImageGenStore {
                 put("skip_cfg_above_sigma", JsonNull); put("image_format", JsonPrimitive("png")); put("dynamic_thresholding", JsonPrimitive(false))
                 put("controlnet_strength", JsonPrimitive(1)); put("legacy", JsonPrimitive(false)); put("legacy_uc", JsonPrimitive(false))
                 put("add_original_image", JsonPrimitive(false)); put("noise_schedule", JsonPrimitive("karras")); put("legacy_v3_extend", JsonPrimitive(false))
-                put("uncond_scale", JsonPrimitive(1)); put("prompt", JsonPrimitive(job.basePrompt)); put("negative_prompt", JsonPrimitive(baseNeg))
+                put("uncond_scale", JsonPrimitive(1)); put("prompt", JsonPrimitive(basePrompt)); put("negative_prompt", JsonPrimitive(baseNeg))
                 put("reference_image_multiple", JsonArray(emptyList())); put("reference_information_extracted_multiple", JsonArray(emptyList()))
                 put("reference_strength_multiple", JsonArray(emptyList()))
                 put("characterPrompts", buildJsonArray {
@@ -439,7 +444,7 @@ object ImageGenStore {
                 put("v4_prompt", buildJsonObject {
                     put("use_coords", JsonPrimitive(useCoords)); put("use_order", JsonPrimitive(true))
                     put("caption", buildJsonObject {
-                        put("base_caption", JsonPrimitive(job.basePrompt))
+                        put("base_caption", JsonPrimitive(basePrompt))
                         put("char_captions", buildJsonArray { chars.forEach { c -> add(buildJsonObject { put("char_caption", JsonPrimitive(c.prompt)); put("centers", buildJsonArray { add(center(c)) }) }) } })
                     })
                 })
