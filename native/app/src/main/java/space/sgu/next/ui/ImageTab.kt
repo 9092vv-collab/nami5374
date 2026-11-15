@@ -1,5 +1,7 @@
 package space.sgu.next.ui
 
+import androidx.compose.material.icons.outlined.Shuffle
+import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.PersonAdd
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 
@@ -469,7 +471,9 @@ private fun GenCharacterTab(cid: String, openField: (String) -> Unit) {
                 if (zoomPreview) ZoomDialog(preview) { zoomPreview = false }
             }
             Spacer(Modifier.height(10.dp))
-            InkButton(if (generating != null) "생성 중… (탭하면 중지)" else "생성", icon = Icons.Filled.AutoAwesome, onClick = {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            SeedButton(cid)
+            InkButton(if (generating != null) "생성 중… (탭하면 중지)" else "생성", icon = Icons.Filled.AutoAwesome, modifier = Modifier.weight(1f), onClick = {
                 generating?.let { it.cancel(); generating = null; return@InkButton }
                 generating = scope.launch {
                     runCatching { ImageGenStore.generateForCharacter(cid, charId) }
@@ -477,6 +481,7 @@ private fun GenCharacterTab(cid: String, openField: (String) -> Unit) {
                     generating = null
                 }
             })
+            }
         }
     }
 
@@ -684,7 +689,7 @@ fun GenPresetScreen(cid: String, presetId: String, openField: (String) -> Unit, 
                 Modifier.fillMaxWidth().background(Sgu.Bg).navigationBarsPadding().padding(horizontal = 16.dp, vertical = 10.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically,
             ) {
-                LineButton("프롬프트", onClick = { showPrompt = true }, icon = Icons.Outlined.Visibility)
+                SeedButton(cid)
                 val run = GenRun.progress[cid]
                 InkButton(if (run != null) "생성 중 ${run.done}/${run.total} (탭하면 중지)" else "이미지 생성", icon = Icons.Filled.AutoAwesome, modifier = Modifier.weight(1f), onClick = {
                     if (run != null) GenRun.stop(cid) else GenRun.run(cid, listOf(presetId), 1)
@@ -869,4 +874,13 @@ private fun BlockChip(b: JsonObject, on: Boolean, enabled: Boolean, folder: Bool
         if (folder) { Icon(Icons.Outlined.Folder, null, tint = fg, modifier = Modifier.size(16.dp)); Spacer(Modifier.width(4.dp)) }
         Text(b.s("name").ifBlank { if (folder) "폴더" else "블록" } + if (neg) " −" else "", color = fg, style = MaterialTheme.typography.labelLarge, maxLines = 1)
     }
+}
+
+
+/** 시드 고정/랜덤 (봇마다, 그림체 설정에 저장). 고정을 누르면 마지막으로 뽑은 그림의 시드로 고정. */
+@Composable
+fun SeedButton(cid: String) {
+    val fixed = remember(cid, ImageGenStore.version) { ImageGenStore.seedFixed(ImageGenStore.load(cid)) }
+    LineButton(if (fixed) "시드 고정" else "시드 랜덤", onClick = { ImageGenStore.toggleSeed(cid) },
+        icon = if (fixed) Icons.Outlined.Lock else Icons.Outlined.Shuffle)
 }

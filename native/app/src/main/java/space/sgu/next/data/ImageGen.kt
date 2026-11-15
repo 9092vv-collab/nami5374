@@ -460,13 +460,28 @@ object ImageGenStore {
             ?: SettingsStore.providers.firstOrNull { it.s("format") == "novelai-image" }
 
     /** Calls NovelAI and returns PNG bytes. */
-    suspend fun generate(g: JsonObject, job: Job): ByteArray = withContext(Dispatchers.IO) {
+    /**
+     * 시드: 그림체 설정(style)의 seedFixed가 켜져 있으면 마지막에 쓴 시드(style.seed)를 계속 씀.
+     * 랜덤일 때도 쓴 시드를 style.seed에 남겨서, 마음에 드는 그림이 나온 뒤 "고정"을 누르면 그 시드로 고정됨.
+     */
+    private suspend fun seedFor(cid: String): Long {
+        val st = load(cid).o("style")
+        val last = (st?.get("seed") as? JsonPrimitive)?.content?.toLongOrNull()
+        val seed = if (st?.b("seedFixed") == true && last != null) last else (Math.random() * 4294967295.0).toLong()
+        if (seed != last) withContext(Dispatchers.Main) { patchStyle(cid, "seed" to JsonPrimitive(seed)) }
+        return seed
+    }
+
+    fun seedFixed(g: JsonObject) = g.o("style")?.b("seedFixed") == true
+    fun toggleSeed(cid: String) = patchStyle(cid, "seedFixed" to JsonPrimitive(!seedFixed(load(cid))))
+
+    suspend fun generate(g: JsonObject, job: Job, seed: Long = (Math.random() * 4294967295.0).toLong()): ByteArray = withContext(Dispatchers.IO) {
         val p = provider(g) ?: throw ProviderError("NovelAI(image) 프로바이더가 없습니다. 설정 › 프로바이더에서 추가하세요.")
         val r = Llm.resolve(p)
         if (r.apiKey.isNullOrBlank()) throw ProviderError("NovelAI Persistent API Token이 설정되지 않았습니다. 설정 › 프로바이더에서 키를 연결하세요.")
         if (job.basePrompt.isBlank() && job.chars.all { it.prompt.isBlank() }) throw ProviderError("프롬프트가 비어 있습니다. 그림체 프롬프트나 캐릭터 블록을 작성하세요.")
         val model = g.o("style").s("model").ifBlank { NaiModels.list[0].first }
-        val body = CardIO.json.encodeToString(JsonElement.serializer(), buildBody(job, g.o("style"), model, (Math.random() * 4294967295.0).toLong()))
+        val body = CardIO.json.encodeToString(JsonElement.serializer(), buildBody(job, g.o("style"), model, seed))
         var attempt = 0
         while (true) {
             val c = URL(Llm.joinUrl(r.baseUrl, "ai/generate-image")).openConnection() as HttpURLConnection
@@ -516,7 +531,7 @@ object ImageGenStore {
     suspend fun generateForPreset(cid: String, presetId: String) {
         val g = load(cid)
         val preset = preset(g, presetId) ?: return
-        val png = generate(g, jobForPreset(g, preset))
+        val png = generate(g, jobForPreset(g, preset), seedFor(cid))
         val name = "${presetId}_${System.currentTimeMillis()}.png"
         withContext(Dispatchers.IO) { imageFile(cid, name).writeBytes(png) }
         withContext(Dispatchers.Main) {
@@ -531,7 +546,7 @@ object ImageGenStore {
     suspend fun generateForCharacter(cid: String, charId: String): String {
         val g = load(cid)
         val c = character(g, charId) ?: throw ProviderError("캐릭터가 없습니다.")
-        val png = generate(g, jobForCharacter(g, c))
+        val png = generate(g, jobForCharacter(g, c), seedFor(cid))
         val name = "free_${charId}_${System.currentTimeMillis()}.png"
         withContext(Dispatchers.IO) { imageFile(cid, name).writeBytes(png) }
         withContext(Dispatchers.Main) { update(cid) { it.with("preview" to JsonPrimitive(name)) } }
