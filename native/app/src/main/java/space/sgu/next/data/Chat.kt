@@ -517,7 +517,11 @@ object Chat {
             }
         }
         if (r.jsonSchema != null && (r.structuredOutput == "auto" || r.structuredOutput == "json_schema")) {
-            gc["responseMimeType"] = JsonPrimitive("application/json"); gc["responseSchema"] = stripSchema(r.jsonSchema.schema)
+            gc["responseMimeType"] = JsonPrimitive("application/json")
+            // Gemini의 responseSchema는 OpenAPI 일부만 지원해서, 형식을 정하지 않은 칸(작업실 edits의 value)이
+            // 깊게 중첩된 객체(프리셋의 chars 배열 등)를 제대로 못 내보냄 → 그 스키마는 보내지 않고 JSON 모드만 씀.
+            // 출력 형식은 메인 프롬프트(출력 형식)에 글로 적혀 있음.
+            if (r.jsonSchema.name != "sgu_edit_output") gc["responseSchema"] = stripSchema(r.jsonSchema.schema)
         } else if (r.structuredOutput == "json_object") gc["responseMimeType"] = JsonPrimitive("application/json")
         val m = mutableMapOf<String, JsonElement>(
             "contents" to JsonArray(contents.map { buildJsonObject { put("role", it.role); put("parts", JsonArray(it.parts)) } }),
