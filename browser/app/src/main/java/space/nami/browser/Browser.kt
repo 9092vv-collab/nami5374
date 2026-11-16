@@ -54,6 +54,8 @@ class BrowserTab(val id: Long, val web: WebView, val frame: PullFrame) {
     var thumb by mutableStateOf<Bitmap?>(null)
     @Volatile var host = ""
     var fellBackNoticed = false
+    /** When the user last tapped a link (redirects right after a tap may also go to an app, like t.co → x.com). */
+    var lastGesture = 0L
     val blocked = java.util.concurrent.atomic.AtomicInteger(0)
     val handlers = ArrayList<androidx.webkit.ScriptHandler>()
 }
@@ -513,7 +515,26 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
                 val u = req.url
                 if (req.isForMainFrame && isUserJs(u.toString())) { offerInstall(u.toString()); return true }
                 val s = u.scheme ?: return false
-                if (s == "http" || s == "https" || s == "about" || s == "data" || s == "blob" || s == "javascript") return false
+                if (s == "http" || s == "https") {
+                    // Like Chrome: a tapped link to another site that an installed app handles (X, YouTube…) opens in that app.
+                    if (req.isForMainFrame && prefs.openApps) {
+                        val now = System.currentTimeMillis()
+                        if (req.hasGesture()) t.lastGesture = now
+                        val tapped = req.hasGesture() || (req.isRedirect && now - t.lastGesture < 4000)
+                        val from = view.url?.let { Uri.parse(it).host } ?: ""
+                        val to = u.host ?: ""
+                        if (tapped && to.isNotEmpty() && Blocker.Engine.registrable(to) != Blocker.Engine.registrable(from) && openInApp(u)) {
+                            // a fresh tab opened only for this link → close it again
+                            if (!view.canGoBack() && (view.url.isNullOrEmpty() || view.url == "about:blank")) {
+                                val i = tabs.indexOfFirst { it.web === view }
+                                if (i >= 0 && tabs.size > 1) closeTab(i)
+                            }
+                            return true
+                        }
+                    }
+                    return false
+                }
+                if (s == "about" || s == "data" || s == "blob" || s == "javascript") return false
                 // intent:, market:, mailto: … → other apps
                 return try {
                     val i = if (s == "intent") Intent.parseUri(u.toString(), Intent.URI_INTENT_SCHEME) else Intent(Intent.ACTION_VIEW, u)
@@ -591,6 +612,13 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
         }
         return t
     }
+
+    /** Opens the link in an installed app that handles it (not another browser). False if there is none. */
+    fun openInApp(u: Uri): Boolean = try {
+        act.startActivity(Intent(Intent.ACTION_VIEW, u).addCategory(Intent.CATEGORY_BROWSABLE)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REQUIRE_NON_BROWSER))
+        true
+    } catch (e: ActivityNotFoundException) { false } catch (e: Exception) { false }
 
     fun exitCustomView() { customCb?.onCustomViewHidden(); customView = null; customCb = null }
 

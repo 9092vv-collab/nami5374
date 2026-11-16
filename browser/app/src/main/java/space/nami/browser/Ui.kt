@@ -556,6 +556,7 @@ private fun LongPressDialog(b: Browser, lp: LongPress) {
                     row("새 탭에서 열기") { b.newTab(link, select = false); b.showPill("새 탭에서 열었어요", 1500) }
                     row("링크 복사") { copyText(ctx, link) }
                     row("링크 공유") { shareText(ctx, link) }
+                    row("앱으로 열기") { if (!b.openInApp(Uri.parse(link))) Toast.makeText(ctx, "이 링크를 열 수 있는 앱이 없어요", Toast.LENGTH_SHORT).show() }
                 }
             }
         })

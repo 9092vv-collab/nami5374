@@ -86,6 +86,8 @@ class Prefs(ctx: Context) {
         private set
     var adblockOff by mutableStateOf(sp.getStringSet("adblockOff", emptySet())?.toSet() ?: emptySet())
         private set
+    var openApps by mutableStateOf(sp.getBoolean("openApps", true))
+        private set
     var dualNetwork by mutableStateOf(sp.getBoolean("dualNetwork", false))
         private set
     var splitParts by mutableStateOf(sp.getInt("splitParts", 4))
@@ -151,6 +153,7 @@ class Prefs(ctx: Context) {
             sp.edit().putBoolean("seed_adblockOff_kioac", true).apply()
         }
     }
+    fun putOpenApps(v: Boolean) { openApps = v; sp.edit().putBoolean("openApps", v).apply() }
     fun putDualNetwork(v: Boolean) { dualNetwork = v; sp.edit().putBoolean("dualNetwork", v).apply() }
     fun putSplitParts(v: Int) { splitParts = v; sp.edit().putInt("splitParts", v).apply() }
     fun putDnsMode(v: DnsMode) { dnsMode = v; sp.edit().putString("dnsMode", v.name).apply() }

@@ -370,6 +370,9 @@ private fun GeneralSection(prefs: Prefs) {
     val colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = C.Accent, unfocusedBorderColor = C.Line, cursorColor = C.Accent)
     Card("일반") {
         DefaultBrowserRow()
+        SwitchRow("링크를 앱으로 열기", prefs.openApps) { prefs.putOpenApps(it) }
+        Text("X, 유튜브처럼 앱이 깔린 사이트로 가는 링크를 누르면 그 앱으로 열어요. 주소창에 직접 쓴 주소나 같은 사이트 안에서 이동할 땐 Nami에서 열어요.",
+            fontSize = 12.sp, color = C.Sub, lineHeight = 17.sp)
         BatteryRow()
         SelectRow("분할 다운로드", listOf(0, 2, 4, 8), prefs.splitParts, { if (it == 0) "끔 (폰 기본)" else "${it}조각" }) { prefs.putSplitParts(it) }
         Text("파일 하나를 여러 조각으로 나눠 동시에 받아요. 큰 파일일수록 빨라지고, 서버가 지원하지 않으면 자동으로 한 줄로 받아요.",
