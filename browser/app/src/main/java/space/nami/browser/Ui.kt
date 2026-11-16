@@ -33,7 +33,9 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -237,7 +239,9 @@ fun NamiApp(b: Browser, prefs: Prefs, act: Activity) = NamiTheme {
                 if (p < 100) Box(Modifier.fillMaxWidth(p / 100f).height(2.dp).background(C.Accent))
                 PullIndicator(b.pull, prefs.pullAction, Modifier.align(Alignment.TopCenter))
             }
-            Spacer(Modifier.windowInsetsBottomHeight(WindowInsets.navigationBars))
+            // Like Chrome: when the keyboard opens, shrink the page to the space above it
+            // (edge-to-edge apps don't get this from adjustResize automatically).
+            Spacer(Modifier.windowInsetsBottomHeight(if (b.editing) WindowInsets.navigationBars else WindowInsets.ime.union(WindowInsets.navigationBars)))
         }
 
         // Bottom overlay: status pill + toolbar / address editor
