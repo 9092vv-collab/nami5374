@@ -13,9 +13,8 @@ import java.nio.channels.FileChannel
 import java.util.concurrent.ConcurrentHashMap
 
 /**
- * Backs the page-side File System Access stand-in (showSaveFilePicker / showDirectoryPicker) on
- * 호환 모드 sites: the site writes a big file piece by piece and we put the pieces straight into
- * Download/ (with sub folders), so nothing has to fit in memory.
+ * Saves a file the page streams to us piece by piece (relayed service-worker downloads, e.g. kio.ac)
+ * straight into Download/, so nothing has to fit in memory.
  */
 class FsSaver(private val ctx: Context) {
     private class Sink(val uri: Uri, val pfd: ParcelFileDescriptor, val ch: FileChannel, val name: String,

@@ -101,9 +101,6 @@ class Prefs(ctx: Context) {
         private set
     var openApps by mutableStateOf(sp.getBoolean("openApps", true))
         private set
-    /** "호환 모드": sites where the service worker is hidden so in-page downloads fall back to a saveable blob. */
-    var swOffSites by mutableStateOf(sp.getStringSet("swOffSites", emptySet())?.toSet() ?: emptySet())
-        private set
     var dualNetwork by mutableStateOf(sp.getBoolean("dualNetwork", false))
         private set
     var splitParts by mutableStateOf(sp.getInt("splitParts", 4))
@@ -173,27 +170,10 @@ class Prefs(ctx: Context) {
             putAdblockOff("kio.ac", true)
             sp.edit().putBoolean("seed_adblockOff_kioac", true).apply()
         }
-        // kio.ac needs its service worker (downloads are relayed instead) → take it out of 호환 모드 once
-        if (!sp.getBoolean("seed_swOn_kioac", false)) {
-            putSwOff("kio.ac", false)
-            sp.edit().putBoolean("seed_swOn_kioac", true).apply()
-        }
+        // 호환 모드 was removed (0.4.6): drop its saved list
+        if (sp.contains("swOffSites")) sp.edit().remove("swOffSites").apply()
     }
     fun putOpenApps(v: Boolean) { openApps = v; sp.edit().putBoolean("openApps", v).apply() }
-    fun swOffFor(host: String): Boolean {
-        if (host.isEmpty()) return false
-        var h = host.lowercase()
-        while (true) {
-            if (h in swOffSites) return true
-            val i = h.indexOf('.'); if (i < 0) return false
-            h = h.substring(i + 1)
-        }
-    }
-    fun putSwOff(host: String, on: Boolean) {
-        val h = host.lowercase().removePrefix("www.")
-        val s = if (on) swOffSites + h else swOffSites.filterNot { e -> host.lowercase() == e || host.lowercase().endsWith(".$e") }.toSet()
-        swOffSites = s; sp.edit().putStringSet("swOffSites", s).apply()
-    }
     fun putDualNetwork(v: Boolean) { dualNetwork = v; sp.edit().putBoolean("dualNetwork", v).apply() }
     fun putSplitParts(v: Int) { splitParts = v; sp.edit().putInt("splitParts", v).apply() }
     fun putDnsMode(v: DnsMode) { dnsMode = v; sp.edit().putString("dnsMode", v.name).apply() }

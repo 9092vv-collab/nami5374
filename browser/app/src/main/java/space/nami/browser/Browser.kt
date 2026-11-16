@@ -64,20 +64,6 @@ class LongPress(val link: String?, val image: String?)
 
 class PageScriptInfo(val sid: String, val name: String, val commands: List<Pair<String, String>>)
 
-/** "호환 모드": hide the service worker (and drop existing ones) so the site saves files as a blob Nami can catch. Every frame. */
-private const val SWOFF_JS = """
-(function(){ try {
-  var B = window.NamiBridge; if (!B || !B.swOff) return;
-  var hosts = [location.hostname];
-  try { var ao = location.ancestorOrigins; if (ao) for (var i = 0; i < ao.length; i++) hosts.push(new URL(ao[i]).hostname); } catch(e) {}
-  var on = false; for (var j = 0; j < hosts.length; j++) if (hosts[j] && B.swOff(hosts[j])) { on = true; break; }
-  if (!on) return;
-  try { var sw = navigator.serviceWorker; if (sw && sw.getRegistrations) sw.getRegistrations().then(function(rs){ rs.forEach(function(r){ r.unregister(); }); }).catch(function(){}); } catch(e) {}
-  try { delete Navigator.prototype.serviceWorker; } catch(e) {}
-  try { if ('serviceWorker' in navigator) Object.defineProperty(navigator, 'serviceWorker', { get: function(){ return undefined; }, configurable: true }); } catch(e) {}
-} catch(e) {} })();
-"""
-
 /** Hides elements matched by the ad-block element-hiding rules; runs at document start in every frame. */
 private const val BLOCK_CSS_JS = """
 (function(){ try {
@@ -158,17 +144,6 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
 
     init {
         scripts.onChange = { tabs.forEach { applyScripts(it) } }
-        Downloads.onFail = { url, code ->
-            val h = Uri.parse(url).host ?: ""
-            val site = tabs.firstOrNull { it.host.isNotEmpty() && Blocker.Engine.registrable(it.host) == Blocker.Engine.registrable(h) }
-            if (code == 404 && h.isNotEmpty() && site != null && !prefs.swOffFor(h) && !isSwUrl(url)) {
-                showPill("이 사이트는 호환 모드로 받아야 해요", 9000, "켜기" to {
-                    prefs.putSwOff(Blocker.Engine.registrable(h), true)
-                    tabs.filter { Blocker.Engine.registrable(it.host) == Blocker.Engine.registrable(h) }.forEach { it.web.reload() }
-                    showPill("호환 모드를 켰어요 · 다시 받아 주세요", 3500)
-                })
-            }
-        }
         Downloads.onDone = { uri, name, mime ->
             showPill("다 받았어요 · " + name.take(24), 4500, "열기" to { Downloads.open(act, uri, mime, name) })
         }
@@ -447,7 +422,6 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
             }
         }
 
-        @JavascriptInterface fun swOff(host: String): Boolean = prefs.swOffFor(host)
         @JavascriptInterface fun css(host: String): String = runCatching { blocker.css(host) }.getOrDefault("")
         @JavascriptInterface fun downloadHint(k: String, href: String, name: String) { if (k != key) return; if (href.isNotEmpty() && name.isNotBlank()) downloadHints[href] = name }
         @JavascriptInterface
@@ -463,12 +437,6 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
         @JavascriptInterface fun blobChunk(k: String, id: String, b64: String): Boolean = k == key && blobs.chunk(id, b64)
         @JavascriptInterface fun blobEnd(k: String, id: String) { if (k == key) blobs.end(id) }
         @JavascriptInterface fun blobFail(k: String, id: String) { if (k != key) return; blobs.fail(id); scope.launch { Toast.makeText(act, "파일을 읽지 못했어요", Toast.LENGTH_SHORT).show() } }
-        @JavascriptInterface fun fsOpen(k: String, id: String, dir: String, name: String, mime: String): Boolean {
-            if (k != key || !prefs.swOffFor(runCatching { Uri.parse(t.url).host ?: "" }.getOrDefault(""))) return false
-            val ok = fs.open(id, dir, name, mime)
-            if (ok) scope.launch { showPill("받는 중: $name", 2000) }
-            return ok
-        }
         @JavascriptInterface fun relayOpen(k: String, id: String, name: String, mime: String): Boolean {
             if (k != key) return false
             val (n, _) = FileName.build("", null, mime.ifEmpty { null }, name.ifEmpty { null })
@@ -483,8 +451,6 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
         }
         @JavascriptInterface fun relayDone(k: String, url: String) { if (k == key) relayFallback.remove(url) }
         @JavascriptInterface fun fsWrite(k: String, id: String, b64: String, pos: Double): Boolean = k == key && fs.write(id, b64, pos)
-        @JavascriptInterface fun fsSeek(k: String, id: String, pos: Double): Boolean = k == key && fs.seek(id, pos)
-        @JavascriptInterface fun fsTrunc(k: String, id: String, size: Double): Boolean = k == key && fs.truncate(id, size)
         @JavascriptInterface fun fsClose(k: String, id: String): Boolean = k == key && fs.close(id)
         @JavascriptInterface fun fsAbort(k: String, id: String) { if (k == key) fs.abort(id) }
         @JavascriptInterface fun forceZoom(k: String): Boolean = k == key && prefs.forceZoom
@@ -548,7 +514,6 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
         CookieManager.getInstance().setAcceptThirdPartyCookies(web, true)
         web.addJavascriptInterface(Bridge(t), "NamiBridge")
         if (docStart) {
-            runCatching { WebViewCompat.addDocumentStartJavaScript(web, SWOFF_JS, setOf("*")) }
             runCatching { WebViewCompat.addDocumentStartJavaScript(web, BLOCK_CSS_JS, setOf("*")) }
             runCatching { WebViewCompat.addDocumentStartJavaScript(web, pageJs, setOf("*")) }
             applyScripts(t)
@@ -623,7 +588,6 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
                 t.canBack = view.canGoBack(); t.canForward = view.canGoForward()
                 view.evaluateJavascript(pageJs, null)
                 if (!docStart) {
-                    view.evaluateJavascript(SWOFF_JS, null)
                     view.evaluateJavascript(BLOCK_CSS_JS, null)
                     scripts.wrappers(key).forEach { view.evaluateJavascript(it, null) }
                 }

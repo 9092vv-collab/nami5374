@@ -108,7 +108,7 @@ fun SettingsScreen(b: Browser, prefs: Prefs) {
                         5 -> DisplaySection(prefs)
                         else -> {
                             GeneralSection(prefs)
-                            Text("Nami 0.4.5", color = C.Sub, fontSize = 13.sp, modifier = Modifier.padding(start = 6.dp))
+                            Text("Nami 0.4.6", color = C.Sub, fontSize = 13.sp, modifier = Modifier.padding(start = 6.dp))
                         }
                     }
                 }
@@ -425,8 +425,6 @@ private fun GeneralSection(prefs: Prefs) {
     val colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = C.Accent, unfocusedBorderColor = C.Line, cursorColor = C.Accent)
     Card("일반") {
         DefaultBrowserRow()
-        HostList("호환 모드 사이트", "페이지 안에서 파일을 만들어 주는 사이트(kio.ac 등)에서 받기가 404로 실패하면 여기에 등록해요. 그 사이트의 서비스 워커를 숨겨서 Nami가 받을 수 있는 방식으로 바꾸게 해요.",
-            prefs.swOffSites, "예: kio.ac", { prefs.putSwOff(it, true) }, { prefs.putSwOff(it, false) })
         SwitchRow("링크를 앱으로 열기", prefs.openApps) { prefs.putOpenApps(it) }
         Text("X, 유튜브처럼 앱이 깔린 사이트로 가는 링크를 누르면 그 앱으로 열어요. 주소창에 직접 쓴 주소나 같은 사이트 안에서 이동할 땐 Nami에서 열어요.",
             fontSize = 12.sp, color = C.Sub, lineHeight = 17.sp)
