@@ -13,6 +13,20 @@ object PageScript {
   if (window.top !== window) return;
   if (window.__nami) return;
   var N = window.__nami = { on:false, seq:0, pending:{}, nodes:[], queued:new Set(), timer:0, obs:null };
+
+  // ---- look like Tampermonkey to script sites (Greasy Fork checks window.external.Tampermonkey) ----
+  try {
+    var tm = {
+      getVersion: function(cb){ if (cb) cb('5.0'); return Promise.resolve('5.0'); },
+      isInstalled: function(name, ns, cb){
+        var v = ''; try { v = NamiBridge.scriptVersion(String(name), String(ns || '')); } catch(e) {}
+        var r = { installed: !!v, version: v || null, enabled: true };
+        if (cb) cb(r); return Promise.resolve(r);
+      }
+    };
+    if (!window.external) window.external = {};
+    Object.defineProperty(window.external, 'Tampermonkey', { value: tm, configurable: true });
+  } catch(e) {}
   var SKIP = {SCRIPT:1,STYLE:1,NOSCRIPT:1,TEXTAREA:1,INPUT:1,SELECT:1,OPTION:1,CODE:1,KBD:1,SAMP:1,SVG:1,svg:1,MATH:1,TEMPLATE:1,IFRAME:1,CANVAS:1};
   var LETTER = /[A-Za-zÀ-ɏͰ-ϿЀ-ӿ぀-ヿ㐀-鿿฀-๿؀-ۿ]/;
   var MAX_ITEMS = 60, MAX_CHARS = 3500, MAX_INFLIGHT = 3;

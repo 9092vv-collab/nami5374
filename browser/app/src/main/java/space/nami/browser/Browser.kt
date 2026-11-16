@@ -303,6 +303,8 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
         }
 
         @JavascriptInterface fun css(host: String): String = runCatching { blocker.css(host) }.getOrDefault("")
+        @JavascriptInterface fun scriptVersion(name: String, ns: String): String =
+            scripts.list.firstOrNull { (it.one("name") == name || it.name == name) && (ns.isEmpty() || it.namespace == ns) }?.version ?: ""
         @JavascriptInterface fun gmValues(id: String): String = scripts.values(id)
         @JavascriptInterface fun gmSet(id: String, key: String, json: String) = scripts.setValue(id, key, json)
         @JavascriptInterface fun gmDel(id: String, key: String) = scripts.deleteValue(id, key)
