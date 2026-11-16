@@ -180,7 +180,7 @@ class Userscripts(private val ctx: Context) {
     // ---------- injection ----------
 
     /** Wrapper JS for every enabled script, ready for addDocumentStartJavaScript. */
-    fun wrappers(): List<String> = list.filter { it.enabled }.map { wrap(it) }
+    fun wrappers(key: String): List<String> = list.filter { it.enabled }.map { wrap(it).replace("__NAMI_KEY__", key) }
 
     private fun matchToRegex(p: String): String {
         val t = p.trim()
@@ -231,24 +231,35 @@ class Userscripts(private val ctx: Context) {
   var EXC = [${exc.joinToString(",") { "new RegExp(${q(it)})" }}];
   try { if (!INC.some(function(r){return r.test(U);}) || EXC.some(function(r){return r.test(U);})) return; } catch(e) { return; }
   var B = window.NamiBridge; if (!B) return;
+  // privileged bridge calls carry a per-launch key; methods are captured before page scripts run
+  var NB = window.NamiBridge, NK = '__NAMI_KEY__', RA = Reflect.apply, NF = {};
+  if (NB) { var NL = ['gmValues','gmSet','gmDel','gmOpen','gmClip','gmToast','gmDownload','gmXhr']; for (var ni = 0; ni < NL.length; ni++) NF[NL[ni]] = NB[NL[ni]]; }
+  function nb(n, a) { var f = NF[n]; if (!f) return undefined; var arr = [NK]; for (var i = 0; i < a.length; i++) arr[i + 1] = a[i]; return RA(f, NB, arr); }
+  if (!window.__namiGmReg) (function(){
+    var CBS = {}, KK = NK;
+    try {
+      Object.defineProperty(window, '__namiGmCb', { value: function(id, r){ var f = CBS[id]; if (f) { delete CBS[id]; f(r); } }, writable: false, configurable: false });
+      Object.defineProperty(window, '__namiGmReg', { value: function(k, id, f){ if (k === KK) CBS[id] = f; }, writable: false, configurable: false });
+    } catch(e) {}
+  })();
   var SID = ${q(s.id)};
   var RES = $res;
-  var VALS = {}; try { VALS = JSON.parse(B.gmValues(SID) || '{}'); } catch(e) {}
+  var VALS = {}; try { VALS = JSON.parse(nb('gmValues', [SID]) || '{}'); } catch(e) {}
   var GM_info = $info;
   function GM_getValue(k, d) { return Object.prototype.hasOwnProperty.call(VALS, k) ? VALS[k] : d; }
-  function GM_setValue(k, v) { VALS[k] = v; try { B.gmSet(SID, String(k), JSON.stringify(v)); } catch(e) {} }
-  function GM_deleteValue(k) { delete VALS[k]; try { B.gmDel(SID, String(k)); } catch(e) {} }
+  function GM_setValue(k, v) { VALS[k] = v; try { nb('gmSet', [SID, String(k), JSON.stringify(v)]); } catch(e) {} }
+  function GM_deleteValue(k) { delete VALS[k]; try { nb('gmDel', [SID, String(k)]); } catch(e) {} }
   function GM_listValues() { return Object.keys(VALS); }
   function GM_addStyle(css) { var st = document.createElement('style'); st.textContent = css; (document.head || document.documentElement).appendChild(st); return st; }
   function GM_addElement(a, b, c) { var parent, tag, attrs; if (typeof a === 'string') { parent = (a === 'script' || a === 'style' || a === 'link') ? (document.head || document.documentElement) : (document.body || document.documentElement); tag = a; attrs = b; } else { parent = a; tag = b; attrs = c; }
     var el = document.createElement(tag); if (attrs) for (var k in attrs) { if (k === 'textContent') el.textContent = attrs[k]; else el.setAttribute(k, attrs[k]); } parent.appendChild(el); return el; }
-  function GM_openInTab(url, o) { var bg = (typeof o === 'boolean') ? o : !!(o && (o.active === false || o.loadInBackground)); B.gmOpen(String(url), bg); return { close: function(){}, closed: false }; }
-  function GM_setClipboard(t) { B.gmClip(String(t)); }
-  function GM_notification(d, title) { var text = (typeof d === 'object' && d) ? (d.text || d.title || '') : String(d); B.gmToast(text); }
+  function GM_openInTab(url, o) { var bg = (typeof o === 'boolean') ? o : !!(o && (o.active === false || o.loadInBackground)); nb('gmOpen', [String(url), bg]); return { close: function(){}, closed: false }; }
+  function GM_setClipboard(t) { nb('gmClip', [String(t)]); }
+  function GM_notification(d, title) { var text = (typeof d === 'object' && d) ? (d.text || d.title || '') : String(d); nb('gmToast', [text]); }
   function GM_log() { console.log.apply(console, arguments); }
   function GM_getResourceText(n) { return RES[n] || null; }
   function GM_getResourceURL(n) { var t = RES[n]; return t == null ? null : 'data:text/plain;charset=utf-8,' + encodeURIComponent(t); }
-  function GM_download(d, name) { var url = (typeof d === 'object') ? d.url : d; var nm = (typeof d === 'object') ? d.name : name; B.gmDownload(String(url), nm ? String(nm) : ''); }
+  function GM_download(d, name) { var url = (typeof d === 'object') ? d.url : d; var nm = (typeof d === 'object') ? d.name : name; nb('gmDownload', [String(url), nm ? String(nm) : '']); }
   var RAN = window.__namiRan = window.__namiRan || [];
   if (window.top === window && !RAN.some(function(x){ return x.sid === SID; })) RAN.push({ sid: SID, name: GM_info.script.name });
   var MENU = window.__namiMenu = window.__namiMenu || [];
@@ -259,12 +270,11 @@ class Userscripts(private val ctx: Context) {
     MENU.push({ id: id, sid: SID, name: String(name), fn: fn }); return id;
   }
   function GM_unregisterMenuCommand(id) { for (var i = 0; i < MENU.length; i++) if (MENU[i].id === id) { MENU.splice(i, 1); break; } }
-  var CB = window.__namiGmCb = window.__namiGmCb || {};
   function GM_xmlhttpRequest(d) {
     var rid = 'x' + Math.random().toString(36).slice(2);
     var aborted = false;
-    CB[rid] = function(r) {
-      delete CB[rid]; if (aborted) return;
+    window.__namiGmReg(NK, rid, function(r) {
+      if (aborted) return;
       if (r.error) { if (d.ontimeout && r.timeout) d.ontimeout(r); else if (d.onerror) d.onerror(r); if (d.onloadend) d.onloadend(r); return; }
       var rt = d.responseType || '';
       if (r.b64 != null) { var bin = atob(r.b64), u8 = new Uint8Array(bin.length); for (var i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
@@ -276,10 +286,10 @@ class Userscripts(private val ctx: Context) {
       if (d.onreadystatechange) d.onreadystatechange(r);
       if (d.onload) d.onload(r);
       if (d.onloadend) d.onloadend(r);
-    };
+    });
     var data = d.data; if (data != null && typeof data !== 'string') { try { data = (data instanceof URLSearchParams) ? data.toString() : JSON.stringify(data); } catch(e) { data = String(data); } }
-    B.gmXhr(JSON.stringify({ id: rid, method: d.method || 'GET', url: String(new URL(d.url, location.href)), headers: d.headers || {}, data: data == null ? null : data,
-      binary: d.responseType === 'arraybuffer' || d.responseType === 'blob', timeout: d.timeout || 0, anonymous: !!d.anonymous, frame: window.top === window }));
+    nb('gmXhr', [JSON.stringify({ id: rid, method: d.method || 'GET', url: String(new URL(d.url, location.href)), headers: d.headers || {}, data: data == null ? null : data,
+      binary: d.responseType === 'arraybuffer' || d.responseType === 'blob', timeout: d.timeout || 0, anonymous: !!d.anonymous, frame: window.top === window })]);
     return { abort: function(){ aborted = true; if (d.onabort) d.onabort({}); } };
   }
   function P(f) { return function() { var a = arguments; return new Promise(function(ok, no) { try { ok(f.apply(null, a)); } catch(e) { no(e); } }); }; }

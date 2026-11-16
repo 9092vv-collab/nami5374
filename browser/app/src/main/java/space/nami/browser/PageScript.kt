@@ -8,18 +8,26 @@ package space.nami.browser
  * Talks to Kotlin through `NamiBridge` (see Bridge in BrowserTab.kt).
  */
 object PageScript {
-    val JS = """
+    /** The script with this launch's bridge key filled in. */
+    fun js(key: String) = TEMPLATE.replace("__NAMI_KEY__", key)
+        .replace("__NAMI_FNS__", "['translate','idle','doubleTap','scriptVersion','blobBegin','blobChunk','blobEnd','blobFail','claimBlob','downloadHint','forceZoom']")
+
+    private val TEMPLATE = """
 (function(){
   if (window.top !== window) return;
   if (window.__nami) return;
-  var N = window.__nami = { on:false, seq:0, pending:{}, nodes:[], queued:new Set(), timer:0, obs:null };
+  // privileged bridge calls carry a per-launch key; methods are captured before page scripts run
+  var NB = window.NamiBridge, NK = '__NAMI_KEY__', RA = Reflect.apply, NF = {};
+  if (NB) { var NL = __NAMI_FNS__; for (var ni = 0; ni < NL.length; ni++) NF[NL[ni]] = NB[NL[ni]]; }
+  function nb(n, a) { var f = NF[n]; if (!f) return undefined; var arr = [NK]; for (var i = 0; i < a.length; i++) arr[i + 1] = a[i]; return RA(f, NB, arr); }
+  var N = { on:false, seq:0, pending:{}, nodes:[], queued:new Set(), timer:0, obs:null };
 
   // ---- look like Tampermonkey to script sites (Greasy Fork checks window.external.Tampermonkey) ----
   try {
     var tm = {
       getVersion: function(cb){ if (cb) cb('5.0'); return Promise.resolve('5.0'); },
       isInstalled: function(name, ns, cb){
-        var v = ''; try { v = NamiBridge.scriptVersion(String(name), String(ns || '')); } catch(e) {}
+        var v = ''; try { v = nb('scriptVersion', [String(name), String(ns || '')]); } catch(e) {}
         var r = { installed: !!v, version: v || null, enabled: true };
         if (cb) cb(r); return Promise.resolve(r);
       }
@@ -82,9 +90,9 @@ object PageScript {
       }
       if (!batch.length) continue;
       var id = ++N.seq; N.pending[id] = batch;
-      NamiBridge.translate(id, JSON.stringify(texts));
+      nb('translate', [id, JSON.stringify(texts)]);
     }
-    if (!N.queued.size && !inflight()) NamiBridge.idle();
+    if (!N.queued.size && !inflight()) nb('idle', []);
   }
   N.done = function(id, arr){
     var batch = N.pending[id]; delete N.pending[id];
@@ -139,26 +147,26 @@ object PageScript {
   N.saveBlob = function(href, name){
     var go = function(b){
       var id = 'b' + Date.now() + Math.random().toString(36).slice(2);
-      if (!NamiBridge.blobBegin(id, href || '', name || '', b.type || '', b.size)) return;
+      if (!nb('blobBegin', [id, href || '', name || '', b.type || '', b.size])) return;
       var CH = 1024 * 1024, off = 0;
       var next = function(){
-        if (off >= b.size) { NamiBridge.blobEnd(id); return; }
+        if (off >= b.size) { nb('blobEnd', [id]); return; }
         var fr = new FileReader();
-        fr.onload = function(){ var s = fr.result; if (!NamiBridge.blobChunk(id, s.substring(s.indexOf(',') + 1))) return; off += CH; next(); };
-        fr.onerror = function(){ NamiBridge.blobFail(id); };
+        fr.onload = function(){ var s = fr.result; if (!nb('blobChunk', [id, s.substring(s.indexOf(',') + 1)])) return; off += CH; next(); };
+        fr.onerror = function(){ nb('blobFail', [id]); };
         fr.readAsDataURL(b.slice(off, off + CH));
       };
       next();
     };
     var known = N.blobs.get(href);
-    if (known) go(known); else fetch(href).then(function(r){ return r.blob(); }).then(go).catch(function(){ NamiBridge.blobFail(''); });
+    if (known) go(known); else fetch(href).then(function(r){ return r.blob(); }).then(go).catch(function(){ nb('blobFail', ['']); });
   };
   function onDownloadLink(a){
     try {
       if (!a || !a.hasAttribute || !a.hasAttribute('download')) return;
       var name = a.getAttribute('download') || '', href = a.href || '';
-      if (href.indexOf('blob:') === 0) { NamiBridge.claimBlob(href); N.saveBlob(href, name); }
-      else NamiBridge.downloadHint(href, name);
+      if (href.indexOf('blob:') === 0) { nb('claimBlob', [href]); N.saveBlob(href, name); }
+      else nb('downloadHint', [href, name]);
     } catch(e) {}
   }
   document.addEventListener('click', function(e){ var a = e.target && e.target.closest && e.target.closest('a[download]'); if (a) onDownloadLink(a); }, true);
@@ -170,7 +178,7 @@ object PageScript {
   // ---- "확대/축소 항상 허용": undo viewport rules that block pinch zoom ----
   function fixViewport(){
     try {
-      if (!NamiBridge.forceZoom()) return;
+      if (!nb('forceZoom', [])) return;
       var ms = document.querySelectorAll('meta[name=viewport]');
       for (var i = 0; i < ms.length; i++) {
         var c = ms[i].getAttribute('content') || '';
@@ -181,6 +189,16 @@ object PageScript {
   }
   document.addEventListener('DOMContentLoaded', fixViewport);
   setTimeout(fixViewport, 1500);
+
+  // ---- what Kotlin may call: frozen, not replaceable by the page; control calls need the key ----
+  var API = Object.freeze({
+    start: function(k){ if (k === NK) N.start(); },
+    stop: function(k){ if (k === NK) N.stop(); },
+    done: function(id, arr){ N.done(id, arr); },
+    fail: function(id){ N.fail(id); },
+    saveBlob: function(k, href, name){ if (k === NK) N.saveBlob(href, name); }
+  });
+  try { Object.defineProperty(window, '__nami', { value: API, writable: false, configurable: false }); } catch(e) {}
 
   // ---- double tap on text / empty space ----
   var sx = 0, sy = 0, moved = false, multi = false, lastT = 0, lx = 0, ly = 0;
@@ -199,7 +217,7 @@ object PageScript {
     var sel = window.getSelection && window.getSelection();
     if (sel && String(sel).length) { lastT = 0; return; }
     var now = Date.now();
-    if (now - lastT < 320 && Math.abs(sx - lx) < 40 && Math.abs(sy - ly) < 40) { lastT = 0; NamiBridge.doubleTap(); }
+    if (now - lastT < 320 && Math.abs(sx - lx) < 40 && Math.abs(sy - ly) < 40) { lastT = 0; nb('doubleTap', []); }
     else { lastT = now; lx = sx; ly = sy; }
   }, { passive:true, capture:true });
 })();

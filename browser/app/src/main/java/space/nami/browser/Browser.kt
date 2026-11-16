@@ -135,6 +135,9 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
     private val docStart = WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)
 
     var netStatus by mutableStateOf("")
+    /** Per-launch secret: only Nami's own injected scripts know it, so web pages can't use the privileged bridge calls. */
+    val key: String = java.util.UUID.randomUUID().toString().replace("-", "") + java.util.UUID.randomUUID().toString().replace("-", "")
+    private val pageJs: String by lazy { PageScript.js(key) }
 
     init {
         scripts.onChange = { tabs.forEach { applyScripts(it) } }
@@ -170,7 +173,7 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
         if (!docStart) return
         t.handlers.forEach { runCatching { it.remove() } }
         t.handlers.clear()
-        scripts.wrappers().forEach { js -> runCatching { t.handlers.add(WebViewCompat.addDocumentStartJavaScript(t.web, js, setOf("*"))) } }
+        scripts.wrappers(key).forEach { js -> runCatching { t.handlers.add(WebViewCompat.addDocumentStartJavaScript(t.web, js, setOf("*"))) } }
     }
 
     fun offerInstall(url: String) {
@@ -332,7 +335,7 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
         if (t.translateOn) startTranslate(t)
         else {
             t.translating = false
-            t.web.evaluateJavascript("window.__nami&&__nami.stop()", null)
+            t.web.evaluateJavascript("window.__nami&&__nami.stop('$key')", null)
             showPill("원문으로 돌아왔어요")
         }
     }
@@ -340,13 +343,14 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
     private fun startTranslate(t: BrowserTab) {
         t.translating = true
         if (t === tab) showPill("번역 중…", 0)
-        t.web.evaluateJavascript(PageScript.JS, null)
-        t.web.evaluateJavascript("window.__nami&&__nami.start()", null)
+        t.web.evaluateJavascript(pageJs, null)
+        t.web.evaluateJavascript("window.__nami&&__nami.start('$key')", null)
     }
 
     inner class Bridge(private val t: BrowserTab) {
         @JavascriptInterface
-        fun translate(id: Int, json: String) {
+        fun translate(k: String, id: Int, json: String) {
+            if (k != key) return
             scope.launch {
                 val texts = runCatching { JSONArray(json).let { a -> (0 until a.length()).map { a.getString(it) } } }.getOrNull()
                 if (texts == null) { t.web.evaluateJavascript("window.__nami&&__nami.fail($id)", null); return@launch }
@@ -365,7 +369,8 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
         }
 
         @JavascriptInterface
-        fun idle() {
+        fun idle(k: String) {
+            if (k != key) return
             scope.launch {
                 if (t.translating) {
                     t.translating = false
@@ -375,42 +380,47 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
         }
 
         @JavascriptInterface fun css(host: String): String = runCatching { blocker.css(host) }.getOrDefault("")
-        @JavascriptInterface fun downloadHint(href: String, name: String) { if (href.isNotEmpty() && name.isNotBlank()) downloadHints[href] = name }
+        @JavascriptInterface fun downloadHint(k: String, href: String, name: String) { if (k != key) return; if (href.isNotEmpty() && name.isNotBlank()) downloadHints[href] = name }
         @JavascriptInterface
-        fun blobBegin(id: String, href: String, hint: String, type: String, size: Double): Boolean {
+        fun blobBegin(k: String, id: String, href: String, hint: String, type: String, size: Double): Boolean {
+            if (k != key) return false
             val (name, guessed) = FileName.build("", null, type.ifEmpty { null }, hint.ifEmpty { null })
             val ok = blobs.start(id, name, type.ifEmpty { null }, guessed)
             scope.launch { Toast.makeText(act, if (ok) "받는 중: $name" else "저장하지 못했어요", Toast.LENGTH_SHORT).show() }
             return ok
         }
         /** Called synchronously on the click, before the WebView's own download callback for the same blob. */
-        @JavascriptInterface fun claimBlob(href: String) { blobs.taken.add(href) }
-        @JavascriptInterface fun blobChunk(id: String, b64: String): Boolean = blobs.chunk(id, b64)
-        @JavascriptInterface fun blobEnd(id: String) = blobs.end(id)
-        @JavascriptInterface fun blobFail(id: String) { blobs.fail(id); scope.launch { Toast.makeText(act, "파일을 읽지 못했어요", Toast.LENGTH_SHORT).show() } }
-        @JavascriptInterface fun forceZoom(): Boolean = prefs.forceZoom
-        @JavascriptInterface fun scriptVersion(name: String, ns: String): String =
+        @JavascriptInterface fun claimBlob(k: String, href: String) { if (k != key) return; blobs.taken.add(href) }
+        @JavascriptInterface fun blobChunk(k: String, id: String, b64: String): Boolean = k == key && blobs.chunk(id, b64)
+        @JavascriptInterface fun blobEnd(k: String, id: String) { if (k == key) blobs.end(id) }
+        @JavascriptInterface fun blobFail(k: String, id: String) { if (k != key) return; blobs.fail(id); scope.launch { Toast.makeText(act, "파일을 읽지 못했어요", Toast.LENGTH_SHORT).show() } }
+        @JavascriptInterface fun forceZoom(k: String): Boolean = k == key && prefs.forceZoom
+        @JavascriptInterface fun scriptVersion(k: String, name: String, ns: String): String = if (k != key) "" else
             scripts.list.firstOrNull { (it.one("name") == name || it.name == name) && (ns.isEmpty() || it.namespace == ns) }?.version ?: ""
-        @JavascriptInterface fun gmValues(id: String): String = scripts.values(id)
-        @JavascriptInterface fun gmSet(id: String, key: String, json: String) = scripts.setValue(id, key, json)
-        @JavascriptInterface fun gmDel(id: String, key: String) = scripts.deleteValue(id, key)
-        @JavascriptInterface fun gmOpen(url: String, background: Boolean) { scope.launch { newTab(url, select = !background); if (background) showPill("새 탭에서 열었어요", 1500) } }
-        @JavascriptInterface fun gmClip(text: String) { scope.launch { copyText(act, text) } }
-        @JavascriptInterface fun gmToast(text: String) { scope.launch { Toast.makeText(act, text, Toast.LENGTH_SHORT).show() } }
-        @JavascriptInterface fun gmDownload(url: String, name: String) { scope.launch { download(url, cd = if (name.isNotEmpty()) "attachment; filename=\"$name\"" else null) } }
+        @JavascriptInterface fun gmValues(k: String, id: String): String = if (k != key) "{}" else scripts.values(id)
+        @JavascriptInterface fun gmSet(k: String, id: String, name: String, json: String) { if (k == key) scripts.setValue(id, name, json) }
+        @JavascriptInterface fun gmDel(k: String, id: String, name: String) { if (k == key) scripts.deleteValue(id, name) }
+        @JavascriptInterface fun gmOpen(k: String, url: String, background: Boolean) { if (k != key) return; scope.launch { newTab(url, select = !background); if (background) showPill("새 탭에서 열었어요", 1500) } }
+        @JavascriptInterface fun gmClip(k: String, text: String) { if (k != key) return; scope.launch { copyText(act, text) } }
+        @JavascriptInterface fun gmToast(k: String, text: String) { if (k != key) return; scope.launch { Toast.makeText(act, text, Toast.LENGTH_SHORT).show() } }
+        @JavascriptInterface fun gmDownload(k: String, url: String, name: String) { if (k != key) return; scope.launch { download(url, cd = if (name.isNotEmpty()) "attachment; filename=\"$name\"" else null) } }
         @JavascriptInterface
-        fun gmXhr(json: String) {
+        fun gmXhr(k: String, json: String) {
+            if (k != key) return
             scope.launch {
                 val o = runCatching { org.json.JSONObject(json) }.getOrNull() ?: return@launch
                 val id = o.optString("id")
                 val res = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { GmXhr.run(o, t.web.settings.userAgentString) }
                 val q = org.json.JSONObject.quote(id)
-                t.web.evaluateJavascript("window.__namiGmCb&&__namiGmCb[$q]&&__namiGmCb[$q]($res)", null)
+                t.web.evaluateJavascript("window.__namiGmCb&&__namiGmCb($q,$res)", null)
             }
         }
 
         @JavascriptInterface
-        fun doubleTap() { scope.launch { if (t === tab) runAction(prefs.doubleTapAction) } }
+        fun doubleTap(k: String) {
+            if (k != key) return
+            scope.launch { if (t === tab) runAction(prefs.doubleTapAction) }
+        }
     }
 
     // ---------- WebView ----------
@@ -446,7 +456,7 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
         web.addJavascriptInterface(Bridge(t), "NamiBridge")
         if (docStart) {
             runCatching { WebViewCompat.addDocumentStartJavaScript(web, BLOCK_CSS_JS, setOf("*")) }
-            runCatching { WebViewCompat.addDocumentStartJavaScript(web, PageScript.JS, setOf("*")) }
+            runCatching { WebViewCompat.addDocumentStartJavaScript(web, pageJs, setOf("*")) }
             applyScripts(t)
         }
 
@@ -497,10 +507,10 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
             override fun onPageFinished(view: WebView, url: String) {
                 t.url = url; t.progress = 100
                 t.canBack = view.canGoBack(); t.canForward = view.canGoForward()
-                view.evaluateJavascript(PageScript.JS, null)
+                view.evaluateJavascript(pageJs, null)
                 if (!docStart) {
                     view.evaluateJavascript(BLOCK_CSS_JS, null)
-                    scripts.wrappers().forEach { view.evaluateJavascript(it, null) }
+                    scripts.wrappers(key).forEach { view.evaluateJavascript(it, null) }
                 }
                 if (t.translateOn) startTranslate(t)
             }
@@ -565,7 +575,7 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
         if (url.startsWith("blob:")) {
             if (blobs.taken.remove(url)) return  // already being saved from the click
             val q = org.json.JSONObject.quote(url); val h = org.json.JSONObject.quote(hint ?: "")
-            (tab?.web)?.evaluateJavascript("(window.__nami&&__nami.saveBlob)?(__nami.saveBlob($q,$h),'ok'):'no'") { r ->
+            (tab?.web)?.evaluateJavascript("(window.__nami&&__nami.saveBlob)?(__nami.saveBlob('$key',$q,$h),'ok'):'no'") { r ->
                 if (r?.contains("ok") != true) Toast.makeText(act, "이 파일은 받을 수 없어요", Toast.LENGTH_SHORT).show()
             }
             return
