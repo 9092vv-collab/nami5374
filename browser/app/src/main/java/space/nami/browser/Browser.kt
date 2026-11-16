@@ -318,6 +318,19 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
         }
 
         @JavascriptInterface fun css(host: String): String = runCatching { blocker.css(host) }.getOrDefault("")
+        @JavascriptInterface fun downloadHint(href: String, name: String) { if (href.isNotEmpty() && name.isNotBlank()) downloadHints[href] = name }
+        @JavascriptInterface
+        fun blobBegin(id: String, href: String, hint: String, type: String, size: Double): Boolean {
+            val (name, guessed) = FileName.build("", null, type.ifEmpty { null }, hint.ifEmpty { null })
+            val ok = blobs.start(id, name, type.ifEmpty { null }, guessed)
+            scope.launch { Toast.makeText(act, if (ok) "받는 중: $name" else "저장하지 못했어요", Toast.LENGTH_SHORT).show() }
+            return ok
+        }
+        /** Called synchronously on the click, before the WebView's own download callback for the same blob. */
+        @JavascriptInterface fun claimBlob(href: String) { blobs.taken.add(href) }
+        @JavascriptInterface fun blobChunk(id: String, b64: String): Boolean = blobs.chunk(id, b64)
+        @JavascriptInterface fun blobEnd(id: String) = blobs.end(id)
+        @JavascriptInterface fun blobFail(id: String) { blobs.fail(id); scope.launch { Toast.makeText(act, "파일을 읽지 못했어요", Toast.LENGTH_SHORT).show() } }
         @JavascriptInterface fun scriptVersion(name: String, ns: String): String =
             scripts.list.firstOrNull { (it.one("name") == name || it.name == name) && (ns.isEmpty() || it.namespace == ns) }?.version ?: ""
         @JavascriptInterface fun gmValues(id: String): String = scripts.values(id)
@@ -471,19 +484,35 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
 
     fun exitCustomView() { customCb?.onCustomViewHidden(); customView = null; customCb = null }
 
+    /** Names a page gave its download links (`<a download="이름">`), keyed by href. */
+    val downloadHints = java.util.concurrent.ConcurrentHashMap<String, String>()
+    val blobs = BlobSaver(act)
+
     fun download(url: String, ua: String? = null, cd: String? = null, mime: String? = null) {
+        val hint = downloadHints.remove(url)
+        if (url.startsWith("data:")) {
+            val n = blobs.saveDataUrl(url, hint)
+            Toast.makeText(act, if (n != null) "저장했어요: $n" else "이 파일은 받을 수 없어요", Toast.LENGTH_SHORT).show(); return
+        }
+        if (url.startsWith("blob:")) {
+            if (blobs.taken.remove(url)) return  // already being saved from the click
+            val q = org.json.JSONObject.quote(url); val h = org.json.JSONObject.quote(hint ?: "")
+            (tab?.web)?.evaluateJavascript("(window.__nami&&__nami.saveBlob)?(__nami.saveBlob($q,$h),'ok'):'no'") { r ->
+                if (r?.contains("ok") != true) Toast.makeText(act, "이 파일은 받을 수 없어요", Toast.LENGTH_SHORT).show()
+            }
+            return
+        }
         if (!url.startsWith("http")) { Toast.makeText(act, "이 파일은 받을 수 없어요", Toast.LENGTH_SHORT).show(); return }
+        val (name, guessed) = FileName.build(url, cd, mime, hint)
         if (prefs.splitParts > 0) runCatching {
-            val name = URLUtil.guessFileName(url, cd, mime)
             if (act.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED)
                 act.requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 11)
             DownloadService.start(act, url, name, mime, CookieManager.getInstance().getCookie(url),
-                ua ?: tab?.web?.settings?.userAgentString, tab?.url, prefs.splitParts)
+                ua ?: tab?.web?.settings?.userAgentString, tab?.url, prefs.splitParts, guessed)
             Toast.makeText(act, "받는 중: $name", Toast.LENGTH_SHORT).show()
             return
         }.onFailure { Toast.makeText(act, "분할 다운로드를 못 써서 기본 방식으로 받아요", Toast.LENGTH_SHORT).show() }
         runCatching {
-            val name = URLUtil.guessFileName(url, cd, mime)
             val req = DownloadManager.Request(Uri.parse(url)).apply {
                 CookieManager.getInstance().getCookie(url)?.let { addRequestHeader("Cookie", it) }
                 addRequestHeader("User-Agent", ua ?: tab?.web?.settings?.userAgentString ?: "")

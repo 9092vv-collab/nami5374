@@ -81,6 +81,7 @@ class DownloadService : Service() {
                     ua = intent.getStringExtra("ua"),
                     referer = intent.getStringExtra("referer"),
                     parts = intent.getIntExtra("parts", 4).coerceIn(1, 8),
+                    guessed = intent.getBooleanExtra("guessed", false),
                 )
                 val job = scope.launch { runJob(id, req) }
                 jobs[id] = job
@@ -97,8 +98,8 @@ class DownloadService : Service() {
 
     override fun onDestroy() { scope.cancel(); super.onDestroy() }
 
-    private class Req(val url: String, val name: String, val mime: String?, val cookie: String?, val ua: String?,
-                      val referer: String?, val parts: Int)
+    private class Req(val url: String, var name: String, var mime: String?, val cookie: String?, val ua: String?,
+                      val referer: String?, val parts: Int, var guessed: Boolean)
 
     private fun open(req: Req, range: String?): HttpURLConnection {
         val c = URL(req.url).openConnection() as HttpURLConnection
@@ -140,6 +141,13 @@ class DownloadService : Service() {
             try {
                 val code = c.responseCode
                 val cr = c.getHeaderField("Content-Range")
+                // the real response often names the file even when the page didn't
+                FileName.fromDisposition(c.getHeaderField("Content-Disposition"))?.let { n ->
+                    if (req.guessed) { req.name = FileName.withExt(n, c.contentType); req.guessed = !FileName.hasRealExt(req.name) }
+                }
+                val ct = c.contentType?.substringBefore(';')?.trim()
+                if (req.mime.isNullOrBlank() || req.mime == "application/octet-stream") if (!ct.isNullOrBlank() && ct != "application/octet-stream") req.mime = ct
+                if (req.guessed) req.name = FileName.withExt(req.name, req.mime)
                 if (code == 206 && cr != null) {
                     total = cr.substringAfter('/').trim().toLongOrNull() ?: -1L
                     ranged = total > 0
@@ -155,7 +163,7 @@ class DownloadService : Service() {
             // 3) target file in Downloads
             val values = ContentValues().apply {
                 put(MediaStore.Downloads.DISPLAY_NAME, req.name)
-                req.mime?.let { put(MediaStore.Downloads.MIME_TYPE, it) }
+                (req.mime?.takeIf { it != "application/octet-stream" } ?: FileName.mimeFor(req.name))?.let { put(MediaStore.Downloads.MIME_TYPE, it) }
                 put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/")
                 put(MediaStore.Downloads.IS_PENDING, 1)
             }
@@ -171,16 +179,11 @@ class DownloadService : Service() {
                     }
                 }
             }
-            contentResolver.update(uri, ContentValues().apply { put(MediaStore.Downloads.IS_PENDING, 0) }, null, null)
+            val head = ByteArray(32)
+            runCatching { contentResolver.openInputStream(uri)?.use { it.read(head) } }
             ticker.cancel()
-            val secs = ((System.currentTimeMillis() - started) / 1000).coerceAtLeast(1)
-            val open = Intent(Intent.ACTION_VIEW).setDataAndType(uri, req.mime ?: contentResolver.getType(uri))
-                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
             nm.cancel(id)
-            nm.notify(id + 100000, NotificationCompat.Builder(this, CH_DONE).setSmallIcon(android.R.drawable.stat_sys_download_done)
-                .setContentTitle("다 받았어요: ${req.name}").setContentText("${size(got.get())} · ${secs}초")
-                .setContentIntent(PendingIntent.getActivity(this, id, open, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT))
-                .setAutoCancel(true).build())
+            BlobSaver.finish(this, uri, req.name, req.guessed, head)
         } catch (e: Throwable) {
             ticker.cancel()
             nm.cancel(id)
@@ -280,10 +283,10 @@ class DownloadService : Service() {
             else -> "$b B"
         }
 
-        fun start(ctx: Context, url: String, name: String, mime: String?, cookie: String?, ua: String?, referer: String?, parts: Int) {
+        fun start(ctx: Context, url: String, name: String, mime: String?, cookie: String?, ua: String?, referer: String?, parts: Int, guessed: Boolean = false) {
             ctx.startForegroundService(Intent(ctx, DownloadService::class.java).setAction(ACTION_START)
                 .putExtra("url", url).putExtra("name", name).putExtra("mime", mime).putExtra("cookie", cookie)
-                .putExtra("ua", ua).putExtra("referer", referer).putExtra("parts", parts))
+                .putExtra("ua", ua).putExtra("referer", referer).putExtra("parts", parts).putExtra("guessed", guessed))
         }
     }
 }

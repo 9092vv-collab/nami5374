@@ -130,6 +130,43 @@ object PageScript {
     N.nodes = [];
   };
 
+  // ---- downloads: remember <a download="name">, save blob: files before the page revokes them ----
+  N.blobs = new Map();
+  try {
+    var oCreate = URL.createObjectURL;
+    URL.createObjectURL = function(o){ var u = oCreate.apply(URL, arguments); try { if (o instanceof Blob) { N.blobs.set(u, o); setTimeout(function(){ N.blobs.delete(u); }, 120000); } } catch(e) {} return u; };
+  } catch(e) {}
+  N.saveBlob = function(href, name){
+    var go = function(b){
+      var id = 'b' + Date.now() + Math.random().toString(36).slice(2);
+      if (!NamiBridge.blobBegin(id, href || '', name || '', b.type || '', b.size)) return;
+      var CH = 1024 * 1024, off = 0;
+      var next = function(){
+        if (off >= b.size) { NamiBridge.blobEnd(id); return; }
+        var fr = new FileReader();
+        fr.onload = function(){ var s = fr.result; if (!NamiBridge.blobChunk(id, s.substring(s.indexOf(',') + 1))) return; off += CH; next(); };
+        fr.onerror = function(){ NamiBridge.blobFail(id); };
+        fr.readAsDataURL(b.slice(off, off + CH));
+      };
+      next();
+    };
+    var known = N.blobs.get(href);
+    if (known) go(known); else fetch(href).then(function(r){ return r.blob(); }).then(go).catch(function(){ NamiBridge.blobFail(''); });
+  };
+  function onDownloadLink(a){
+    try {
+      if (!a || !a.hasAttribute || !a.hasAttribute('download')) return;
+      var name = a.getAttribute('download') || '', href = a.href || '';
+      if (href.indexOf('blob:') === 0) { NamiBridge.claimBlob(href); N.saveBlob(href, name); }
+      else NamiBridge.downloadHint(href, name);
+    } catch(e) {}
+  }
+  document.addEventListener('click', function(e){ var a = e.target && e.target.closest && e.target.closest('a[download]'); if (a) onDownloadLink(a); }, true);
+  try {
+    var oClick = HTMLAnchorElement.prototype.click;
+    HTMLAnchorElement.prototype.click = function(){ if (!this.isConnected) onDownloadLink(this); return oClick.apply(this, arguments); };
+  } catch(e) {}
+
   // ---- double tap on text / empty space ----
   var sx = 0, sy = 0, moved = false, multi = false, lastT = 0, lx = 0, ly = 0;
   var NOTAP = 'a,button,input,textarea,select,label,img,video,audio,canvas,summary,[role=button],[onclick],[contenteditable=""],[contenteditable=true]';
