@@ -10,7 +10,7 @@ package space.nami.browser
 object PageScript {
     /** The script with this launch's bridge key filled in. */
     fun js(key: String) = TEMPLATE.replace("__NAMI_KEY__", key)
-        .replace("__NAMI_FNS__", "['translate','idle','doubleTap','scriptVersion','blobBegin','blobChunk','blobEnd','blobFail','claimBlob','downloadHint','forceZoom','fsOpen','fsWrite','fsSeek','fsTrunc','fsClose','fsAbort','relayOpen','relayFail']")
+        .replace("__NAMI_FNS__", "['translate','idle','doubleTap','scriptVersion','blobBegin','blobChunk','blobEnd','blobFail','claimBlob','downloadHint','forceZoom','fsOpen','fsWrite','fsSeek','fsTrunc','fsClose','fsAbort','relayOpen','relayFail','relayDone']")
 
     private val TEMPLATE = """
 (function(){
@@ -273,13 +273,13 @@ object PageScript {
       };
       var pump = function(){
         return rd.read().then(function(x){
-          if (x.done) return flush().then(function(){ nb('fsClose', [id]); });
+          if (x.done) return flush().then(function(){ nb('fsClose', [id]); nb('relayDone', [url]); });
           buf.push(x.value); size += x.value.byteLength;
           return (size >= CH ? flush() : Promise.resolve()).then(pump);
         });
       };
       return pump().catch(function(e){ nb('fsAbort', [id]); throw e; });
-    }).catch(function(e){ nb('relayFail', [String(e && e.message || e)]); });
+    }).catch(function(e){ nb('relayFail', [String(e && e.message || e), url]); });
   };
   try {
     var oOpen = window.open;

@@ -476,7 +476,12 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
             scope.launch { if (ok) Toast.makeText(act, "받는 중: $n", Toast.LENGTH_SHORT).show() else Toast.makeText(act, "받기 실패", Toast.LENGTH_SHORT).show() }
             return ok
         }
-        @JavascriptInterface fun relayFail(k: String, msg: String) { if (k != key) return; scope.launch { Toast.makeText(act, "받기 실패: $msg", Toast.LENGTH_SHORT).show() } }
+        @JavascriptInterface fun relayFail(k: String, msg: String, url: String) {
+            if (k != key) return
+            val fb = relayFallback.remove(url)
+            scope.launch { if (fb != null) fb() else Toast.makeText(act, "받기 실패: $msg", Toast.LENGTH_SHORT).show() }
+        }
+        @JavascriptInterface fun relayDone(k: String, url: String) { if (k == key) relayFallback.remove(url) }
         @JavascriptInterface fun fsWrite(k: String, id: String, b64: String, pos: Double): Boolean = k == key && fs.write(id, b64, pos)
         @JavascriptInterface fun fsSeek(k: String, id: String, pos: Double): Boolean = k == key && fs.seek(id, pos)
         @JavascriptInterface fun fsTrunc(k: String, id: String, size: Double): Boolean = k == key && fs.truncate(id, size)
@@ -695,18 +700,38 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
     fun isSwUrl(url: String) = runCatching { Uri.parse(url).path?.endsWith("_service-worker-responsify") == true }.getOrDefault(false)
 
     /** Have a page of the same site fetch it (through its service worker) and stream it to a file. */
+    /** Native download to try if the page couldn't get a relayed URL. */
+    val relayFallback = java.util.concurrent.ConcurrentHashMap<String, () -> Unit>()
+
     fun relay(url: String, hint: String?, from: WebView? = null) {
         val h = Uri.parse(url).host ?: ""
         val t = tabs.filter { it.host == h && it.web.url != url && (from == null || it.web !== from || !it.web.url.isNullOrEmpty()) }.let { l -> l.firstOrNull { it === tab } ?: l.lastOrNull() }
         if (t == null) { Toast.makeText(act, "이 파일은 받을 수 없어요", Toast.LENGTH_SHORT).show(); return }
         val q = org.json.JSONObject.quote(url); val n = org.json.JSONObject.quote(hint ?: "")
         t.web.evaluateJavascript("(window.__nami&&__nami.relay)?(__nami.relay('$key',$q,$n),'ok'):'no'") { r ->
-            if (r?.contains("ok") != true) Toast.makeText(act, "이 파일은 받을 수 없어요", Toast.LENGTH_SHORT).show()
+            if (r?.contains("ok") != true) relayFallback.remove(url)?.invoke() ?: Toast.makeText(act, "이 파일은 받을 수 없어요", Toast.LENGTH_SHORT).show()
         }
     }
 
-    fun download(url: String, ua: String? = null, cd: String? = null, mime: String? = null) {
-        val hint = downloadHints.remove(url)
+    fun download(url: String, ua: String? = null, cd: String? = null, mime: String? = null, direct: Boolean = false) {
+        val hint = downloadHints[url]
+        // A download from a page its service worker controls (kio.ac zip etc.): our downloader can't see the
+        // service worker, so let the page fetch it first; plain downloader if that fails.
+        if (!direct && url.startsWith("http")) {
+            val h = Uri.parse(url).host ?: ""
+            val ok = tabs.filter { it.host == h && !it.web.url.isNullOrEmpty() && it.web.url != url && it.web.url != "about:blank" }
+            val t = ok.firstOrNull { it === tab } ?: ok.lastOrNull()
+            if (t != null) {
+                t.web.evaluateJavascript("!!(navigator.serviceWorker&&navigator.serviceWorker.controller)") { r ->
+                    if (r == "true") {
+                        relayFallback[url] = { download(url, ua, cd, mime, true) }
+                        relay(url, hint, null)
+                    } else download(url, ua, cd, mime, true)
+                }
+                return
+            }
+        }
+        downloadHints.remove(url)
         if (url.startsWith("data:")) {
             val n = blobs.saveDataUrl(url, hint)
             Toast.makeText(act, if (n != null) "저장했어요: $n" else "이 파일은 받을 수 없어요", Toast.LENGTH_SHORT).show(); return

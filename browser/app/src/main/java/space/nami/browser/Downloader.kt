@@ -164,7 +164,7 @@ class DownloadService : Service() {
                     ranged = total > 0
                 } else if (code in 200..299) {
                     total = c.contentLengthLong
-                } else { Downloads.notifyFail(req.url, code); throw IOException("서버 응답 $code") }
+                } else { Downloads.notifyFail(req.url, code); throw IOException("서버 응답 $code · " + (android.net.Uri.parse(req.url).path ?: "").takeLast(60)) }
             } finally { c.disconnect() }
             totalRef.set(total)
             // 2) space
