@@ -2,6 +2,12 @@
 
 package space.nami.browser
 
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import android.os.PowerManager
+import android.provider.Settings
+import androidx.activity.ComponentActivity
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -46,6 +52,7 @@ import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -57,6 +64,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -284,10 +294,42 @@ private fun DisplaySection(prefs: Prefs) {
     }
 }
 
+/** Samsung "배터리 사용량 제한 없음": asks Android to stop optimizing (pausing) Nami in the background. */
+@Composable
+private fun BatteryRow() {
+    val ctx = LocalContext.current
+    val pm = ctx.getSystemService(Context.POWER_SERVICE) as PowerManager
+    var free by remember { mutableStateOf(pm.isIgnoringBatteryOptimizations(ctx.packageName)) }
+    val owner = ctx as? ComponentActivity
+    DisposableEffect(owner) {
+        val obs = LifecycleEventObserver { _, e -> if (e == Lifecycle.Event.ON_RESUME) free = pm.isIgnoringBatteryOptimizations(ctx.packageName) }
+        owner?.lifecycle?.addObserver(obs)
+        onDispose { owner?.lifecycle?.removeObserver(obs) }
+    }
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f).padding(end = 10.dp)) {
+            Text("배터리 사용량 제한 없음", fontSize = 15.sp, color = C.Ink)
+            Text(if (free) "켜져 있어요. 뒤에 둔 탭도 멈추지 않아요." else "폰이 Nami를 뒤에서 멈출 수 있어요.",
+                fontSize = 12.sp, color = if (free) C.Accent else C.Sub)
+        }
+        if (!free) TextButton({
+            runCatching {
+                ctx.startActivity(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:" + ctx.packageName)))
+            }.onFailure {
+                runCatching { ctx.startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)) }
+            }
+        }) { Text("풀기", color = C.Accent, fontWeight = FontWeight.SemiBold) }
+        else TextButton({
+            runCatching { ctx.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + ctx.packageName))) }
+        }) { Text("앱 정보", color = C.Sub) }
+    }
+}
+
 @Composable
 private fun GeneralSection(prefs: Prefs) {
     val colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = C.Accent, unfocusedBorderColor = C.Line, cursorColor = C.Accent)
     Card("일반") {
+        BatteryRow()
         Label("홈페이지 · 새 탭")
         OutlinedTextField(prefs.homeUrl, { prefs.putHomeUrl(it.trim()) }, Modifier.fillMaxWidth(), singleLine = true,
             shape = RoundedCornerShape(16.dp), colors = colors)
