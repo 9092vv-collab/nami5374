@@ -25,6 +25,10 @@ object Downloads {
     /** Set by Browser: called on the main thread when a download finishes (to show "다 받았어요 · 열기"). */
     @Volatile var onDone: ((Uri, String, String?) -> Unit)? = null
 
+    /** Set by Browser: a native download got an HTTP error (404 → maybe a page-made "service worker" download). */
+    @Volatile var onFail: ((String, Int) -> Unit)? = null
+    fun notifyFail(url: String, code: Int) { Handler(Looper.getMainLooper()).post { onFail?.invoke(url, code) } }
+
     fun notifyDone(uri: Uri, name: String, mime: String?) {
         Handler(Looper.getMainLooper()).post { onDone?.invoke(uri, name, mime) }
     }
