@@ -589,7 +589,7 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
             if (act.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED)
                 act.requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 11)
             DownloadService.start(act, url, name, mime, CookieManager.getInstance().getCookie(url),
-                ua ?: tab?.web?.settings?.userAgentString, tab?.url, prefs.splitParts, guessed)
+                ua ?: tab?.web?.settings?.userAgentString, tab?.url, prefs.splitParts, guessed, prefs.dualNetwork)
             Toast.makeText(act, "받는 중: $name", Toast.LENGTH_SHORT).show()
             return
         }.onFailure { Toast.makeText(act, "분할 다운로드를 못 써서 기본 방식으로 받아요", Toast.LENGTH_SHORT).show() }

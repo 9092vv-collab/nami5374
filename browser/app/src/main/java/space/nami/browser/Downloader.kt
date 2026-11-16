@@ -9,6 +9,10 @@ import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
+import android.net.NetworkRequest
 import android.net.Uri
 import android.os.Environment
 import android.os.IBinder
@@ -82,6 +86,7 @@ class DownloadService : Service() {
                     referer = intent.getStringExtra("referer"),
                     parts = intent.getIntExtra("parts", 4).coerceIn(1, 8),
                     guessed = intent.getBooleanExtra("guessed", false),
+                    dual = intent.getBooleanExtra("dual", false),
                 )
                 val job = scope.launch { runJob(id, req) }
                 jobs[id] = job
@@ -99,10 +104,11 @@ class DownloadService : Service() {
     override fun onDestroy() { scope.cancel(); super.onDestroy() }
 
     private class Req(val url: String, var name: String, var mime: String?, val cookie: String?, val ua: String?,
-                      val referer: String?, val parts: Int, var guessed: Boolean)
+                      val referer: String?, val parts: Int, var guessed: Boolean, val dual: Boolean = false)
 
-    private fun open(req: Req, range: String?): HttpURLConnection {
-        val c = URL(req.url).openConnection(LocalProxy.javaProxy()) as HttpURLConnection
+    /** net = a specific network (mobile data in "와이파이 + 데이터" mode); null = normal path. */
+    private fun open(req: Req, range: String?, net: Network? = null): HttpURLConnection {
+        val c = (if (net != null) net.openConnection(URL(req.url)) else URL(req.url).openConnection(LocalProxy.javaProxy())) as HttpURLConnection
         c.connectTimeout = 20_000; c.readTimeout = 30_000; c.instanceFollowRedirects = true
         req.cookie?.let { c.setRequestProperty("Cookie", it) }
         req.ua?.let { c.setRequestProperty("User-Agent", it) }
@@ -121,6 +127,8 @@ class DownloadService : Service() {
         val totalRef = AtomicLong(-1)
         Downloads.active[id] = DlActive(req.name, got, totalRef)
         val started = System.currentTimeMillis()
+        var cellNet: Network? = null
+        var cellCb: ConnectivityManager.NetworkCallback? = null
         val ticker = scope.launch {
             var lastBytes = 0L; var lastT = System.currentTimeMillis()
             while (isActive) {
@@ -128,7 +136,8 @@ class DownloadService : Service() {
                 val speed = if (now > lastT) (b - lastBytes) * 1000 / (now - lastT) else 0
                 lastBytes = b; lastT = now
                 val pct = if (total > 0) (b * 100 / total).toInt() else 0
-                val text = (if (total > 0) "${size(b)} / ${size(total)}" else size(b)) + " · ${size(speed)}/s"
+                val text = (if (total > 0) "${size(b)} / ${size(total)}" else size(b)) + " · ${size(speed)}/s" +
+                    (if (cellNet != null) " · 와이파이 + 데이터" else "")
                 nm.notify(id, NotificationCompat.Builder(this@DownloadService, CH_PROGRESS)
                     .setSmallIcon(android.R.drawable.stat_sys_download).setContentTitle(req.name).setContentText(text)
                     .setProgress(100, pct, total <= 0).setOngoing(true).setSilent(true).setOnlyAlertOnce(true)
@@ -175,7 +184,11 @@ class DownloadService : Service() {
             pfd.use {
                 FileOutputStream(it.fileDescriptor).channel.use { ch ->
                     val split = ranged && req.parts > 1 && total >= 2L * 1024 * 1024
-                    val ok = if (split) runCatching { parallel(req, ch, total, req.parts, got) }.isSuccess else false
+                    // "와이파이 + 데이터": only while on Wi-Fi and for files of 20MB+; half of the parts go over mobile data
+                    if (split && req.dual && total >= 20L * 1024 * 1024 && onWifi()) {
+                        mobileData()?.let { (n, cb) -> cellNet = n; cellCb = cb }
+                    }
+                    val ok = if (split) runCatching { parallel(req, ch, total, req.parts, got, cellNet) }.isSuccess else false
                     if (!ok) {
                         if (split) { got.set(0); ch.truncate(0) }
                         single(req, ch, ranged, total, got)
@@ -187,9 +200,11 @@ class DownloadService : Service() {
             ticker.cancel()
             nm.cancel(id)
             Downloads.active.remove(id)
+            cellCb?.let { c -> runCatching { getSystemService(ConnectivityManager::class.java).unregisterNetworkCallback(c) } }
             BlobSaver.finish(this, uri, req.name, req.guessed, head)
         } catch (e: Throwable) {
             Downloads.active.remove(id)
+            cellCb?.let { c -> runCatching { getSystemService(ConnectivityManager::class.java).unregisterNetworkCallback(c) } }
             ticker.cancel()
             nm.cancel(id)
             uri?.let { u -> runCatching { contentResolver.delete(u, null, null) } }
@@ -200,22 +215,23 @@ class DownloadService : Service() {
     }
 
     /** N ranges at once, each resuming on its own after errors. */
-    private suspend fun parallel(req: Req, ch: FileChannel, total: Long, parts: Int, got: AtomicLong) = coroutineScope {
+    private suspend fun parallel(req: Req, ch: FileChannel, total: Long, parts: Int, got: AtomicLong, cell: Network? = null) = coroutineScope {
         val size = (total + parts - 1) / parts
         (0 until parts).map { i ->
             val start = i * size
             val end = minOf(total, start + size) - 1
-            async { part(req, ch, start, end, got) }
+            async { part(req, ch, start, end, got, if (cell != null && i % 2 == 1) cell else null) }
         }.awaitAll()
     }
 
-    private suspend fun part(req: Req, ch: FileChannel, start: Long, end: Long, got: AtomicLong) {
+    private suspend fun part(req: Req, ch: FileChannel, start: Long, end: Long, got: AtomicLong, cell: Network? = null) {
         var pos = start
         var tries = 0
+        var net = cell
         while (pos <= end) {
             coroutineContext.ensureActive()
             try {
-                val c = open(req, "bytes=$pos-$end")
+                val c = open(req, "bytes=$pos-$end", net)
                 try {
                     if (c.responseCode != 206) throw IOException("조각 받기 거부 (${c.responseCode})")
                     c.inputStream.use { input ->
@@ -233,10 +249,36 @@ class DownloadService : Service() {
                 } finally { c.disconnect() }
                 if (pos <= end) throw IOException("연결이 끊겼어요")
             } catch (e: IOException) {
+                // mobile data trouble → finish this part over Wi-Fi
+                if (net != null && tries >= 1) { net = null; tries = 0; continue }
                 if (++tries > 5) throw e
                 delay(1000L * tries)
             }
         }
+    }
+
+    private fun onWifi(): Boolean {
+        val cm = getSystemService(ConnectivityManager::class.java)
+        return cm.getNetworkCapabilities(cm.activeNetwork)?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true
+    }
+
+    /** Opens the mobile-data network alongside Wi-Fi (waits up to 6s). */
+    private suspend fun mobileData(): Pair<Network, ConnectivityManager.NetworkCallback>? {
+        val cm = getSystemService(ConnectivityManager::class.java)
+        val req = NetworkRequest.Builder().addTransportType(NetworkCapabilities.TRANSPORT_CELLULAR)
+            .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET).build()
+        var cb: ConnectivityManager.NetworkCallback? = null
+        val n = kotlinx.coroutines.withTimeoutOrNull(6000) {
+            kotlinx.coroutines.suspendCancellableCoroutine<Network> { cont ->
+                val c = object : ConnectivityManager.NetworkCallback() {
+                    override fun onAvailable(network: Network) { if (cont.isActive) cont.resumeWith(Result.success(network)) }
+                }
+                cb = c
+                runCatching { cm.requestNetwork(req, c) }.onFailure { if (cont.isActive) cont.cancel() }
+            }
+        }
+        if (n == null) { cb?.let { c -> runCatching { cm.unregisterNetworkCallback(c) } }; return null }
+        return n to cb!!
     }
 
     /** One stream; resumes with Range when the server allows it. */
@@ -288,10 +330,10 @@ class DownloadService : Service() {
             else -> "$b B"
         }
 
-        fun start(ctx: Context, url: String, name: String, mime: String?, cookie: String?, ua: String?, referer: String?, parts: Int, guessed: Boolean = false) {
+        fun start(ctx: Context, url: String, name: String, mime: String?, cookie: String?, ua: String?, referer: String?, parts: Int, guessed: Boolean = false, dual: Boolean = false) {
             ctx.startForegroundService(Intent(ctx, DownloadService::class.java).setAction(ACTION_START)
                 .putExtra("url", url).putExtra("name", name).putExtra("mime", mime).putExtra("cookie", cookie)
-                .putExtra("ua", ua).putExtra("referer", referer).putExtra("parts", parts).putExtra("guessed", guessed))
+                .putExtra("ua", ua).putExtra("referer", referer).putExtra("parts", parts).putExtra("guessed", guessed).putExtra("dual", dual))
         }
     }
 }
