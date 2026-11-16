@@ -312,7 +312,8 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
         attachCurrent()
     }
 
-    private val thumbDir get() = java.io.File(act.filesDir, "thumbs")
+    /** In the app cache: the system may clear it when space is low (then tabs just show the site name). */
+    private val thumbDir get() = java.io.File(act.cacheDir, "thumbs")
 
     /** Saves open tabs (urls + preview pictures) so they come back after the app is closed. */
     fun save() {
