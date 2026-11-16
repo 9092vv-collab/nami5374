@@ -1,0 +1,221 @@
+browser run: 1  commit: 33c8a02988084465215245a2abb008449ec1a554
+===== errors =====
+54-> Task :app:processReleaseResources
+55-
+56:> Task :app:compileReleaseKotlin FAILED
+57:e: file:///home/runner/work/nami5374/nami5374/browser/app/src/main/java/space/nami/browser/Prefs.kt:63:9 Platform declaration clash: The following declarations have the same JVM signature (setToolbar(Ljava/util/List;)V):
+58-    fun `<set-toolbar>`(`<set-?>`: List<Action>): Unit defined in space.nami.browser.Prefs
+59-    fun setToolbar(v: List<Action>): Unit defined in space.nami.browser.Prefs
+60:e: file:///home/runner/work/nami5374/nami5374/browser/app/src/main/java/space/nami/browser/Prefs.kt:66:9 Platform declaration clash: The following declarations have the same JVM signature (setPullAction(Lspace/nami/browser/Action;)V):
+61-    fun `<set-pullAction>`(`<set-?>`: Action): Unit defined in space.nami.browser.Prefs
+62-    fun setPullAction(v: Action): Unit defined in space.nami.browser.Prefs
+63:e: file:///home/runner/work/nami5374/nami5374/browser/app/src/main/java/space/nami/browser/Prefs.kt:68:9 Platform declaration clash: The following declarations have the same JVM signature (setDoubleTapAction(Lspace/nami/browser/Action;)V):
+64-    fun `<set-doubleTapAction>`(`<set-?>`: Action): Unit defined in space.nami.browser.Prefs
+65-    fun setDoubleTapAction(v: Action): Unit defined in space.nami.browser.Prefs
+66:e: file:///home/runner/work/nami5374/nami5374/browser/app/src/main/java/space/nami/browser/Prefs.kt:70:9 Platform declaration clash: The following declarations have the same JVM signature (setPullStrength(Lspace/nami/browser/PullStrength;)V):
+67-    fun `<set-pullStrength>`(`<set-?>`: PullStrength): Unit defined in space.nami.browser.Prefs
+68-    fun setPullStrength(v: PullStrength): Unit defined in space.nami.browser.Prefs
+69:e: file:///home/runner/work/nami5374/nami5374/browser/app/src/main/java/space/nami/browser/Prefs.kt:72:9 Platform declaration clash: The following declarations have the same JVM signature (setDotOnLeft(Z)V):
+70-    fun `<set-dotOnLeft>`(`<set-?>`: Boolean): Unit defined in space.nami.browser.Prefs
+71-    fun setDotOnLeft(v: Boolean): Unit defined in space.nami.browser.Prefs
+72:e: file:///home/runner/work/nami5374/nami5374/browser/app/src/main/java/space/nami/browser/Prefs.kt:74:9 Platform declaration clash: The following declarations have the same JVM signature (setHideStatusBar(Z)V):
+73-    fun `<set-hideStatusBar>`(`<set-?>`: Boolean): Unit defined in space.nami.browser.Prefs
+74-    fun setHideStatusBar(v: Boolean): Unit defined in space.nami.browser.Prefs
+75:e: file:///home/runner/work/nami5374/nami5374/browser/app/src/main/java/space/nami/browser/Prefs.kt:76:9 Platform declaration clash: The following declarations have the same JVM signature (setEngine(Lspace/nami/browser/Engine;)V):
+76-    fun `<set-engine>`(`<set-?>`: Engine): Unit defined in space.nami.browser.Prefs
+77-    fun setEngine(v: Engine): Unit defined in space.nami.browser.Prefs
+78:e: file:///home/runner/work/nami5374/nami5374/browser/app/src/main/java/space/nami/browser/Prefs.kt:78:9 Platform declaration clash: The following declarations have the same JVM signature (setVertexJson(Ljava/lang/String;)V):
+79-    fun `<set-vertexJson>`(`<set-?>`: String): Unit defined in space.nami.browser.Prefs
+80-    fun setVertexJson(v: String): Unit defined in space.nami.browser.Prefs
+81:e: file:///home/runner/work/nami5374/nami5374/browser/app/src/main/java/space/nami/browser/Prefs.kt:80:9 Platform declaration clash: The following declarations have the same JVM signature (setVertexModel(Ljava/lang/String;)V):
+82-    fun `<set-vertexModel>`(`<set-?>`: String): Unit defined in space.nami.browser.Prefs
+83-    fun setVertexModel(v: String): Unit defined in space.nami.browser.Prefs
+84:e: file:///home/runner/work/nami5374/nami5374/browser/app/src/main/java/space/nami/browser/Prefs.kt:82:9 Platform declaration clash: The following declarations have the same JVM signature (setVertexLocation(Ljava/lang/String;)V):
+85-    fun `<set-vertexLocation>`(`<set-?>`: String): Unit defined in space.nami.browser.Prefs
+86-    fun setVertexLocation(v: String): Unit defined in space.nami.browser.Prefs
+87:e: file:///home/runner/work/nami5374/nami5374/browser/app/src/main/java/space/nami/browser/Prefs.kt:86:9 Platform declaration clash: The following declarations have the same JVM signature (setHomeUrl(Ljava/lang/String;)V):
+88-    fun `<set-homeUrl>`(`<set-?>`: String): Unit defined in space.nami.browser.Prefs
+89-    fun setHomeUrl(v: String): Unit defined in space.nami.browser.Prefs
+90:e: file:///home/runner/work/nami5374/nami5374/browser/app/src/main/java/space/nami/browser/Prefs.kt:88:5 Platform declaration clash: The following declarations have the same JVM signature (setToolbar(Ljava/util/List;)V):
+91-    fun `<set-toolbar>`(`<set-?>`: List<Action>): Unit defined in space.nami.browser.Prefs
+92-    fun setToolbar(v: List<Action>): Unit defined in space.nami.browser.Prefs
+93:e: file:///home/runner/work/nami5374/nami5374/browser/app/src/main/java/space/nami/browser/Prefs.kt:92:5 Platform declaration clash: The following declarations have the same JVM signature (setPullAction(Lspace/nami/browser/Action;)V):
+94-    fun `<set-pullAction>`(`<set-?>`: Action): Unit defined in space.nami.browser.Prefs
+95-    fun setPullAction(v: Action): Unit defined in space.nami.browser.Prefs
+96:e: file:///home/runner/work/nami5374/nami5374/browser/app/src/main/java/space/nami/browser/Prefs.kt:93:5 Platform declaration clash: The following declarations have the same JVM signature (setDoubleTapAction(Lspace/nami/browser/Action;)V):
+97-    fun `<set-doubleTapAction>`(`<set-?>`: Action): Unit defined in space.nami.browser.Prefs
+98-    fun setDoubleTapAction(v: Action): Unit defined in space.nami.browser.Prefs
+99:e: file:///home/runner/work/nami5374/nami5374/browser/app/src/main/java/space/nami/browser/Prefs.kt:94:5 Platform declaration clash: The following declarations have the same JVM signature (setPullStrength(Lspace/nami/browser/PullStrength;)V):
+100-    fun `<set-pullStrength>`(`<set-?>`: PullStrength): Unit defined in space.nami.browser.Prefs
+101-    fun setPullStrength(v: PullStrength): Unit defined in space.nami.browser.Prefs
+102:e: file:///home/runner/work/nami5374/nami5374/browser/app/src/main/java/space/nami/browser/Prefs.kt:95:5 Platform declaration clash: The following declarations have the same JVM signature (setDotOnLeft(Z)V):
+103-    fun `<set-dotOnLeft>`(`<set-?>`: Boolean): Unit defined in space.nami.browser.Prefs
+104-    fun setDotOnLeft(v: Boolean): Unit defined in space.nami.browser.Prefs
+105:e: file:///home/runner/work/nami5374/nami5374/browser/app/src/main/java/space/nami/browser/Prefs.kt:96:5 Platform declaration clash: The following declarations have the same JVM signature (setHideStatusBar(Z)V):
+106-    fun `<set-hideStatusBar>`(`<set-?>`: Boolean): Unit defined in space.nami.browser.Prefs
+107-    fun setHideStatusBar(v: Boolean): Unit defined in space.nami.browser.Prefs
+108:e: file:///home/runner/work/nami5374/nami5374/browser/app/src/main/java/space/nami/browser/Prefs.kt:97:5 Platform declaration clash: The following declarations have the same JVM signature (setEngine(Lspace/nami/browser/Engine;)V):
+109-    fun `<set-engine>`(`<set-?>`: Engine): Unit defined in space.nami.browser.Prefs
+110-    fun setEngine(v: Engine): Unit defined in space.nami.browser.Prefs
+111:e: file:///home/runner/work/nami5374/nami5374/browser/app/src/main/java/space/nami/browser/Prefs.kt:98:5 Platform declaration clash: The following declarations have the same JVM signature (setVertexJson(Ljava/lang/String;)V):
+112-    fun `<set-vertexJson>`(`<set-?>`: String): Unit defined in space.nami.browser.Prefs
+113-    fun setVertexJson(v: String): Unit defined in space.nami.browser.Prefs
+114:e: file:///home/runner/work/nami5374/nami5374/browser/app/src/main/java/space/nami/browser/Prefs.kt:99:5 Platform declaration clash: The following declarations have the same JVM signature (setVertexModel(Ljava/lang/String;)V):
+115-    fun `<set-vertexModel>`(`<set-?>`: String): Unit defined in space.nami.browser.Prefs
+116-    fun setVertexModel(v: String): Unit defined in space.nami.browser.Prefs
+117:e: file:///home/runner/work/nami5374/nami5374/browser/app/src/main/java/space/nami/browser/Prefs.kt:100:5 Platform declaration clash: The following declarations have the same JVM signature (setVertexLocation(Ljava/lang/String;)V):
+118-    fun `<set-vertexLocation>`(`<set-?>`: String): Unit defined in space.nami.browser.Prefs
+119-    fun setVertexLocation(v: String): Unit defined in space.nami.browser.Prefs
+120:e: file:///home/runner/work/nami5374/nami5374/browser/app/src/main/java/space/nami/browser/Prefs.kt:101:5 Platform declaration clash: The following declarations have the same JVM signature (setHomeUrl(Ljava/lang/String;)V):
+121-    fun `<set-homeUrl>`(`<set-?>`: String): Unit defined in space.nami.browser.Prefs
+122-    fun setHomeUrl(v: String): Unit defined in space.nami.browser.Prefs
+123-
+124-FAILURE: Build failed with an exception.
+125-
+126:* What went wrong:
+127-Execution failed for task ':app:compileReleaseKotlin'.
+128-> A failure occurred while executing org.jetbrains.kotlin.compilerRunner.GradleCompilerRunnerWithWorkers$GradleKotlinCompilerWorkAction
+129-   > Compilation error. See log for more details
+130-
+131-* Try:
+132-> Run with --info or --debug option to get more log output.
+133-> Run with --scan to get full insights.
+134-> Get more help at https://help.gradle.org.
+135-
+136-* Exception is:
+137-org.gradle.api.tasks.TaskExecutionException: Execution failed for task ':app:compileReleaseKotlin'.
+138-	at org.gradle.api.internal.tasks.execution.ExecuteActionsTaskExecuter.lambda$executeIfValid$1(ExecuteActionsTaskExecuter.java:130)
+139-	at org.gradle.internal.Try$Failure.ifSuccessfulOrElse(Try.java:293)
+140-	at org.gradle.api.internal.tasks.execution.ExecuteActionsTaskExecuter.executeIfValid(ExecuteActionsTaskExecuter.java:128)
+141-	at org.gradle.api.internal.tasks.execution.ExecuteActionsTaskExecuter.execute(ExecuteActionsTaskExecuter.java:116)
+142-	at org.gradle.api.internal.tasks.execution.ProblemsTaskPathTrackingTaskExecuter.execute(ProblemsTaskPathTrackingTaskExecuter.java:41)
+143-	at org.gradle.api.internal.tasks.execution.FinalizePropertiesTaskExecuter.execute(FinalizePropertiesTaskExecuter.java:46)
+144-	at org.gradle.api.internal.tasks.execution.ResolveTaskExecutionModeExecuter.execute(ResolveTaskExecutionModeExecuter.java:51)
+145-	at org.gradle.api.internal.tasks.execution.SkipTaskWithNoActionsExecuter.execute(SkipTaskWithNoActionsExecuter.java:57)
+146-	at org.gradle.api.internal.tasks.execution.SkipOnlyIfTaskExecuter.execute(SkipOnlyIfTaskExecuter.java:74)
+--
+326-
+327-
+328:BUILD FAILED in 1m 27s
+329-33 actionable tasks: 33 executed
+===== last 120 lines =====
+	at org.gradle.internal.execution.steps.PreCreateOutputParentsStep.execute(PreCreateOutputParentsStep.java:28)
+	at org.gradle.internal.execution.steps.RemovePreviousOutputsStep.execute(RemovePreviousOutputsStep.java:67)
+	at org.gradle.internal.execution.steps.RemovePreviousOutputsStep.execute(RemovePreviousOutputsStep.java:37)
+	at org.gradle.internal.execution.steps.BroadcastChangingOutputsStep.execute(BroadcastChangingOutputsStep.java:61)
+	at org.gradle.internal.execution.steps.BroadcastChangingOutputsStep.execute(BroadcastChangingOutputsStep.java:26)
+	at org.gradle.internal.execution.steps.CaptureOutputsAfterExecutionStep.execute(CaptureOutputsAfterExecutionStep.java:69)
+	at org.gradle.internal.execution.steps.CaptureOutputsAfterExecutionStep.execute(CaptureOutputsAfterExecutionStep.java:46)
+	at org.gradle.internal.execution.steps.ResolveInputChangesStep.execute(ResolveInputChangesStep.java:40)
+	at org.gradle.internal.execution.steps.ResolveInputChangesStep.execute(ResolveInputChangesStep.java:29)
+	at org.gradle.internal.execution.steps.BuildCacheStep.executeWithoutCache(BuildCacheStep.java:189)
+	at org.gradle.internal.execution.steps.BuildCacheStep.lambda$execute$1(BuildCacheStep.java:75)
+	at org.gradle.internal.Either$Right.fold(Either.java:175)
+	at org.gradle.internal.execution.caching.CachingState.fold(CachingState.java:62)
+	at org.gradle.internal.execution.steps.BuildCacheStep.execute(BuildCacheStep.java:73)
+	at org.gradle.internal.execution.steps.BuildCacheStep.execute(BuildCacheStep.java:48)
+	at org.gradle.internal.execution.steps.StoreExecutionStateStep.execute(StoreExecutionStateStep.java:46)
+	at org.gradle.internal.execution.steps.StoreExecutionStateStep.execute(StoreExecutionStateStep.java:35)
+	at org.gradle.internal.execution.steps.SkipUpToDateStep.executeBecause(SkipUpToDateStep.java:75)
+	at org.gradle.internal.execution.steps.SkipUpToDateStep.lambda$execute$2(SkipUpToDateStep.java:53)
+	at org.gradle.internal.execution.steps.SkipUpToDateStep.execute(SkipUpToDateStep.java:53)
+	at org.gradle.internal.execution.steps.SkipUpToDateStep.execute(SkipUpToDateStep.java:35)
+	at org.gradle.internal.execution.steps.legacy.MarkSnapshottingInputsFinishedStep.execute(MarkSnapshottingInputsFinishedStep.java:37)
+	at org.gradle.internal.execution.steps.legacy.MarkSnapshottingInputsFinishedStep.execute(MarkSnapshottingInputsFinishedStep.java:27)
+	at org.gradle.internal.execution.steps.ResolveIncrementalCachingStateStep.executeDelegate(ResolveIncrementalCachingStateStep.java:49)
+	at org.gradle.internal.execution.steps.ResolveIncrementalCachingStateStep.executeDelegate(ResolveIncrementalCachingStateStep.java:27)
+	at org.gradle.internal.execution.steps.AbstractResolveCachingStateStep.execute(AbstractResolveCachingStateStep.java:71)
+	at org.gradle.internal.execution.steps.AbstractResolveCachingStateStep.execute(AbstractResolveCachingStateStep.java:39)
+	at org.gradle.internal.execution.steps.ResolveChangesStep.execute(ResolveChangesStep.java:65)
+	at org.gradle.internal.execution.steps.ResolveChangesStep.execute(ResolveChangesStep.java:36)
+	at org.gradle.internal.execution.steps.ValidateStep.execute(ValidateStep.java:107)
+	at org.gradle.internal.execution.steps.ValidateStep.execute(ValidateStep.java:56)
+	at org.gradle.internal.execution.steps.AbstractCaptureStateBeforeExecutionStep.execute(AbstractCaptureStateBeforeExecutionStep.java:64)
+	at org.gradle.internal.execution.steps.AbstractCaptureStateBeforeExecutionStep.execute(AbstractCaptureStateBeforeExecutionStep.java:43)
+	at org.gradle.internal.execution.steps.AbstractSkipEmptyWorkStep.executeWithNonEmptySources(AbstractSkipEmptyWorkStep.java:125)
+	at org.gradle.internal.execution.steps.AbstractSkipEmptyWorkStep.execute(AbstractSkipEmptyWorkStep.java:61)
+	at org.gradle.internal.execution.steps.AbstractSkipEmptyWorkStep.execute(AbstractSkipEmptyWorkStep.java:36)
+	at org.gradle.internal.execution.steps.legacy.MarkSnapshottingInputsStartedStep.execute(MarkSnapshottingInputsStartedStep.java:38)
+	at org.gradle.internal.execution.steps.LoadPreviousExecutionStateStep.execute(LoadPreviousExecutionStateStep.java:36)
+	at org.gradle.internal.execution.steps.LoadPreviousExecutionStateStep.execute(LoadPreviousExecutionStateStep.java:23)
+	at org.gradle.internal.execution.steps.HandleStaleOutputsStep.execute(HandleStaleOutputsStep.java:75)
+	at org.gradle.internal.execution.steps.HandleStaleOutputsStep.execute(HandleStaleOutputsStep.java:41)
+	at org.gradle.internal.execution.steps.AssignMutableWorkspaceStep.lambda$execute$0(AssignMutableWorkspaceStep.java:35)
+	at org.gradle.api.internal.tasks.execution.TaskExecution$4.withWorkspace(TaskExecution.java:289)
+	at org.gradle.internal.execution.steps.AssignMutableWorkspaceStep.execute(AssignMutableWorkspaceStep.java:31)
+	at org.gradle.internal.execution.steps.AssignMutableWorkspaceStep.execute(AssignMutableWorkspaceStep.java:22)
+	at org.gradle.internal.execution.steps.ChoosePipelineStep.execute(ChoosePipelineStep.java:40)
+	at org.gradle.internal.execution.steps.ChoosePipelineStep.execute(ChoosePipelineStep.java:23)
+	at org.gradle.internal.execution.steps.ExecuteWorkBuildOperationFiringStep.lambda$execute$2(ExecuteWorkBuildOperationFiringStep.java:67)
+	at org.gradle.internal.execution.steps.ExecuteWorkBuildOperationFiringStep.execute(ExecuteWorkBuildOperationFiringStep.java:67)
+	at org.gradle.internal.execution.steps.ExecuteWorkBuildOperationFiringStep.execute(ExecuteWorkBuildOperationFiringStep.java:39)
+	at org.gradle.internal.execution.steps.IdentityCacheStep.execute(IdentityCacheStep.java:46)
+	at org.gradle.internal.execution.steps.IdentityCacheStep.execute(IdentityCacheStep.java:34)
+	at org.gradle.internal.execution.steps.IdentifyStep.execute(IdentifyStep.java:48)
+	at org.gradle.internal.execution.steps.IdentifyStep.execute(IdentifyStep.java:35)
+	at org.gradle.internal.execution.impl.DefaultExecutionEngine$1.execute(DefaultExecutionEngine.java:64)
+	at org.gradle.api.internal.tasks.execution.ExecuteActionsTaskExecuter.executeIfValid(ExecuteActionsTaskExecuter.java:127)
+	at org.gradle.api.internal.tasks.execution.ExecuteActionsTaskExecuter.execute(ExecuteActionsTaskExecuter.java:116)
+	at org.gradle.api.internal.tasks.execution.ProblemsTaskPathTrackingTaskExecuter.execute(ProblemsTaskPathTrackingTaskExecuter.java:41)
+	at org.gradle.api.internal.tasks.execution.FinalizePropertiesTaskExecuter.execute(FinalizePropertiesTaskExecuter.java:46)
+	at org.gradle.api.internal.tasks.execution.ResolveTaskExecutionModeExecuter.execute(ResolveTaskExecutionModeExecuter.java:51)
+	at org.gradle.api.internal.tasks.execution.SkipTaskWithNoActionsExecuter.execute(SkipTaskWithNoActionsExecuter.java:57)
+	at org.gradle.api.internal.tasks.execution.SkipOnlyIfTaskExecuter.execute(SkipOnlyIfTaskExecuter.java:74)
+	at org.gradle.api.internal.tasks.execution.CatchExceptionTaskExecuter.execute(CatchExceptionTaskExecuter.java:36)
+	at org.gradle.api.internal.tasks.execution.EventFiringTaskExecuter$1.executeTask(EventFiringTaskExecuter.java:77)
+	at org.gradle.api.internal.tasks.execution.EventFiringTaskExecuter$1.call(EventFiringTaskExecuter.java:55)
+	at org.gradle.api.internal.tasks.execution.EventFiringTaskExecuter$1.call(EventFiringTaskExecuter.java:52)
+	at org.gradle.internal.operations.DefaultBuildOperationRunner$CallableBuildOperationWorker.execute(DefaultBuildOperationRunner.java:210)
+	at org.gradle.internal.operations.DefaultBuildOperationRunner$CallableBuildOperationWorker.execute(DefaultBuildOperationRunner.java:205)
+	at org.gradle.internal.operations.DefaultBuildOperationRunner$2.execute(DefaultBuildOperationRunner.java:67)
+	at org.gradle.internal.operations.DefaultBuildOperationRunner$2.execute(DefaultBuildOperationRunner.java:60)
+	at org.gradle.internal.operations.DefaultBuildOperationRunner.execute(DefaultBuildOperationRunner.java:167)
+	at org.gradle.internal.operations.DefaultBuildOperationRunner.execute(DefaultBuildOperationRunner.java:60)
+	at org.gradle.internal.operations.DefaultBuildOperationRunner.call(DefaultBuildOperationRunner.java:54)
+	at org.gradle.api.internal.tasks.execution.EventFiringTaskExecuter.execute(EventFiringTaskExecuter.java:52)
+	at org.gradle.execution.plan.LocalTaskNodeExecutor.execute(LocalTaskNodeExecutor.java:42)
+	at org.gradle.execution.taskgraph.DefaultTaskExecutionGraph$InvokeNodeExecutorsAction.execute(DefaultTaskExecutionGraph.java:331)
+	at org.gradle.execution.taskgraph.DefaultTaskExecutionGraph$InvokeNodeExecutorsAction.execute(DefaultTaskExecutionGraph.java:318)
+	at org.gradle.execution.taskgraph.DefaultTaskExecutionGraph$BuildOperationAwareExecutionAction.lambda$execute$0(DefaultTaskExecutionGraph.java:314)
+	at org.gradle.internal.operations.CurrentBuildOperationRef.with(CurrentBuildOperationRef.java:85)
+	at org.gradle.execution.taskgraph.DefaultTaskExecutionGraph$BuildOperationAwareExecutionAction.execute(DefaultTaskExecutionGraph.java:314)
+	at org.gradle.execution.taskgraph.DefaultTaskExecutionGraph$BuildOperationAwareExecutionAction.execute(DefaultTaskExecutionGraph.java:303)
+	at org.gradle.execution.plan.DefaultPlanExecutor$ExecutorWorker.execute(DefaultPlanExecutor.java:459)
+	at org.gradle.execution.plan.DefaultPlanExecutor$ExecutorWorker.run(DefaultPlanExecutor.java:376)
+	at org.gradle.internal.concurrent.ExecutorPolicy$CatchAndRecordFailures.onExecute(ExecutorPolicy.java:64)
+	at org.gradle.internal.concurrent.AbstractManagedExecutor$1.run(AbstractManagedExecutor.java:48)
+Caused by: org.jetbrains.kotlin.gradle.tasks.CompilationErrorException: Compilation error. See log for more details
+	at org.jetbrains.kotlin.gradle.tasks.TasksUtilsKt.throwExceptionIfCompilationFailed(tasksUtils.kt:21)
+	at org.jetbrains.kotlin.compilerRunner.GradleKotlinCompilerWork.run(GradleKotlinCompilerWork.kt:119)
+	at org.jetbrains.kotlin.compilerRunner.GradleCompilerRunnerWithWorkers$GradleKotlinCompilerWorkAction.execute(GradleCompilerRunnerWithWorkers.kt:74)
+	at org.gradle.workers.internal.DefaultWorkerServer.execute(DefaultWorkerServer.java:63)
+	at org.gradle.workers.internal.NoIsolationWorkerFactory$1$1.create(NoIsolationWorkerFactory.java:66)
+	at org.gradle.workers.internal.NoIsolationWorkerFactory$1$1.create(NoIsolationWorkerFactory.java:62)
+	at org.gradle.internal.classloader.ClassLoaderUtils.executeInClassloader(ClassLoaderUtils.java:100)
+	at org.gradle.workers.internal.NoIsolationWorkerFactory$1.lambda$execute$0(NoIsolationWorkerFactory.java:62)
+	at org.gradle.workers.internal.AbstractWorker$1.call(AbstractWorker.java:44)
+	at org.gradle.workers.internal.AbstractWorker$1.call(AbstractWorker.java:41)
+	at org.gradle.internal.operations.DefaultBuildOperationRunner$CallableBuildOperationWorker.execute(DefaultBuildOperationRunner.java:210)
+	at org.gradle.internal.operations.DefaultBuildOperationRunner$CallableBuildOperationWorker.execute(DefaultBuildOperationRunner.java:205)
+	at org.gradle.internal.operations.DefaultBuildOperationRunner$2.execute(DefaultBuildOperationRunner.java:67)
+	at org.gradle.internal.operations.DefaultBuildOperationRunner$2.execute(DefaultBuildOperationRunner.java:60)
+	at org.gradle.internal.operations.DefaultBuildOperationRunner.execute(DefaultBuildOperationRunner.java:167)
+	at org.gradle.internal.operations.DefaultBuildOperationRunner.execute(DefaultBuildOperationRunner.java:60)
+	at org.gradle.internal.operations.DefaultBuildOperationRunner.call(DefaultBuildOperationRunner.java:54)
+	at org.gradle.workers.internal.AbstractWorker.executeWrappedInBuildOperation(AbstractWorker.java:41)
+	at org.gradle.workers.internal.NoIsolationWorkerFactory$1.execute(NoIsolationWorkerFactory.java:59)
+	at org.gradle.workers.internal.DefaultWorkerExecutor.lambda$submitWork$0(DefaultWorkerExecutor.java:174)
+	at org.gradle.internal.work.DefaultConditionalExecutionQueue$ExecutionRunner.runExecution(DefaultConditionalExecutionQueue.java:194)
+	at org.gradle.internal.work.DefaultConditionalExecutionQueue$ExecutionRunner.access$700(DefaultConditionalExecutionQueue.java:127)
+	at org.gradle.internal.work.DefaultConditionalExecutionQueue$ExecutionRunner$1.run(DefaultConditionalExecutionQueue.java:169)
+	at org.gradle.internal.Factories$1.create(Factories.java:31)
+	at org.gradle.internal.work.DefaultWorkerLeaseService.withLocks(DefaultWorkerLeaseService.java:263)
+	at org.gradle.internal.work.DefaultWorkerLeaseService.runAsWorkerThread(DefaultWorkerLeaseService.java:127)
+	at org.gradle.internal.work.DefaultWorkerLeaseService.runAsWorkerThread(DefaultWorkerLeaseService.java:132)
+	at org.gradle.internal.work.DefaultConditionalExecutionQueue$ExecutionRunner.runBatch(DefaultConditionalExecutionQueue.java:164)
+	at org.gradle.internal.work.DefaultConditionalExecutionQueue$ExecutionRunner.run(DefaultConditionalExecutionQueue.java:133)
+	... 2 more
+
+
+BUILD FAILED in 1m 27s
+33 actionable tasks: 33 executed
