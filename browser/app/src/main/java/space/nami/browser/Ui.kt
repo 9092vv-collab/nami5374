@@ -379,7 +379,7 @@ private fun MainMenu(b: Browser, prefs: Prefs, open: Boolean, close: () -> Unit,
             }
         }
         if (host.isNotEmpty() && prefs.adblock) {
-            val on = host !in prefs.adblockOff
+            val on = !prefs.adblockOffFor(host)
             val n = tab?.blocked?.get() ?: 0
             item(if (on && n > 0) "광고 차단 · ${n}개 막음" else "이 사이트 광고 차단", Icons.Filled.Block, checked = on) {
                 prefs.putAdblockOff(host, on); tab?.web?.reload()

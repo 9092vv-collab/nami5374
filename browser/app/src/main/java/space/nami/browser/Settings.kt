@@ -386,8 +386,23 @@ private fun ExtensionsSection(b: Browser, prefs: Prefs) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             TextButton({ refresh() }, enabled = !busy) { Text(if (busy) "받는 중…" else "필터 새로 받기", color = C.Accent, fontWeight = FontWeight.SemiBold) }
         }
-        if (prefs.adblockOff.isNotEmpty()) {
-            Label("광고 차단을 끈 사이트")
+        Label("광고 차단을 끈 사이트")
+        Text("여기 있는 사이트(와 그 하위 주소)에서는 광고 차단을 완전히 꺼요. 요청도 막지 않고 숨기지도 않아요.",
+            fontSize = 12.sp, color = C.Sub, lineHeight = 17.sp)
+        var site by remember { mutableStateOf("") }
+        fun addSite() {
+            val h = site.trim().let { if (it.contains("://")) Uri.parse(it).host ?: "" else it.substringBefore('/') }.lowercase()
+            if (h.contains('.')) { prefs.putAdblockOff(h, true); site = "" }
+        }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            OutlinedTextField(site, { site = it }, Modifier.weight(1f), singleLine = true, placeholder = { Text("예: kio.ac", color = C.Sub) },
+                shape = RoundedCornerShape(16.dp), colors = colors,
+                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Uri,
+                    imeAction = androidx.compose.ui.text.input.ImeAction.Done),
+                keyboardActions = androidx.compose.foundation.text.KeyboardActions(onDone = { addSite() }))
+            TextButton({ addSite() }) { Text("등록", color = C.Accent) }
+        }
+        run {
             prefs.adblockOff.sorted().forEach { h ->
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Text(h, fontSize = 15.sp, color = C.Ink, modifier = Modifier.weight(1f))

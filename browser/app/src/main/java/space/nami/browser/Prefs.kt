@@ -110,9 +110,29 @@ class Prefs(ctx: Context) {
     fun putAdblock(v: Boolean) { adblock = v; sp.edit().putBoolean("adblock", v).apply() }
     fun putBlockerApps(v: Set<String>) { blockerApps = v; sp.edit().putStringSet("blockerApps", v).apply() }
     fun putFilterUrls(v: List<String>) { filterUrls = v.distinct(); sp.edit().putString("filterUrls", filterUrls.joinToString("\n")).apply() }
+    /** True when ad blocking is turned off for this host or a parent domain (kio.ac also covers www.kio.ac). */
+    fun adblockOffFor(host: String): Boolean {
+        if (host.isEmpty()) return false
+        var h = host.lowercase()
+        while (true) {
+            if (h in adblockOff) return true
+            val i = h.indexOf('.'); if (i < 0) return false
+            h = h.substring(i + 1)
+        }
+    }
     fun putAdblockOff(host: String, off: Boolean) {
-        val s = if (off) adblockOff + host else adblockOff - host
+        val h = host.lowercase().removePrefix("www.")
+        val s = if (off) adblockOff + h
+            else adblockOff.filterNot { e -> host.lowercase() == e || host.lowercase().endsWith(".$e") }.toSet()
         adblockOff = s; sp.edit().putStringSet("adblockOff", s).apply()
+    }
+
+    init {
+        // Sites the user asked to keep ad blocking off for (added once).
+        if (!sp.getBoolean("seed_adblockOff_kioac", false)) {
+            putAdblockOff("kio.ac", true)
+            sp.edit().putBoolean("seed_adblockOff_kioac", true).apply()
+        }
     }
     fun putSplitParts(v: Int) { splitParts = v; sp.edit().putInt("splitParts", v).apply() }
     fun putHighRefresh(v: Boolean) { highRefresh = v; sp.edit().putBoolean("highRefresh", v).apply() }

@@ -86,7 +86,7 @@ class Blocker(private val ctx: Context, private val prefs: Prefs) {
         }
     }
 
-    fun active(pageHost: String) = prefs.adblock && engine.size > 0 && pageHost !in prefs.adblockOff && !engine.siteAllowed(pageHost)
+    fun active(pageHost: String) = prefs.adblock && engine.size > 0 && !prefs.adblockOffFor(pageHost) && !engine.siteAllowed(pageHost)
 
     /** Called from shouldInterceptRequest (background thread). */
     fun intercept(url: String, pageHost: String): WebResourceResponse? {
