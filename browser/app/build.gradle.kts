@@ -17,22 +17,13 @@ android {
         ndk { abiFilters.add("arm64-v8a") }
     }
 
-    // Personal sideload key (same as SGU Next) so updates install over the old version.
-    signingConfigs {
-        create("nami") {
-            storeFile = file("sgu-next.keystore")
-            storePassword = "sgunext"
-            keyAlias = "sgu"
-            keyPassword = "sgunext"
-        }
-    }
-
+    // Release APKs are signed in CI (see .github/workflows/build-browser.yml) with the new key + a v3 rotation
+    // lineage from the old public key, so installed copies update in place and old-key builds can't replace it.
     buildTypes {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            signingConfig = signingConfigs.getByName("nami")
         }
     }
 
