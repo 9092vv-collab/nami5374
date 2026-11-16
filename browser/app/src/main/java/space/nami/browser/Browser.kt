@@ -463,6 +463,17 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
         @JavascriptInterface fun blobChunk(k: String, id: String, b64: String): Boolean = k == key && blobs.chunk(id, b64)
         @JavascriptInterface fun blobEnd(k: String, id: String) { if (k == key) blobs.end(id) }
         @JavascriptInterface fun blobFail(k: String, id: String) { if (k != key) return; blobs.fail(id); scope.launch { Toast.makeText(act, "파일을 읽지 못했어요", Toast.LENGTH_SHORT).show() } }
+        @JavascriptInterface fun fsOpen(k: String, id: String, dir: String, name: String, mime: String): Boolean {
+            if (k != key || !prefs.swOffFor(runCatching { Uri.parse(t.url).host ?: "" }.getOrDefault(""))) return false
+            val ok = fs.open(id, dir, name, mime)
+            if (ok) scope.launch { showPill("받는 중: $name", 2000) }
+            return ok
+        }
+        @JavascriptInterface fun fsWrite(k: String, id: String, b64: String, pos: Double): Boolean = k == key && fs.write(id, b64, pos)
+        @JavascriptInterface fun fsSeek(k: String, id: String, pos: Double): Boolean = k == key && fs.seek(id, pos)
+        @JavascriptInterface fun fsTrunc(k: String, id: String, size: Double): Boolean = k == key && fs.truncate(id, size)
+        @JavascriptInterface fun fsClose(k: String, id: String): Boolean = k == key && fs.close(id)
+        @JavascriptInterface fun fsAbort(k: String, id: String) { if (k == key) fs.abort(id) }
         @JavascriptInterface fun forceZoom(k: String): Boolean = k == key && prefs.forceZoom
         @JavascriptInterface fun scriptVersion(k: String, name: String, ns: String): String = if (k != key) "" else
             scripts.list.firstOrNull { (it.one("name") == name || it.name == name) && (ns.isEmpty() || it.namespace == ns) }?.version ?: ""
@@ -660,6 +671,7 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
     /** Names a page gave its download links (`<a download="이름">`), keyed by href. */
     val downloadHints = java.util.concurrent.ConcurrentHashMap<String, String>()
     val blobs = BlobSaver(act)
+    val fs = FsSaver(act)
 
     fun download(url: String, ua: String? = null, cd: String? = null, mime: String? = null) {
         val hint = downloadHints.remove(url)
