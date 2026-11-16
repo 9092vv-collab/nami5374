@@ -126,13 +126,13 @@ private fun ToolbarSection(prefs: Prefs) {
                 a.icon?.let { Icon(it, null, tint = C.Ink, modifier = Modifier.size(20.dp)) }
                 Spacer(Modifier.width(10.dp))
                 Text(a.label, fontSize = 15.sp, color = C.Ink, modifier = Modifier.weight(1f))
-                IconButton({ prefs.setToolbar(list.toMutableList().apply { add(i - 1, removeAt(i)) }) }, enabled = i > 0) {
+                IconButton({ prefs.putToolbar(list.toMutableList().apply { add(i - 1, removeAt(i)) }) }, enabled = i > 0) {
                     Icon(Icons.Filled.KeyboardArrowUp, "위로", tint = if (i > 0) C.Ink else C.Line)
                 }
-                IconButton({ prefs.setToolbar(list.toMutableList().apply { add(i + 1, removeAt(i)) }) }, enabled = i < list.size - 1) {
+                IconButton({ prefs.putToolbar(list.toMutableList().apply { add(i + 1, removeAt(i)) }) }, enabled = i < list.size - 1) {
                     Icon(Icons.Filled.KeyboardArrowDown, "아래로", tint = if (i < list.size - 1) C.Ink else C.Line)
                 }
-                IconButton({ prefs.setToolbar(list - a) }, enabled = a != Action.MENU) {
+                IconButton({ prefs.putToolbar(list - a) }, enabled = a != Action.MENU) {
                     Icon(Icons.Filled.Close, "빼기", tint = if (a != Action.MENU) C.Sub else Color.Transparent)
                 }
             }
@@ -142,7 +142,7 @@ private fun ToolbarSection(prefs: Prefs) {
             Label("눌러서 추가")
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 rest.forEach { a ->
-                    Row(Modifier.clip(CircleShape).background(C.Drawer).clickable { prefs.setToolbar(list + a) }
+                    Row(Modifier.clip(CircleShape).background(C.Drawer).clickable { prefs.putToolbar(list + a) }
                         .padding(start = 10.dp, end = 14.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Filled.Add, null, tint = C.Accent, modifier = Modifier.size(16.dp))
                         Spacer(Modifier.width(4.dp))
@@ -152,7 +152,7 @@ private fun ToolbarSection(prefs: Prefs) {
             }
         }
         Label("툴바 부르는 점 위치")
-        Choices(listOf(false, true), prefs.dotOnLeft, { if (it) "왼쪽 아래" else "오른쪽 아래" }) { prefs.setDotOnLeft(it) }
+        Choices(listOf(false, true), prefs.dotOnLeft, { if (it) "왼쪽 아래" else "오른쪽 아래" }) { prefs.putDotOnLeft(it) }
     }
 }
 
@@ -160,11 +160,11 @@ private fun ToolbarSection(prefs: Prefs) {
 private fun GestureSection(prefs: Prefs) {
     Card("동작", "동작마다 할 일을 골라요. 스크롤로는 툴바가 나오지 않아요.") {
         Label("맨 위에서 세게 끌어내리기")
-        Choices(Action.gestureChoices, prefs.pullAction, { it.label }) { prefs.setPullAction(it) }
+        Choices(Action.gestureChoices, prefs.pullAction, { it.label }) { prefs.putPullAction(it) }
         Label("끌어내리는 세기")
-        Choices(PullStrength.entries, prefs.pullStrength, { it.label }) { prefs.setPullStrength(it) }
+        Choices(PullStrength.entries, prefs.pullStrength, { it.label }) { prefs.putPullStrength(it) }
         Label("글자나 빈 곳 두 번 탭")
-        Choices(Action.gestureChoices, prefs.doubleTapAction, { it.label }) { prefs.setDoubleTapAction(it) }
+        Choices(Action.gestureChoices, prefs.doubleTapAction, { it.label }) { prefs.putDoubleTapAction(it) }
         Text("링크·그림 위를 두 번 탭하면 첫 탭에 이미 넘어가서 동작하지 않아요.", fontSize = 12.sp, color = C.Sub)
     }
 }
@@ -176,7 +176,7 @@ private fun TranslateSection(b: Browser, prefs: Prefs) {
     var testing by remember { mutableStateOf(false) }
     Card("번역", "크롬처럼 페이지 모양은 그대로 두고 글자만 한국어로 바꿔요. 구글이 안 되면 폰 안 번역으로 자동으로 넘어가요.") {
         Label("번역 엔진")
-        Choices(Engine.entries, prefs.engine, { it.label }) { prefs.setEngine(it); result = null }
+        Choices(Engine.entries, prefs.engine, { it.label }) { prefs.putEngine(it); result = null }
         if (prefs.engine == Engine.VERTEX) VertexFields(prefs)
         Row(verticalAlignment = Alignment.CenterVertically) {
             TextButton({
@@ -220,16 +220,16 @@ private fun VertexFields(prefs: Prefs) {
                 val o = runCatching { JSONObject(draft.trim()) }.getOrNull()
                 if (o == null || o.optString("project_id").isBlank() || o.optString("client_email").isBlank() || o.optString("private_key").isBlank())
                     err = "project_id · client_email · private_key가 들어 있는 JSON이어야 해요."
-                else { prefs.setVertexJson(draft.trim()); editing = false }
+                else { prefs.putVertexJson(draft.trim()); editing = false }
             }) { Text("저장", color = C.Accent, fontWeight = FontWeight.SemiBold) }
             if (saved.isNotEmpty()) TextButton({ editing = false }) { Text("취소", color = C.Ink) }
         }
     }
     Label("모델")
-    OutlinedTextField(prefs.vertexModel, { prefs.setVertexModel(it.trim()) }, Modifier.fillMaxWidth(), singleLine = true,
+    OutlinedTextField(prefs.vertexModel, { prefs.putVertexModel(it.trim()) }, Modifier.fillMaxWidth(), singleLine = true,
         shape = RoundedCornerShape(16.dp), colors = colors)
     Label("위치")
-    OutlinedTextField(prefs.vertexLocation, { prefs.setVertexLocation(it.trim()) }, Modifier.fillMaxWidth(), singleLine = true,
+    OutlinedTextField(prefs.vertexLocation, { prefs.putVertexLocation(it.trim()) }, Modifier.fillMaxWidth(), singleLine = true,
         shape = RoundedCornerShape(16.dp), colors = colors)
     Text("Vertex가 실패하면 구글 → 폰 번역 순서로 넘어가요. 쓸 때마다 요금이 들어요.", fontSize = 12.sp, color = C.Sub)
 }
@@ -238,9 +238,9 @@ private fun VertexFields(prefs: Prefs) {
 private fun ScreenSection(prefs: Prefs) {
     val colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = C.Accent, unfocusedBorderColor = C.Line, cursorColor = C.Accent)
     Card("화면") {
-        SwitchRow("상태 표시줄 숨기기", prefs.hideStatusBar) { prefs.setHideStatusBar(it) }
+        SwitchRow("상태 표시줄 숨기기", prefs.hideStatusBar) { prefs.putHideStatusBar(it) }
         Label("홈페이지 · 새 탭")
-        OutlinedTextField(prefs.homeUrl, { prefs.setHomeUrl(it.trim()) }, Modifier.fillMaxWidth(), singleLine = true,
+        OutlinedTextField(prefs.homeUrl, { prefs.putHomeUrl(it.trim()) }, Modifier.fillMaxWidth(), singleLine = true,
             shape = RoundedCornerShape(16.dp), colors = colors)
     }
 }

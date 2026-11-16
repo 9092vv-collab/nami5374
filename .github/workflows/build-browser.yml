@@ -17,13 +17,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Probe Google translate endpoints (info only)
-        continue-on-error: true
-        run: |
-          U='https://translate.googleapis.com/translate_a'
-          echo "--- t, two q"; curl -s -m 15 -X POST "$U/t?client=gtx&sl=auto&tl=ko&dt=t&format=text" --data-urlencode "q=long hair" --data-urlencode "q=Hello, world! It's a test." ; echo
-          echo "--- t, one q"; curl -s -m 15 -X POST "$U/t?client=gtx&sl=auto&tl=ko&dt=t&format=text" --data-urlencode "q=Hello, world!" ; echo
-          echo "--- single"; curl -s -m 15 -X POST "$U/single?client=gtx&sl=auto&tl=ko&dt=t" --data-urlencode "q=Hello, world! How are you?" | head -c 400; echo
       - name: Fonts (Pretendard GOV)
         run: bash browser/fetch-fonts.sh
       - name: Get Gradle 8.14.3 (GitHub mirror)

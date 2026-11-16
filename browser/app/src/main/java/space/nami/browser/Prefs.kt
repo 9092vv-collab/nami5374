@@ -85,20 +85,20 @@ class Prefs(ctx: Context) {
     var homeUrl by mutableStateOf(sp.getString("homeUrl", "https://www.google.com") ?: "https://www.google.com")
         private set
 
-    fun setToolbar(v: List<Action>) {
+    fun putToolbar(v: List<Action>) {
         val list = v.distinct().let { if (Action.MENU in it) it else it + Action.MENU }
         toolbar = list; sp.edit().putString("toolbar", list.joinToString(",") { it.name }).apply()
     }
-    fun setPullAction(v: Action) { pullAction = v; sp.edit().putString("pullAction", v.name).apply() }
-    fun setDoubleTapAction(v: Action) { doubleTapAction = v; sp.edit().putString("doubleTapAction", v.name).apply() }
-    fun setPullStrength(v: PullStrength) { pullStrength = v; sp.edit().putString("pullStrength", v.name).apply() }
-    fun setDotOnLeft(v: Boolean) { dotOnLeft = v; sp.edit().putBoolean("dotOnLeft", v).apply() }
-    fun setHideStatusBar(v: Boolean) { hideStatusBar = v; sp.edit().putBoolean("hideStatusBar", v).apply() }
-    fun setEngine(v: Engine) { engine = v; sp.edit().putString("engine", v.name).apply() }
-    fun setVertexJson(v: String) { vertexJson = v; sp.edit().putString("vertexJson", v).apply() }
-    fun setVertexModel(v: String) { vertexModel = v; sp.edit().putString("vertexModel", v).apply() }
-    fun setVertexLocation(v: String) { vertexLocation = v; sp.edit().putString("vertexLocation", v).apply() }
-    fun setHomeUrl(v: String) { homeUrl = v; sp.edit().putString("homeUrl", v).apply() }
+    fun putPullAction(v: Action) { pullAction = v; sp.edit().putString("pullAction", v.name).apply() }
+    fun putDoubleTapAction(v: Action) { doubleTapAction = v; sp.edit().putString("doubleTapAction", v.name).apply() }
+    fun putPullStrength(v: PullStrength) { pullStrength = v; sp.edit().putString("pullStrength", v.name).apply() }
+    fun putDotOnLeft(v: Boolean) { dotOnLeft = v; sp.edit().putBoolean("dotOnLeft", v).apply() }
+    fun putHideStatusBar(v: Boolean) { hideStatusBar = v; sp.edit().putBoolean("hideStatusBar", v).apply() }
+    fun putEngine(v: Engine) { engine = v; sp.edit().putString("engine", v.name).apply() }
+    fun putVertexJson(v: String) { vertexJson = v; sp.edit().putString("vertexJson", v).apply() }
+    fun putVertexModel(v: String) { vertexModel = v; sp.edit().putString("vertexModel", v).apply() }
+    fun putVertexLocation(v: String) { vertexLocation = v; sp.edit().putString("vertexLocation", v).apply() }
+    fun putHomeUrl(v: String) { homeUrl = v; sp.edit().putString("homeUrl", v).apply() }
     fun setAlways(host: String, on: Boolean) {
         val s = if (on) alwaysHosts + host else alwaysHosts - host
         alwaysHosts = s; sp.edit().putStringSet("alwaysHosts", s).apply()
