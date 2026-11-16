@@ -95,6 +95,8 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
@@ -446,6 +448,10 @@ private fun AddressEditor(b: Browser) {
 
 @Composable
 private fun TabsScreen(b: Browser) {
+    val grid = androidx.compose.foundation.lazy.grid.rememberLazyGridState()
+    val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
+    var dragId by remember { mutableStateOf<Long?>(null) }
+    var drag by remember { mutableStateOf(androidx.compose.ui.geometry.Offset.Zero) }
     Surface(Modifier.fillMaxSize(), color = C.Bg) {
         Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding()) {
             Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 8.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -455,18 +461,49 @@ private fun TabsScreen(b: Browser) {
                 }
                 IconButton({ b.showTabs = false }) { Icon(Icons.Filled.Close, "닫기", tint = C.Ink) }
             }
-            LazyVerticalGrid(GridCells.Adaptive(170.dp), Modifier.fillMaxSize().padding(horizontal = 12.dp),
+            Text("꾹 눌러서 끌면 순서를 바꿀 수 있어요", fontSize = 12.sp, color = C.Sub, modifier = Modifier.padding(start = 20.dp, bottom = 6.dp))
+            LazyVerticalGrid(GridCells.Adaptive(170.dp), Modifier.fillMaxSize().padding(horizontal = 12.dp), state = grid,
                 verticalArrangement = Arrangement.spacedBy(10.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 itemsIndexed(b.tabs, key = { _, t -> t.id }) { i, t ->
                     val sel = i == b.current
-                    Surface(Modifier.fillMaxWidth().height(250.dp).clickable { b.select(i); b.showTabs = false; b.toolbarVisible = false },
+                    val dragging = dragId == t.id
+                    val moveMod = if (dragging) Modifier.zIndex(1f).graphicsLayer {
+                        translationX = drag.x; translationY = drag.y; scaleX = 1.04f; scaleY = 1.04f; shadowElevation = 24f
+                    } else Modifier.animateItem()
+                    Surface(moveMod.fillMaxWidth().height(250.dp)
+                        .pointerInput(t.id) {
+                            detectDragGesturesAfterLongPress(
+                                onDragStart = { haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress); dragId = t.id; drag = androidx.compose.ui.geometry.Offset.Zero },
+                                onDragEnd = { dragId = null; drag = androidx.compose.ui.geometry.Offset.Zero },
+                                onDragCancel = { dragId = null; drag = androidx.compose.ui.geometry.Offset.Zero },
+                            ) { change, amount ->
+                                change.consume()
+                                drag += amount
+                                val info = grid.layoutInfo.visibleItemsInfo
+                                val me = info.firstOrNull { it.key == t.id }
+                                if (me != null) {
+                                    val cx = me.offset.x + drag.x + me.size.width / 2f
+                                    val cy = me.offset.y + drag.y + me.size.height / 2f
+                                    val target = info.firstOrNull {
+                                        it.key != t.id && cx >= it.offset.x && cx <= it.offset.x + it.size.width &&
+                                            cy >= it.offset.y && cy <= it.offset.y + it.size.height
+                                    }
+                                    if (target != null) {
+                                        val from = b.tabs.indexOfFirst { it.id == t.id }
+                                        b.moveTab(from, target.index)
+                                        drag -= androidx.compose.ui.geometry.Offset((target.offset.x - me.offset.x).toFloat(), (target.offset.y - me.offset.y).toFloat())
+                                    }
+                                }
+                            }
+                        }
+                        .clickable { b.select(b.tabs.indexOfFirst { it.id == t.id }); b.showTabs = false; b.toolbarVisible = false },
                         shape = RoundedCornerShape(22.dp), color = Color.White,
                         border = androidx.compose.foundation.BorderStroke(if (sel) 2.dp else 1.dp, if (sel) C.Accent else C.Line)) {
                         Column {
                             Row(Modifier.padding(start = 14.dp, top = 4.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                                 Text(t.title.ifEmpty { Uri.parse(t.url).host ?: t.url }, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = C.Ink,
                                     maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-                                IconButton({ b.closeTab(i) }, Modifier.size(36.dp)) { Icon(Icons.Filled.Close, "탭 닫기", tint = C.Sub, modifier = Modifier.size(18.dp)) }
+                                IconButton({ b.closeTab(b.tabs.indexOfFirst { it.id == t.id }) }, Modifier.size(36.dp)) { Icon(Icons.Filled.Close, "탭 닫기", tint = C.Sub, modifier = Modifier.size(18.dp)) }
                             }
                             Box(Modifier.fillMaxSize().padding(start = 6.dp, end = 6.dp, bottom = 6.dp).clip(RoundedCornerShape(16.dp)).background(C.Drawer),
                                 contentAlignment = Alignment.Center) {

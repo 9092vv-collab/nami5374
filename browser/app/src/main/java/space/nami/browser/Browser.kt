@@ -262,6 +262,14 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
         showPill("${to + 1}/${tabs.size} · " + t.title.ifEmpty { Uri.parse(t.url).host ?: t.url }.take(28), 1300)
     }
 
+    /** Long-press drag in the tab list. Keeps the selected tab selected. */
+    fun moveTab(from: Int, to: Int) {
+        if (from !in tabs.indices || to !in tabs.indices || from == to) return
+        val cur = tab
+        tabs.add(to, tabs.removeAt(from))
+        current = tabs.indexOf(cur).coerceAtLeast(0)
+    }
+
     fun openTabs() { tab?.let { capture(it) }; showTabs = true }
 
     /** Draws what the tab shows now into a small bitmap (40% size). */
