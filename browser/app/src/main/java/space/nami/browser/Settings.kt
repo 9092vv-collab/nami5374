@@ -108,7 +108,7 @@ fun SettingsScreen(b: Browser, prefs: Prefs) {
                         5 -> DisplaySection(prefs)
                         else -> {
                             GeneralSection(prefs)
-                            Text("Nami 0.4.3", color = C.Sub, fontSize = 13.sp, modifier = Modifier.padding(start = 6.dp))
+                            Text("Nami 0.4.4", color = C.Sub, fontSize = 13.sp, modifier = Modifier.padding(start = 6.dp))
                         }
                     }
                 }

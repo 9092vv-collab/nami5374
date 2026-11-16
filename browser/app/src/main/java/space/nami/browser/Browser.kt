@@ -562,6 +562,16 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
                 if (req.isForMainFrame && isUserJs(u.toString())) { offerInstall(u.toString()); return true }
                 val s = u.scheme ?: return false
                 if (s == "http" || s == "https") {
+                    // kio.ac-style service-worker download: stop the navigation before it uses up the one-time URL,
+                    // and let a page of that site fetch it instead
+                    if (isSwUrl(u.toString())) {
+                        relay(u.toString(), null, view)
+                        if (!view.canGoBack() && (view.url.isNullOrEmpty() || view.url == "about:blank")) {
+                            val i = tabs.indexOfFirst { it.web === view }
+                            if (i >= 0 && tabs.size > 1) closeTab(i)
+                        }
+                        return true
+                    }
                     // Like Chrome: a tapped link to another site that an installed app handles (X, YouTube…) opens in that app.
                     if (req.isForMainFrame && prefs.openApps) {
                         val now = System.currentTimeMillis()
@@ -685,9 +695,9 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
     fun isSwUrl(url: String) = runCatching { Uri.parse(url).path?.endsWith("_service-worker-responsify") == true }.getOrDefault(false)
 
     /** Have a page of the same site fetch it (through its service worker) and stream it to a file. */
-    fun relay(url: String, hint: String?) {
+    fun relay(url: String, hint: String?, from: WebView? = null) {
         val h = Uri.parse(url).host ?: ""
-        val t = tabs.filter { it.host == h && it.web.url != url }.let { l -> l.firstOrNull { it === tab } ?: l.lastOrNull() }
+        val t = tabs.filter { it.host == h && it.web.url != url && (from == null || it.web !== from || !it.web.url.isNullOrEmpty()) }.let { l -> l.firstOrNull { it === tab } ?: l.lastOrNull() }
         if (t == null) { Toast.makeText(act, "이 파일은 받을 수 없어요", Toast.LENGTH_SHORT).show(); return }
         val q = org.json.JSONObject.quote(url); val n = org.json.JSONObject.quote(hint ?: "")
         t.web.evaluateJavascript("(window.__nami&&__nami.relay)?(__nami.relay('$key',$q,$n),'ok'):'no'") { r ->
