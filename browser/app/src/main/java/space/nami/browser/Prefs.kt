@@ -93,16 +93,6 @@ class Prefs(ctx: Context) {
         private set
     var bypassOff by mutableStateOf(sp.getStringSet("bypassOff", emptySet())?.toSet() ?: emptySet())
         private set
-    var socksHost by mutableStateOf(sp.getString("socksHost", "127.0.0.1") ?: "127.0.0.1")
-        private set
-    var socksPort by mutableStateOf(sp.getInt("socksPort", 1080))
-        private set
-    var socksUser by mutableStateOf(sp.getString("socksUser", "") ?: "")
-        private set
-    var socksPass by mutableStateOf(sp.getString("socksPass", "") ?: "")
-        private set
-    var proxySites by mutableStateOf(sp.getStringSet("proxySites", setOf("iwara.tv"))?.toSet() ?: emptySet())
-        private set
     var textZoom by mutableStateOf(sp.getInt("textZoom", 100))
         private set
     var forceZoom by mutableStateOf(sp.getBoolean("forceZoom", true))
@@ -163,14 +153,6 @@ class Prefs(ctx: Context) {
     fun putBypassOff(host: String, off: Boolean) {
         val h = host.lowercase().removePrefix("www.")
         bypassOff = if (off) bypassOff + h else bypassOff - h; sp.edit().putStringSet("bypassOff", bypassOff).apply()
-    }
-    fun putSocksHost(v: String) { socksHost = v; sp.edit().putString("socksHost", v).apply() }
-    fun putSocksPort(v: Int) { socksPort = v; sp.edit().putInt("socksPort", v).apply() }
-    fun putSocksUser(v: String) { socksUser = v; sp.edit().putString("socksUser", v).apply() }
-    fun putSocksPass(v: String) { socksPass = v; sp.edit().putString("socksPass", v).apply() }
-    fun putProxySite(host: String, on: Boolean) {
-        val h = host.lowercase().removePrefix("www.")
-        proxySites = if (on) proxySites + h else proxySites - h; sp.edit().putStringSet("proxySites", proxySites).apply()
     }
     fun putTextZoom(v: Int) { textZoom = v; sp.edit().putInt("textZoom", v).apply() }
     fun putForceZoom(v: Boolean) { forceZoom = v; sp.edit().putBoolean("forceZoom", v).apply() }

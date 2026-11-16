@@ -2,7 +2,6 @@ package space.nami.browser
 
 import org.json.JSONObject
 import java.io.BufferedInputStream
-import java.io.DataInputStream
 import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
@@ -16,13 +15,10 @@ import java.net.URL
 import java.net.URLEncoder
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
-import javax.net.ssl.SSLSocket
-import javax.net.ssl.SSLSocketFactory
 
 /**
  * A tiny HTTP proxy inside Nami (127.0.0.1:<random port>). The WebView is pointed at it with ProxyController.
  * For each connection it:
- *  - sends registered sites (e.g. iwara.tv) through the user's SOCKS5 proxy (AdGuard VPN's SOCKS5 mode),
  *  - looks other hosts up with DNS-over-HTTPS (Cloudflare 1.1.1.1 / Google 8.8.8.8),
  *  - optionally splits the TLS ClientHello into two TLS records so ISP SNI filtering can't read the site name
  *    (the same idea as Unicorn HTTPS / GoodbyeDPI).
@@ -56,7 +52,7 @@ object LocalProxy {
     @Synchronized
     fun stop() { runCatching { server?.close() }; server = null; port = 0 }
 
-    /** For Nami's own downloads / GM_xmlhttpRequest, so they follow the same routes. */
+    /** For Nami's own downloads / GM_xmlhttpRequest, so they use the same DNS. */
     fun javaProxy(): Proxy = if (running) Proxy(Proxy.Type.HTTP, InetSocketAddress("127.0.0.1", port)) else Proxy.NO_PROXY
 
     fun clearDns() = dnsCache.clear()
@@ -72,14 +68,8 @@ object LocalProxy {
         }
     }
 
-    private fun viaSocks(host: String): Boolean {
-        val p = prefs ?: return false
-        return p.socksHost.isNotBlank() && p.socksPort > 0 && matches(host, p.proxySites)
-    }
-
     private fun open(host: String, port: Int): Socket =
-        if (viaSocks(host)) socksConnect(host, port)
-        else Socket().apply { connect(InetSocketAddress(resolve(host), port), 12_000); tcpNoDelay = true }
+        Socket().apply { connect(InetSocketAddress(resolve(host), port), 12_000); tcpNoDelay = true }
 
     // ---------- DNS over HTTPS ----------
 
@@ -120,53 +110,6 @@ object LocalProxy {
         } finally { c.disconnect() }
     }
 
-    // ---------- SOCKS5 client (RFC 1928 + user/pass RFC 1929) ----------
-
-    fun socksConnect(host: String, port: Int): Socket {
-        val p = prefs ?: throw IOException("설정 없음")
-        val s = Socket()
-        s.connect(InetSocketAddress(p.socksHost.trim(), p.socksPort), 10_000)
-        s.tcpNoDelay = true; s.soTimeout = 15_000
-        val o = s.getOutputStream(); val i = DataInputStream(s.getInputStream())
-        val auth = p.socksUser.isNotEmpty()
-        o.write(if (auth) byteArrayOf(5, 2, 0, 2) else byteArrayOf(5, 1, 0)); o.flush()
-        i.readUnsignedByte()
-        when (i.readUnsignedByte()) {
-            0 -> {}
-            2 -> {
-                val u = p.socksUser.toByteArray(); val pw = p.socksPass.toByteArray()
-                o.write(byteArrayOf(1, u.size.toByte()) + u + byteArrayOf(pw.size.toByte()) + pw); o.flush()
-                i.readUnsignedByte()
-                if (i.readUnsignedByte() != 0) { s.close(); throw IOException("SOCKS 아이디/비밀번호가 틀렸어요") }
-            }
-            else -> { s.close(); throw IOException("SOCKS 인증 방식이 맞지 않아요") }
-        }
-        val h = host.toByteArray()
-        o.write(byteArrayOf(5, 1, 0, 3, h.size.toByte()) + h + byteArrayOf((port shr 8).toByte(), port.toByte())); o.flush()
-        i.readUnsignedByte(); val rep = i.readUnsignedByte(); i.readUnsignedByte()
-        when (i.readUnsignedByte()) { 1 -> i.skipBytes(4); 3 -> i.skipBytes(i.readUnsignedByte()); 4 -> i.skipBytes(16) }
-        i.skipBytes(2)
-        if (rep != 0) { s.close(); throw IOException("SOCKS 서버가 연결을 거부했어요 ($rep)") }
-        s.soTimeout = 0
-        return s
-    }
-
-    /** Settings "연결 확인": asks ipinfo.io through the SOCKS proxy and returns the IP / country it sees. */
-    fun testSocks(p: Prefs): String = runCatching {
-        prefs = prefs ?: p
-        val raw = socksConnect("ipinfo.io", 443)
-        val ssl = (SSLSocketFactory.getDefault() as SSLSocketFactory).createSocket(raw, "ipinfo.io", 443, true) as SSLSocket
-        ssl.soTimeout = 10_000
-        ssl.startHandshake()
-        ssl.outputStream.write("GET /json HTTP/1.1\r\nHost: ipinfo.io\r\nUser-Agent: Nami\r\nAccept: application/json\r\nConnection: close\r\n\r\n".toByteArray())
-        ssl.outputStream.flush()
-        val text = ssl.inputStream.bufferedReader().use { it.readText() }
-        ssl.close()
-        val body = text.substring(text.indexOf('{'), text.lastIndexOf('}') + 1)
-        val o = JSONObject(body)
-        "연결됨 · 사이트가 보는 IP ${o.optString("ip")} (${o.optString("country")})"
-    }.getOrElse { "연결 실패: ${it.message ?: it.javaClass.simpleName}" }
-
     // ---------- connection handling ----------
 
     private fun readHead(inp: InputStream): String? {
@@ -199,7 +142,7 @@ object LocalProxy {
             }
             out.write("HTTP/1.1 200 Connection established\r\n\r\n".toByteArray()); out.flush()
             val p = prefs
-            if (port == 443 && p != null && p.dpiBypass && !viaSocks(host) && !matches(host, p.bypassOff)) {
+            if (port == 443 && p != null && p.dpiBypass && !matches(host, p.bypassOff)) {
                 runCatching { sendSplitHello(inp, up.getOutputStream(), host) }.onFailure { up.close(); c.close(); return }
             }
             pipe(c, inp, up)

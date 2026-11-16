@@ -55,8 +55,6 @@ class BrowserTab(val id: Long, val web: WebView, val frame: PullFrame) {
     @Volatile var host = ""
     var fellBackNoticed = false
     val blocked = java.util.concurrent.atomic.AtomicInteger(0)
-    /** Hosts whose requests failed on this page (to find which ones need the proxy). */
-    val failed: MutableSet<String> = java.util.Collections.synchronizedSet(LinkedHashSet())
     val handlers = ArrayList<androidx.webkit.ScriptHandler>()
 }
 
@@ -154,7 +152,7 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
     /** Points every WebView at LocalProxy when DNS / bypass / site proxy is on; otherwise goes direct. */
     fun applyNetwork() {
         if (!WebViewFeature.isFeatureSupported(WebViewFeature.PROXY_OVERRIDE)) { netStatus = "이 폰의 웹뷰가 지원하지 않아요"; LocalProxy.stop(); return }
-        val need = prefs.dnsMode != DnsMode.OFF || prefs.dpiBypass || prefs.proxySites.isNotEmpty()
+        val need = prefs.dnsMode != DnsMode.OFF || prefs.dpiBypass
         val pc = androidx.webkit.ProxyController.getInstance()
         if (need) {
             val port = runCatching { LocalProxy.start(prefs) }.getOrNull()
@@ -476,14 +474,6 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
                 return r
             }
 
-            override fun onReceivedError(view: WebView, req: WebResourceRequest, err: android.webkit.WebResourceError) {
-                req.url.host?.let { t.failed.add(it) }
-            }
-
-            override fun onReceivedHttpError(view: WebView, req: WebResourceRequest, resp: android.webkit.WebResourceResponse) {
-                if (resp.statusCode == 403 || resp.statusCode == 451 || resp.statusCode == 401) req.url.host?.let { t.failed.add(it) }
-            }
-
             override fun shouldOverrideUrlLoading(view: WebView, req: WebResourceRequest): Boolean {
                 val u = req.url
                 if (req.isForMainFrame && isUserJs(u.toString())) { offerInstall(u.toString()); return true }
@@ -509,7 +499,6 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
                 t.translating = false
                 t.host = h
                 t.blocked.set(0)
-                t.failed.clear()
             }
 
             override fun onPageFinished(view: WebView, url: String) {
