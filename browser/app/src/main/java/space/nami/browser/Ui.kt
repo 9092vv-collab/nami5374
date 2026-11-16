@@ -52,7 +52,9 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Download
@@ -256,6 +258,8 @@ fun NamiApp(b: Browser, prefs: Prefs, act: Activity) = NamiTheme {
         if (b.showTabs) TabsScreen(b)
         if (b.showSettings) SettingsScreen(b, prefs)
         b.longPress?.let { LongPressDialog(b, it) }
+        b.pendingInstall?.let { InstallDialog(b, it) }
+        b.scriptCommands?.let { CommandsDialog(b, it) }
         b.customView?.let { v ->
             AndroidView(factory = { FrameLayout(it).apply { setBackgroundColor(android.graphics.Color.BLACK) } },
                 modifier = Modifier.fillMaxSize(),
@@ -371,6 +375,14 @@ private fun MainMenu(b: Browser, prefs: Prefs, open: Boolean, close: () -> Unit,
                 if (!always && tab != null && !tab.translateOn) b.toggleTranslate(tab)
             }
         }
+        if (host.isNotEmpty() && prefs.adblock) {
+            val on = host !in prefs.adblockOff
+            val n = tab?.blocked?.get() ?: 0
+            item(if (on && n > 0) "광고 차단 · ${n}개 막음" else "이 사이트 광고 차단", Icons.Filled.Block, checked = on) {
+                prefs.putAdblockOff(host, on); tab?.web?.reload()
+            }
+        }
+        if (b.scripts.list.any { it.enabled }) item("유저스크립트 명령", Icons.Filled.Code) { b.loadScriptCommands() }
         item("공유", Action.SHARE.icon) { run(Action.SHARE) }
         item("맨 위로", Action.TOP.icon) { run(Action.TOP) }
         item("받은 파일", Icons.Filled.Download) {
@@ -463,6 +475,40 @@ private fun LongPressDialog(b: Browser, lp: LongPress) {
                     row("새 탭에서 열기") { b.newTab(link, select = false); b.showPill("새 탭에서 열었어요", 1500) }
                     row("링크 복사") { copyText(ctx, link) }
                     row("링크 공유") { shareText(ctx, link) }
+                }
+            }
+        })
+}
+
+@Composable
+private fun InstallDialog(b: Browser, s: UScript) {
+    val existing = b.scripts.list.firstOrNull { it.name == s.name && it.namespace == s.namespace }
+    AlertDialog(onDismissRequest = { b.pendingInstall = null }, containerColor = Color.White, shape = RoundedCornerShape(24.dp),
+        title = { Text(if (existing != null) "유저스크립트 업데이트" else "유저스크립트 설치", fontWeight = FontWeight.Bold) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(s.name + if (s.version.isNotEmpty()) "  ${s.version}" else "", fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = C.Ink)
+                if (existing != null) Text("지금 설치된 버전: ${existing.version}", fontSize = 13.sp, color = C.Sub)
+                if (s.description.isNotEmpty()) Text(s.description, fontSize = 14.sp, color = C.Ink)
+                val m = s.matches.ifEmpty { listOf("모든 사이트") }
+                Text("실행되는 곳: " + m.take(5).joinToString(", ") + if (m.size > 5) " 외 ${m.size - 5}곳" else "", fontSize = 13.sp, color = C.Sub)
+                Text("믿을 수 있는 곳에서 받은 스크립트만 설치해 주세요. 스크립트는 그 사이트의 내용을 읽고 바꿀 수 있어요.", fontSize = 12.sp, color = C.Sub)
+            }
+        },
+        confirmButton = { TextButton({ b.installPending() }) { Text(if (existing != null) "업데이트" else "설치", color = C.Accent, fontWeight = FontWeight.Bold) } },
+        dismissButton = { TextButton({ b.pendingInstall = null }) { Text("취소", color = C.Ink) } })
+}
+
+@Composable
+private fun CommandsDialog(b: Browser, list: List<String>) {
+    AlertDialog(onDismissRequest = { b.scriptCommands = null }, confirmButton = {}, containerColor = Color.White, shape = RoundedCornerShape(24.dp),
+        title = { Text("유저스크립트 명령", fontWeight = FontWeight.Bold) },
+        text = {
+            Column {
+                if (list.isEmpty()) Text("이 페이지에는 스크립트가 등록한 명령이 없어요.", fontSize = 14.sp, color = C.Sub)
+                list.forEachIndexed { i, name ->
+                    Text(name, fontSize = 16.sp, color = C.Ink, modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
+                        .clickable { b.runScriptCommand(i) }.padding(horizontal = 8.dp, vertical = 13.dp))
                 }
             }
         })

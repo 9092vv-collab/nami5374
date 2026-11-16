@@ -50,11 +50,24 @@ class BrowserTab(val id: Long, val web: WebView, val frame: PullFrame) {
     /** Translation wanted on this tab (stays on while moving around the same site). */
     var translateOn by mutableStateOf(false)
     var translating by mutableStateOf(false)
-    var host = ""
+    @Volatile var host = ""
     var fellBackNoticed = false
+    val blocked = java.util.concurrent.atomic.AtomicInteger(0)
+    val handlers = ArrayList<androidx.webkit.ScriptHandler>()
 }
 
 class LongPress(val link: String?, val image: String?)
+
+/** Hides elements matched by the ad-block element-hiding rules; runs at document start in every frame. */
+private const val BLOCK_CSS_JS = """
+(function(){ try {
+  var B = window.NamiBridge; if (!B || !B.css) return;
+  var c = B.css(location.hostname); if (!c) return;
+  var st = document.createElement('style'); st.textContent = c;
+  var add = function(){ var p = document.head || document.documentElement; if (p) { p.appendChild(st); return true; } return false; };
+  if (!add()) new MutationObserver(function(m, o){ if (add()) o.disconnect(); }).observe(document, { childList: true, subtree: true });
+} catch(e) {} })();
+"""
 
 /**
  * Pull-down detector around the WebView: watches touches without stealing them.
@@ -107,6 +120,69 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
     var runAction: (Action) -> Unit = {}
 
     val translator = TranslatorHub(prefs)
+    val blocker = Blocker(act, prefs)
+    val scripts = Userscripts(act)
+    /** A .user.js the user opened, waiting for "설치". */
+    var pendingInstall by mutableStateOf<UScript?>(null)
+    var scriptCommands by mutableStateOf<List<String>?>(null)
+    private val docStart = WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)
+
+    init {
+        scripts.onChange = { tabs.forEach { applyScripts(it) } }
+        scope.launch {
+            if (!prefs.blockerAppsChosen) {
+                val found = blocker.findApps()
+                if (found.isNotEmpty()) prefs.putBlockerApps(found.map { it.pkg }.toSet())
+            }
+            blocker.refresh(true)
+        }
+    }
+
+    fun applyScripts(t: BrowserTab) {
+        if (!docStart) return
+        t.handlers.forEach { runCatching { it.remove() } }
+        t.handlers.clear()
+        scripts.wrappers().forEach { js -> runCatching { t.handlers.add(WebViewCompat.addDocumentStartJavaScript(t.web, js, setOf("*"))) } }
+    }
+
+    fun offerInstall(url: String) {
+        showPill("스크립트 불러오는 중…", 0)
+        scope.launch {
+            runCatching { scripts.fetch(url) }
+                .onSuccess { src ->
+                    showPill(null)
+                    if (!src.contains("==UserScript==")) { Toast.makeText(act, "유저스크립트가 아니에요", Toast.LENGTH_SHORT).show(); tab?.web?.loadUrl(url) }
+                    else pendingInstall = UScript("preview", src, true, url)
+                }
+                .onFailure { showPill("스크립트를 받지 못했어요: ${it.message}") }
+        }
+    }
+
+    fun installPending() {
+        val p = pendingInstall ?: return
+        pendingInstall = null
+        scope.launch {
+            runCatching { scripts.install(p.source, p.installUrl) }
+                .onSuccess { showPill("'${it.name}' 설치했어요 · 새로고침하면 적용돼요", 2600) }
+                .onFailure { showPill("설치 실패: ${it.message}") }
+        }
+    }
+
+    fun loadScriptCommands() {
+        val t = tab ?: return
+        t.web.evaluateJavascript("JSON.stringify((window.__namiMenu||[]).map(function(m){return m.name}))") { r ->
+            val list = runCatching {
+                val inner = org.json.JSONTokener(r).nextValue() as? String ?: "[]"
+                JSONArray(inner).let { a -> (0 until a.length()).map { a.getString(it) } }
+            }.getOrDefault(emptyList())
+            scriptCommands = list
+        }
+    }
+
+    fun runScriptCommand(i: Int) {
+        scriptCommands = null
+        tab?.web?.evaluateJavascript("try{window.__namiMenu[$i].fn()}catch(e){console.error(e)}", null)
+    }
     private var nextId = 1L
     private val density = act.resources.displayMetrics.density
     private var pillJob: Job? = null
@@ -169,9 +245,13 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
             !s.contains(' ') && s.startsWith("localhost") -> "http://$s"
             else -> "https://www.google.com/search?q=" + URLEncoder.encode(s, "UTF-8")
         }
+        if (isUserJs(url)) { offerInstall(url); return }
         t.url = url
         t.web.loadUrl(url)
     }
+
+    private fun isUserJs(url: String) = (url.startsWith("http://") || url.startsWith("https://")) &&
+        Uri.parse(url).path?.endsWith(".user.js") == true
 
     // ---------- translation ----------
 
@@ -222,6 +302,25 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
             }
         }
 
+        @JavascriptInterface fun css(host: String): String = runCatching { blocker.css(host) }.getOrDefault("")
+        @JavascriptInterface fun gmValues(id: String): String = scripts.values(id)
+        @JavascriptInterface fun gmSet(id: String, key: String, json: String) = scripts.setValue(id, key, json)
+        @JavascriptInterface fun gmDel(id: String, key: String) = scripts.deleteValue(id, key)
+        @JavascriptInterface fun gmOpen(url: String, background: Boolean) { scope.launch { newTab(url, select = !background); if (background) showPill("새 탭에서 열었어요", 1500) } }
+        @JavascriptInterface fun gmClip(text: String) { scope.launch { copyText(act, text) } }
+        @JavascriptInterface fun gmToast(text: String) { scope.launch { Toast.makeText(act, text, Toast.LENGTH_SHORT).show() } }
+        @JavascriptInterface fun gmDownload(url: String, name: String) { scope.launch { download(url, cd = if (name.isNotEmpty()) "attachment; filename=\"$name\"" else null) } }
+        @JavascriptInterface
+        fun gmXhr(json: String) {
+            scope.launch {
+                val o = runCatching { org.json.JSONObject(json) }.getOrNull() ?: return@launch
+                val id = o.optString("id")
+                val res = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { GmXhr.run(o, t.web.settings.userAgentString) }
+                val q = org.json.JSONObject.quote(id)
+                t.web.evaluateJavascript("window.__namiGmCb&&__namiGmCb[$q]&&__namiGmCb[$q]($res)", null)
+            }
+        }
+
         @JavascriptInterface
         fun doubleTap() { scope.launch { if (t === tab) runAction(prefs.doubleTapAction) } }
     }
@@ -256,13 +355,23 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
         }
         CookieManager.getInstance().setAcceptThirdPartyCookies(web, true)
         web.addJavascriptInterface(Bridge(t), "NamiBridge")
-        if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
+        if (docStart) {
+            runCatching { WebViewCompat.addDocumentStartJavaScript(web, BLOCK_CSS_JS, setOf("*")) }
             runCatching { WebViewCompat.addDocumentStartJavaScript(web, PageScript.JS, setOf("*")) }
+            applyScripts(t)
         }
 
         web.webViewClient = object : WebViewClient() {
+            override fun shouldInterceptRequest(view: WebView, req: WebResourceRequest): android.webkit.WebResourceResponse? {
+                if (req.isForMainFrame) return null
+                val r = blocker.intercept(req.url.toString(), t.host)
+                if (r != null) t.blocked.incrementAndGet()
+                return r
+            }
+
             override fun shouldOverrideUrlLoading(view: WebView, req: WebResourceRequest): Boolean {
                 val u = req.url
+                if (req.isForMainFrame && isUserJs(u.toString())) { offerInstall(u.toString()); return true }
                 val s = u.scheme ?: return false
                 if (s == "http" || s == "https" || s == "about" || s == "data" || s == "blob" || s == "javascript") return false
                 // intent:, market:, mailto: … → other apps
@@ -284,12 +393,17 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
                 t.translateOn = (t.translateOn && h == t.host) || h in prefs.alwaysHosts
                 t.translating = false
                 t.host = h
+                t.blocked.set(0)
             }
 
             override fun onPageFinished(view: WebView, url: String) {
                 t.url = url; t.progress = 100
                 t.canBack = view.canGoBack(); t.canForward = view.canGoForward()
                 view.evaluateJavascript(PageScript.JS, null)
+                if (!docStart) {
+                    view.evaluateJavascript(BLOCK_CSS_JS, null)
+                    scripts.wrappers().forEach { view.evaluateJavascript(it, null) }
+                }
                 if (t.translateOn) startTranslate(t)
             }
 

@@ -72,6 +72,16 @@ class Prefs(ctx: Context) {
         private set
     var hideStatusBar by mutableStateOf(sp.getBoolean("hideStatusBar", false))
         private set
+    var adblock by mutableStateOf(sp.getBoolean("adblock", true))
+        private set
+    /** Content-blocker apps the user turned on (null = never chosen → turn on whatever is found). */
+    var blockerApps by mutableStateOf(sp.getStringSet("blockerApps", emptySet())?.toSet() ?: emptySet())
+        private set
+    val blockerAppsChosen get() = sp.contains("blockerApps")
+    var filterUrls by mutableStateOf(sp.getString("filterUrls", "")!!.split("\n").filter { it.isNotBlank() })
+        private set
+    var adblockOff by mutableStateOf(sp.getStringSet("adblockOff", emptySet())?.toSet() ?: emptySet())
+        private set
     var splitParts by mutableStateOf(sp.getInt("splitParts", 4))
         private set
     var highRefresh by mutableStateOf(sp.getBoolean("highRefresh", true))
@@ -97,6 +107,13 @@ class Prefs(ctx: Context) {
     fun putDoubleTapAction(v: Action) { doubleTapAction = v; sp.edit().putString("doubleTapAction", v.name).apply() }
     fun putPullStrength(v: PullStrength) { pullStrength = v; sp.edit().putString("pullStrength", v.name).apply() }
     fun putDotOnLeft(v: Boolean) { dotOnLeft = v; sp.edit().putBoolean("dotOnLeft", v).apply() }
+    fun putAdblock(v: Boolean) { adblock = v; sp.edit().putBoolean("adblock", v).apply() }
+    fun putBlockerApps(v: Set<String>) { blockerApps = v; sp.edit().putStringSet("blockerApps", v).apply() }
+    fun putFilterUrls(v: List<String>) { filterUrls = v.distinct(); sp.edit().putString("filterUrls", filterUrls.joinToString("\n")).apply() }
+    fun putAdblockOff(host: String, off: Boolean) {
+        val s = if (off) adblockOff + host else adblockOff - host
+        adblockOff = s; sp.edit().putStringSet("adblockOff", s).apply()
+    }
     fun putSplitParts(v: Int) { splitParts = v; sp.edit().putInt("splitParts", v).apply() }
     fun putHighRefresh(v: Boolean) { highRefresh = v; sp.edit().putBoolean("highRefresh", v).apply() }
     fun putHideStatusBar(v: Boolean) { hideStatusBar = v; sp.edit().putBoolean("hideStatusBar", v).apply() }

@@ -8,6 +8,8 @@ import android.net.Uri
 import android.os.PowerManager
 import android.provider.Settings
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -85,7 +87,7 @@ fun SettingsScreen(b: Browser, prefs: Prefs) {
             }
             Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 6.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf("툴바", "동작", "번역", "디스플레이", "일반").forEachIndexed { i, t ->
+                listOf("툴바", "동작", "번역", "확장", "디스플레이", "일반").forEachIndexed { i, t ->
                     val sel = i == page
                     Text(t, fontSize = 15.sp, fontWeight = if (sel) FontWeight.Bold else FontWeight.Medium,
                         color = if (sel) Color.White else C.Ink, textAlign = TextAlign.Center,
@@ -100,7 +102,8 @@ fun SettingsScreen(b: Browser, prefs: Prefs) {
                         0 -> ToolbarSection(prefs)
                         1 -> GestureSection(prefs)
                         2 -> TranslateSection(b, prefs)
-                        3 -> DisplaySection(prefs)
+                        3 -> ExtensionsSection(b, prefs)
+                        4 -> DisplaySection(prefs)
                         else -> {
                             GeneralSection(prefs)
                             Text("Nami 0.1.1", color = C.Sub, fontSize = 13.sp, modifier = Modifier.padding(start = 6.dp))
@@ -336,5 +339,105 @@ private fun GeneralSection(prefs: Prefs) {
         Label("홈페이지 · 새 탭")
         OutlinedTextField(prefs.homeUrl, { prefs.putHomeUrl(it.trim()) }, Modifier.fillMaxWidth(), singleLine = true,
             shape = RoundedCornerShape(16.dp), colors = colors)
+    }
+}
+
+@Composable
+private fun ExtensionsSection(b: Browser, prefs: Prefs) {
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val apps = remember { b.blocker.findApps() }
+    var busy by remember { mutableStateOf(false) }
+    var msg by remember { mutableStateOf<String?>(null) }
+    val colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = C.Accent, unfocusedBorderColor = C.Line, cursorColor = C.Accent)
+    fun refresh() { busy = true; scope.launch { b.blocker.refresh(true); busy = false } }
+
+    Card("광고 차단", "삼성 인터넷용 광고 차단 앱의 필터를 그대로 받아 써요. 바꾸면 새로고침했을 때 적용돼요.") {
+        SwitchRow("광고 차단", prefs.adblock) { prefs.putAdblock(it) }
+        Text(b.blocker.status, fontSize = 13.sp, color = if (b.blocker.ruleCount > 0) C.Accent else C.Sub)
+        Label("차단 앱")
+        if (apps.isEmpty()) {
+            Text("설치된 차단 앱이 없어요. 삼성 인터넷용 광고 차단 앱(Adblock Plus for Samsung Internet, AdGuard Content Blocker 등)을 설치하면 여기 나와요.",
+                fontSize = 13.sp, color = C.Sub, lineHeight = 18.sp)
+            TextButton({
+                runCatching { ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("market://search?q=samsung%20internet%20adblock"))) }
+            }) { Text("스토어에서 찾기", color = C.Accent, fontWeight = FontWeight.SemiBold) }
+        }
+        apps.forEach { a ->
+            SwitchRow(a.label, a.pkg in prefs.blockerApps) { on ->
+                prefs.putBlockerApps(if (on) prefs.blockerApps + a.pkg else prefs.blockerApps - a.pkg); refresh()
+            }
+        }
+        Label("필터 목록 주소")
+        prefs.filterUrls.forEach { u ->
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text(u, fontSize = 13.sp, color = C.Ink, modifier = Modifier.weight(1f))
+                IconButton({ prefs.putFilterUrls(prefs.filterUrls - u); refresh() }) { Icon(Icons.Filled.Close, "빼기", tint = C.Sub) }
+            }
+        }
+        var url by remember { mutableStateOf("") }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            OutlinedTextField(url, { url = it }, Modifier.weight(1f), singleLine = true, placeholder = { Text("https://…/filter.txt", color = C.Sub) },
+                shape = RoundedCornerShape(16.dp), colors = colors)
+            TextButton({ if (url.startsWith("http")) { prefs.putFilterUrls(prefs.filterUrls + url.trim()); url = ""; refresh() } }) { Text("추가", color = C.Accent) }
+        }
+        if ("https://easylist.to/easylist/easylist.txt" !in prefs.filterUrls)
+            TextButton({ prefs.putFilterUrls(prefs.filterUrls + "https://easylist.to/easylist/easylist.txt"); refresh() }) { Text("+ EasyList 추가", color = C.Accent) }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            TextButton({ refresh() }, enabled = !busy) { Text(if (busy) "받는 중…" else "필터 새로 받기", color = C.Accent, fontWeight = FontWeight.SemiBold) }
+        }
+        if (prefs.adblockOff.isNotEmpty()) {
+            Label("광고 차단을 끈 사이트")
+            prefs.adblockOff.sorted().forEach { h ->
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text(h, fontSize = 15.sp, color = C.Ink, modifier = Modifier.weight(1f))
+                    IconButton({ prefs.putAdblockOff(h, false) }) { Icon(Icons.Filled.Close, "빼기", tint = C.Sub) }
+                }
+            }
+        }
+    }
+
+    val pick = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri != null) scope.launch {
+            msg = runCatching { "${b.scripts.importFile(uri)}개 가져왔어요" }.getOrElse { "가져오기 실패: ${it.message}" }
+        }
+    }
+    Card("유저스크립트", "템퍼몽키용 스크립트를 그대로 돌려요. 그리스포크 같은 곳에서 설치 버튼을 누르면 바로 추가돼요. 바꾸면 새로고침했을 때 적용돼요.") {
+        var url by remember { mutableStateOf("") }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            OutlinedTextField(url, { url = it }, Modifier.weight(1f), singleLine = true, placeholder = { Text("https://…/script.user.js", color = C.Sub) },
+                shape = RoundedCornerShape(16.dp), colors = colors)
+            TextButton({
+                val u = url.trim()
+                if (u.startsWith("http")) scope.launch {
+                    msg = runCatching { "'${b.scripts.installFromUrl(u).name}' 추가했어요" }.getOrElse { "추가 실패: ${it.message}" }
+                    url = ""
+                }
+            }) { Text("추가", color = C.Accent) }
+        }
+        TextButton({ pick.launch("*/*") }) { Text("파일에서 가져오기 (.user.js · 템퍼몽키 백업)", color = C.Accent, fontWeight = FontWeight.SemiBold) }
+        msg?.let { Text(it, fontSize = 13.sp, color = C.Ink) }
+        if (b.scripts.list.isEmpty()) Text("아직 설치한 스크립트가 없어요.", fontSize = 13.sp, color = C.Sub)
+        b.scripts.list.forEach { sc ->
+            var confirm by remember(sc.id) { mutableStateOf(false) }
+            Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(C.Bg).padding(start = 14.dp, end = 6.dp, top = 8.dp, bottom = 4.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(sc.name, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = C.Ink)
+                        Text(listOf(sc.version, sc.matches.firstOrNull() ?: "모든 사이트").filter { it.isNotEmpty() }.joinToString(" · "),
+                            fontSize = 12.sp, color = C.Sub, maxLines = 1)
+                    }
+                    Switch(sc.enabled, { b.scripts.setEnabled(sc, it) }, colors = SwitchDefaults.colors(checkedTrackColor = C.Accent,
+                        checkedThumbColor = Color.White, uncheckedTrackColor = C.Drawer, uncheckedBorderColor = C.Line))
+                }
+                Row {
+                    if (sc.updateUrl.isNotEmpty()) TextButton({ scope.launch { msg = runCatching { b.scripts.update(sc) }.getOrElse { "업데이트 실패: ${it.message}" } } }) {
+                        Text("업데이트 확인", color = C.Ink, fontSize = 13.sp)
+                    }
+                    if (!confirm) TextButton({ confirm = true }) { Text("삭제", color = C.Sub, fontSize = 13.sp) }
+                    else TextButton({ b.scripts.remove(sc) }) { Text("정말 삭제", color = Color(0xFFC0392B), fontSize = 13.sp, fontWeight = FontWeight.Bold) }
+                }
+            }
+        }
     }
 }
