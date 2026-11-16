@@ -294,6 +294,9 @@ private fun DisplaySection(prefs: Prefs) {
         Text("켜면 Nami가 떠 있는 동안 폰에 가장 높은 주사율을 요청해서 스크롤이 항상 부드러워요. 배터리를 조금 더 써요. " +
             "끄면 폰의 '부드러운 화면 움직임' 설정대로 움직여요.", fontSize = 12.sp, color = C.Sub, lineHeight = 17.sp)
         SwitchRow("상태 표시줄 숨기기", prefs.hideStatusBar) { prefs.putHideStatusBar(it) }
+        SelectRow("글자 크기", listOf(80, 90, 100, 110, 125, 150, 175, 200), prefs.textZoom, { "$it%" }) { prefs.putTextZoom(it) }
+        SwitchRow("확대/축소 항상 허용", prefs.forceZoom) { prefs.putForceZoom(it) }
+        Text("사이트가 막아 둔 두 손가락 확대·축소도 되게 해요. 새로고침하면 적용돼요.", fontSize = 12.sp, color = C.Sub, lineHeight = 17.sp)
     }
 }
 

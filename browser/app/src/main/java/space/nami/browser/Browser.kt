@@ -365,6 +365,7 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
         @JavascriptInterface fun blobChunk(id: String, b64: String): Boolean = blobs.chunk(id, b64)
         @JavascriptInterface fun blobEnd(id: String) = blobs.end(id)
         @JavascriptInterface fun blobFail(id: String) { blobs.fail(id); scope.launch { Toast.makeText(act, "파일을 읽지 못했어요", Toast.LENGTH_SHORT).show() } }
+        @JavascriptInterface fun forceZoom(): Boolean = prefs.forceZoom
         @JavascriptInterface fun scriptVersion(name: String, ns: String): String =
             scripts.list.firstOrNull { (it.one("name") == name || it.name == name) && (ns.isEmpty() || it.namespace == ns) }?.version ?: ""
         @JavascriptInterface fun gmValues(id: String): String = scripts.values(id)
@@ -410,6 +411,7 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
             builtInZoomControls = true
             displayZoomControls = false
             setSupportZoom(true)
+            textZoom = prefs.textZoom
             setSupportMultipleWindows(true)
             javaScriptCanOpenWindowsAutomatically = false
             mediaPlaybackRequiresUserGesture = true

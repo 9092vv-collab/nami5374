@@ -167,6 +167,21 @@ object PageScript {
     HTMLAnchorElement.prototype.click = function(){ if (!this.isConnected) onDownloadLink(this); return oClick.apply(this, arguments); };
   } catch(e) {}
 
+  // ---- "확대/축소 항상 허용": undo viewport rules that block pinch zoom ----
+  function fixViewport(){
+    try {
+      if (!NamiBridge.forceZoom()) return;
+      var ms = document.querySelectorAll('meta[name=viewport]');
+      for (var i = 0; i < ms.length; i++) {
+        var c = ms[i].getAttribute('content') || '';
+        var n = c.replace(/(^|,)\s*(user-scalable|maximum-scale)\s*=\s*[^,]*/gi, '').replace(/^\s*,\s*/, '');
+        if (n !== c || !/user-scalable/i.test(c)) ms[i].setAttribute('content', (n ? n + ', ' : '') + 'user-scalable=yes, maximum-scale=10');
+      }
+    } catch(e) {}
+  }
+  document.addEventListener('DOMContentLoaded', fixViewport);
+  setTimeout(fixViewport, 1500);
+
   // ---- double tap on text / empty space ----
   var sx = 0, sy = 0, moved = false, multi = false, lastT = 0, lx = 0, ly = 0;
   var NOTAP = 'a,button,input,textarea,select,label,img,video,audio,canvas,summary,[role=button],[onclick],[contenteditable=""],[contenteditable=true]';

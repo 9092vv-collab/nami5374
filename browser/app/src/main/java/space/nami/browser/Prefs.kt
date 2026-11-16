@@ -84,6 +84,10 @@ class Prefs(ctx: Context) {
         private set
     var splitParts by mutableStateOf(sp.getInt("splitParts", 4))
         private set
+    var textZoom by mutableStateOf(sp.getInt("textZoom", 100))
+        private set
+    var forceZoom by mutableStateOf(sp.getBoolean("forceZoom", true))
+        private set
     var highRefresh by mutableStateOf(sp.getBoolean("highRefresh", true))
         private set
     var engine by mutableStateOf(Engine.entries.firstOrNull { it.name == sp.getString("engine", null) } ?: Engine.GOOGLE)
@@ -135,6 +139,8 @@ class Prefs(ctx: Context) {
         }
     }
     fun putSplitParts(v: Int) { splitParts = v; sp.edit().putInt("splitParts", v).apply() }
+    fun putTextZoom(v: Int) { textZoom = v; sp.edit().putInt("textZoom", v).apply() }
+    fun putForceZoom(v: Boolean) { forceZoom = v; sp.edit().putBoolean("forceZoom", v).apply() }
     fun putHighRefresh(v: Boolean) { highRefresh = v; sp.edit().putBoolean("highRefresh", v).apply() }
     fun putHideStatusBar(v: Boolean) { hideStatusBar = v; sp.edit().putBoolean("hideStatusBar", v).apply() }
     fun putEngine(v: Engine) { engine = v; sp.edit().putString("engine", v.name).apply() }

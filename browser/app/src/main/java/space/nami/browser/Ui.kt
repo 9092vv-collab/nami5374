@@ -195,6 +195,8 @@ fun NamiApp(b: Browser, prefs: Prefs, act: Activity) = NamiTheme {
         }
     }
 
+    LaunchedEffect(prefs.textZoom) { b.tabs.forEach { it.web.settings.textZoom = prefs.textZoom } }
+
     fun run(a: Action) {
         val t = b.tab
         when (a) {
