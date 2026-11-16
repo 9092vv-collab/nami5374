@@ -179,8 +179,7 @@ class BlobSaver(private val ctx: Context) {
             Downloads.notifyDone(uri, final, FileName.mimeFor(final))
             val nm = ctx.getSystemService(NotificationManager::class.java)
             nm.createNotificationChannel(NotificationChannel("dl_done", "다운로드 완료", NotificationManager.IMPORTANCE_DEFAULT))
-            val open = Intent(Intent.ACTION_VIEW).setDataAndType(uri, FileName.mimeFor(final) ?: ctx.contentResolver.getType(uri))
-                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+            val open = Downloads.openIntent(ctx, uri, final, FileName.mimeFor(final) ?: ctx.contentResolver.getType(uri))
             val id = (System.currentTimeMillis() % 100000).toInt() + 200000
             runCatching {
                 nm.notify(id, NotificationCompat.Builder(ctx, "dl_done").setSmallIcon(android.R.drawable.stat_sys_download_done)

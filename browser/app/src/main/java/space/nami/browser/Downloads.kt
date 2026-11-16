@@ -68,11 +68,46 @@ object Downloads {
         return out.sortedByDescending { it.time }
     }
 
+    const val APK = "application/vnd.android.package-archive"
+    const val ACTION_OPEN_FILE = "space.nami.browser.OPEN_FILE"
+
+    /** An .apk waiting for the user to allow "install unknown apps" for Nami; installed when they come back. */
+    @Volatile var pendingApk: Uri? = null
+
+    /** Intent the "다 받았어요" notification sends: goes through Nami so .apk files get the install-permission step. */
+    fun openIntent(ctx: Context, uri: Uri, name: String, mime: String?): Intent =
+        Intent(ctx, MainActivity::class.java).setAction(ACTION_OPEN_FILE).setData(uri)
+            .putExtra("name", name).putExtra("mime", mime).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+
+    /** Opens a downloaded file right away in its default app (.apk → installer, asking for permission first if needed). */
     fun open(ctx: Context, uri: Uri, mime: String?, name: String) {
         val type = mime?.takeIf { it.isNotBlank() && it != "application/octet-stream" } ?: FileName.mimeFor(name) ?: ctx.contentResolver.getType(uri) ?: "*/*"
+        if (type == APK || name.endsWith(".apk", true)) { install(ctx, uri); return }
         val i = Intent(Intent.ACTION_VIEW).setDataAndType(uri, type).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
-        runCatching { ctx.startActivity(Intent.createChooser(i, name).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+        runCatching { ctx.startActivity(i) }
             .onFailure { Toast.makeText(ctx, "이 파일을 열 수 있는 앱이 없어요", Toast.LENGTH_SHORT).show() }
+    }
+
+    fun install(ctx: Context, uri: Uri) {
+        if (!ctx.packageManager.canRequestPackageInstalls()) {
+            pendingApk = uri
+            Toast.makeText(ctx, "Nami에서 앱 설치를 허용해 주세요. 허용하고 돌아오면 바로 설치해요.", Toast.LENGTH_LONG).show()
+            runCatching {
+                ctx.startActivity(Intent(android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:" + ctx.packageName))
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            }
+            return
+        }
+        pendingApk = null
+        val i = Intent(Intent.ACTION_VIEW).setDataAndType(uri, APK)
+            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+        runCatching { ctx.startActivity(i) }.onFailure { Toast.makeText(ctx, "설치 화면을 열지 못했어요", Toast.LENGTH_SHORT).show() }
+    }
+
+    /** Back from the permission screen: continue the install if it's allowed now. */
+    fun resumePending(ctx: Context) {
+        val u = pendingApk ?: return
+        if (ctx.packageManager.canRequestPackageInstalls()) install(ctx, u)
     }
 
     fun share(ctx: Context, it: DlItem) {

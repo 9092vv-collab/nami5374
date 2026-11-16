@@ -31,6 +31,7 @@ class MainActivity : ComponentActivity(), Host {
         super.onCreate(savedInstanceState)
         prefs = Prefs(this)
         browser = Browser(this, prefs, lifecycleScope, this)
+        handleOpenFile(intent)
         val incoming = urlFrom(intent)
         if (!browser.restore()) browser.newTab(incoming ?: prefs.homeUrl)
         else if (incoming != null) browser.newTab(incoming)
@@ -39,6 +40,7 @@ class MainActivity : ComponentActivity(), Host {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        if (handleOpenFile(intent)) return
         urlFrom(intent)?.let { browser.newTab(it); browser.toolbarVisible = false }
     }
 
@@ -49,6 +51,16 @@ class MainActivity : ComponentActivity(), Host {
         }
         else -> null
     }
+
+    /** Tap on the "다 받았어요" notification → open the file now. */
+    private fun handleOpenFile(i: Intent?): Boolean {
+        if (i?.action != Downloads.ACTION_OPEN_FILE) return false
+        val uri = i.data ?: return true
+        Downloads.open(this, uri, i.getStringExtra("mime"), i.getStringExtra("name") ?: "")
+        return true
+    }
+
+    override fun onResume() { super.onResume(); Downloads.resumePending(this) }
 
     override fun onStop() { super.onStop(); browser.save() }
 
