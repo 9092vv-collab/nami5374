@@ -5,6 +5,7 @@ package space.nami.browser
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -26,9 +27,13 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -41,7 +46,9 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -50,6 +57,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.launch
@@ -57,20 +65,34 @@ import org.json.JSONObject
 
 @Composable
 fun SettingsScreen(b: Browser, prefs: Prefs) {
+    var page by rememberSaveable { mutableIntStateOf(0) }
     Surface(Modifier.fillMaxSize(), color = C.Bg) {
         Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding()) {
             Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                 IconButton({ b.showSettings = false }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "뒤로", tint = C.Ink) }
                 Text("설정", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = C.Ink)
             }
+            Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf("툴바", "동작", "번역", "화면").forEachIndexed { i, t ->
+                    val sel = i == page
+                    Text(t, fontSize = 15.sp, fontWeight = if (sel) FontWeight.Bold else FontWeight.Medium,
+                        color = if (sel) Color.White else C.Ink, textAlign = TextAlign.Center,
+                        modifier = Modifier.weight(1f).clip(CircleShape).background(if (sel) C.Ink else Color.White)
+                            .clickable { page = i }.padding(vertical = 10.dp))
+                }
+            }
             Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp).padding(bottom = 40.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 Column(Modifier.widthIn(max = 760.dp).align(Alignment.CenterHorizontally), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                    ToolbarSection(prefs)
-                    GestureSection(prefs)
-                    TranslateSection(b, prefs)
-                    ScreenSection(prefs)
-                    Text("Nami 0.1.0", color = C.Sub, fontSize = 13.sp, modifier = Modifier.padding(start = 6.dp))
+                    when (page) {
+                        0 -> ToolbarSection(prefs)
+                        1 -> GestureSection(prefs)
+                        2 -> TranslateSection(b, prefs)
+                        else -> {
+                            ScreenSection(prefs)
+                            Text("Nami 0.1.1", color = C.Sub, fontSize = 13.sp, modifier = Modifier.padding(start = 6.dp))
+                        }
+                    }
                 }
             }
         }
@@ -100,10 +122,30 @@ private fun Chip(label: String, selected: Boolean, onClick: () -> Unit) {
             .clickable(onClick = onClick).padding(horizontal = 14.dp, vertical = 8.dp))
 }
 
+/** One line: label on the left, the current choice in a box on the right; tap opens the list. */
 @Composable
-private fun <T> Choices(items: List<T>, selected: T, label: (T) -> String, onPick: (T) -> Unit) {
-    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        items.forEach { Chip(label(it), it == selected) { onPick(it) } }
+private fun <T> SelectRow(label: String, items: List<T>, selected: T, name: (T) -> String, onPick: (T) -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    Row(Modifier.fillMaxWidth().padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(label, fontSize = 15.sp, color = C.Ink, modifier = Modifier.weight(1f).padding(end = 10.dp))
+        Box {
+            Row(Modifier.clip(RoundedCornerShape(14.dp)).background(C.Drawer).clickable { open = true }
+                .padding(start = 14.dp, end = 8.dp, top = 9.dp, bottom = 9.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(name(selected), fontSize = 15.sp, fontWeight = FontWeight.Medium, color = C.Ink)
+                Icon(Icons.Filled.ArrowDropDown, null, tint = C.Sub)
+            }
+            DropdownMenu(open, { open = false }, shape = RoundedCornerShape(18.dp), containerColor = Color.White) {
+                items.forEach { item ->
+                    val sel = item == selected
+                    val check: @Composable () -> Unit = { Icon(Icons.Filled.Check, null, tint = C.Accent) }
+                    DropdownMenuItem(
+                        text = { Text(name(item), fontSize = 15.sp, color = if (sel) C.Accent else C.Ink,
+                            fontWeight = if (sel) FontWeight.SemiBold else FontWeight.Normal) },
+                        onClick = { open = false; onPick(item) },
+                        trailingIcon = if (sel) check else null)
+                }
+            }
+        }
     }
 }
 
@@ -151,20 +193,16 @@ private fun ToolbarSection(prefs: Prefs) {
                 }
             }
         }
-        Label("툴바 부르는 점 위치")
-        Choices(listOf(false, true), prefs.dotOnLeft, { if (it) "왼쪽 아래" else "오른쪽 아래" }) { prefs.putDotOnLeft(it) }
+        SelectRow("툴바 부르는 점", listOf(false, true), prefs.dotOnLeft, { if (it) "왼쪽 아래" else "오른쪽 아래" }) { prefs.putDotOnLeft(it) }
     }
 }
 
 @Composable
 private fun GestureSection(prefs: Prefs) {
     Card("동작", "동작마다 할 일을 골라요. 스크롤로는 툴바가 나오지 않아요.") {
-        Label("맨 위에서 세게 끌어내리기")
-        Choices(Action.gestureChoices, prefs.pullAction, { it.label }) { prefs.putPullAction(it) }
-        Label("끌어내리는 세기")
-        Choices(PullStrength.entries, prefs.pullStrength, { it.label }) { prefs.putPullStrength(it) }
-        Label("글자나 빈 곳 두 번 탭")
-        Choices(Action.gestureChoices, prefs.doubleTapAction, { it.label }) { prefs.putDoubleTapAction(it) }
+        SelectRow("맨 위에서 끌어내리기", Action.gestureChoices, prefs.pullAction, { it.label }) { prefs.putPullAction(it) }
+        SelectRow("끌어내리는 세기", PullStrength.entries, prefs.pullStrength, { it.label }) { prefs.putPullStrength(it) }
+        SelectRow("두 번 탭 (글자·빈 곳)", Action.gestureChoices, prefs.doubleTapAction, { it.label }) { prefs.putDoubleTapAction(it) }
         Text("링크·그림 위를 두 번 탭하면 첫 탭에 이미 넘어가서 동작하지 않아요.", fontSize = 12.sp, color = C.Sub)
     }
 }
@@ -175,8 +213,7 @@ private fun TranslateSection(b: Browser, prefs: Prefs) {
     var result by remember { mutableStateOf<String?>(null) }
     var testing by remember { mutableStateOf(false) }
     Card("번역", "크롬처럼 페이지 모양은 그대로 두고 글자만 한국어로 바꿔요. 구글이 안 되면 폰 안 번역으로 자동으로 넘어가요.") {
-        Label("번역 엔진")
-        Choices(Engine.entries, prefs.engine, { it.label }) { prefs.putEngine(it); result = null }
+        SelectRow("번역 엔진", Engine.entries, prefs.engine, { it.label }) { prefs.putEngine(it); result = null }
         if (prefs.engine == Engine.VERTEX) VertexFields(prefs)
         Row(verticalAlignment = Alignment.CenterVertically) {
             TextButton({
