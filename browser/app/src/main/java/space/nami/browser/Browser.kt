@@ -312,13 +312,41 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
         attachCurrent()
     }
 
-    fun save() = prefs.saveTabs(tabs.map { it.web.url ?: it.url }.filter { it.startsWith("http") }, current)
+    private val thumbDir get() = java.io.File(act.filesDir, "thumbs")
+
+    /** Saves open tabs (urls + preview pictures) so they come back after the app is closed. */
+    fun save() {
+        tab?.let { capture(it) }
+        val kept = tabs.filter { (it.web.url ?: it.url).startsWith("http") }
+        prefs.saveTabs(kept.map { it.web.url ?: it.url }, kept.indexOf(tab).coerceAtLeast(0))
+        val snaps = kept.map { it.thumb }
+        val dir = thumbDir
+        scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            runCatching {
+                dir.mkdirs()
+                dir.listFiles()?.forEach { it.delete() }
+                snaps.forEachIndexed { i, b ->
+                    b?.let { bmp -> java.io.FileOutputStream(java.io.File(dir, "$i.webp")).use { o -> bmp.compress(Bitmap.CompressFormat.WEBP_LOSSY, 70, o) } }
+                }
+            }
+        }
+    }
 
     fun restore(): Boolean {
         val (urls, idx) = prefs.loadTabs()
         if (urls.isEmpty()) return false
         urls.forEach { newTab(it, select = false, append = true) }
         select(idx.coerceIn(0, tabs.size - 1))
+        val restored = tabs.toList()
+        val dir = thumbDir
+        scope.launch {
+            restored.forEachIndexed { i, t ->
+                val bmp = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    runCatching { android.graphics.BitmapFactory.decodeFile(java.io.File(dir, "$i.webp").path) }.getOrNull()
+                }
+                if (bmp != null && t.thumb == null) t.thumb = bmp
+            }
+        }
         return true
     }
 
