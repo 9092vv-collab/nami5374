@@ -104,6 +104,8 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.systemGestureExclusion
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -226,6 +228,8 @@ fun NamiApp(b: Browser, prefs: Prefs, act: Activity) = NamiTheme {
             Action.TOOLBAR -> b.toolbarVisible = !b.toolbarVisible
             Action.SETTINGS -> b.showSettings = true
             Action.DOWNLOADS -> b.showDownloads = true
+            Action.NEXT_TAB -> b.switchBy(1)
+            Action.PREV_TAB -> b.switchBy(-1)
         }
     }
     SideEffect { b.runAction = { run(it) } }
@@ -270,15 +274,40 @@ fun NamiApp(b: Browser, prefs: Prefs, act: Activity) = NamiTheme {
         }
 
         // The small dot that calls the toolbar
+        // Tap = toolbar. Swipe the dot left / right / up = actions from 설정 → 동작.
         if (!b.toolbarVisible && !b.editing) {
             val on = tab?.translateOn == true
-            Box(
-                Modifier.align(if (prefs.dotOnLeft) Alignment.BottomStart else Alignment.BottomEnd)
-                    .navigationBarsPadding().padding(14.dp).size(30.dp).clip(CircleShape)
-                    .background(if (on) C.Accent.copy(alpha = 0.55f) else C.Ink.copy(alpha = 0.16f))
-                    .clickable { b.toolbarVisible = true },
-                contentAlignment = Alignment.Center
-            ) { Box(Modifier.size(8.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.9f))) }
+            var drag by remember { mutableStateOf(androidx.compose.ui.geometry.Offset.Zero) }
+            val density = androidx.compose.ui.platform.LocalDensity.current
+            val limit = with(density) { 26.dp.toPx() }
+            fun pending(o: androidx.compose.ui.geometry.Offset): Action? = when {
+                kotlin.math.abs(o.x) > kotlin.math.abs(o.y) && kotlin.math.abs(o.x) > limit -> if (o.x < 0) prefs.dotLeftAction else prefs.dotRightAction
+                o.y < -limit && kotlin.math.abs(o.y) > kotlin.math.abs(o.x) -> prefs.dotUpAction
+                else -> null
+            }?.takeIf { it != Action.NONE }
+            Column(Modifier.align(if (prefs.dotOnLeft) Alignment.BottomStart else Alignment.BottomEnd).navigationBarsPadding().padding(14.dp),
+                horizontalAlignment = if (prefs.dotOnLeft) Alignment.Start else Alignment.End) {
+                pending(drag)?.let { a ->
+                    Surface(Modifier.padding(bottom = 6.dp), shape = CircleShape, color = C.Ink.copy(alpha = 0.85f)) {
+                        Text(a.label, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp))
+                    }
+                }
+                Box(
+                    Modifier.systemGestureExclusion()
+                        .graphicsLayer { translationX = drag.x * 0.45f; translationY = drag.y * 0.45f }
+                        .size(30.dp).clip(CircleShape)
+                        .background(if (on) C.Accent.copy(alpha = 0.55f) else C.Ink.copy(alpha = 0.16f))
+                        .pointerInput(Unit) {
+                            detectDragGestures(
+                                onDragEnd = { val a = pending(drag); drag = androidx.compose.ui.geometry.Offset.Zero; if (a != null) run(a) },
+                                onDragCancel = { drag = androidx.compose.ui.geometry.Offset.Zero },
+                            ) { change, d -> change.consume(); drag += d }
+                        }
+                        .clickable { b.toolbarVisible = true },
+                    contentAlignment = Alignment.Center
+                ) { Box(Modifier.size(8.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.9f))) }
+            }
         }
 
         if (b.showTabs) TabsScreen(b)

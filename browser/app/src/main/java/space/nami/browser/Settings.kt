@@ -221,6 +221,11 @@ private fun GestureSection(prefs: Prefs) {
         SelectRow("끌어내리는 세기", PullStrength.entries, prefs.pullStrength, { it.label }) { prefs.putPullStrength(it) }
         SelectRow("두 번 탭 (글자·빈 곳)", Action.gestureChoices, prefs.doubleTapAction, { it.label }) { prefs.putDoubleTapAction(it) }
         Text("링크·그림 위를 두 번 탭하면 첫 탭에 이미 넘어가서 동작하지 않아요.", fontSize = 12.sp, color = C.Sub)
+        Label("툴바 부르는 점")
+        Text("점을 누르면 툴바가 나와요. 점을 밀면 아래 동작을 해요.", fontSize = 12.sp, color = C.Sub)
+        SelectRow("왼쪽으로 밀기", Action.gestureChoices, prefs.dotLeftAction, { it.label }) { prefs.putDotLeftAction(it) }
+        SelectRow("오른쪽으로 밀기", Action.gestureChoices, prefs.dotRightAction, { it.label }) { prefs.putDotRightAction(it) }
+        SelectRow("위로 밀기", Action.gestureChoices, prefs.dotUpAction, { it.label }) { prefs.putDotUpAction(it) }
     }
 }
 

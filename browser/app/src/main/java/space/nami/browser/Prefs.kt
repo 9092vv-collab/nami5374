@@ -37,6 +37,8 @@ enum class Action(val label: String, val icon: ImageVector?) {
     SHARE("공유", Icons.Filled.Share),
     TOP("맨 위로", Icons.Filled.VerticalAlignTop),
     TOOLBAR("툴바 보이기/숨기기", Icons.Outlined.Visibility),
+    NEXT_TAB("다음 탭", Icons.AutoMirrored.Filled.ArrowForward),
+    PREV_TAB("이전 탭", Icons.AutoMirrored.Filled.ArrowBack),
     DOWNLOADS("받은 파일", Icons.Filled.Download),
     SETTINGS("설정", Icons.Filled.Settings);
 
@@ -45,7 +47,7 @@ enum class Action(val label: String, val icon: ImageVector?) {
         /** Buttons that can live on the toolbar. */
         val toolbarChoices = listOf(ADDRESS, TABS, MENU, BACK, FORWARD, RELOAD, TRANSLATE, NEW_TAB, HOME, SHARE, TOP, DOWNLOADS, SETTINGS)
         /** Things a gesture can be bound to. */
-        val gestureChoices = listOf(NONE, RELOAD, TRANSLATE, BACK, FORWARD, TOOLBAR, NEW_TAB, TABS, TOP, HOME, DOWNLOADS)
+        val gestureChoices = listOf(NONE, RELOAD, TRANSLATE, BACK, FORWARD, NEXT_TAB, PREV_TAB, TOOLBAR, NEW_TAB, TABS, TOP, HOME, DOWNLOADS)
     }
 }
 
@@ -71,6 +73,12 @@ class Prefs(ctx: Context) {
     var doubleTapAction by mutableStateOf(Action.of(sp.getString("doubleTapAction", null)) ?: Action.TRANSLATE)
         private set
     var pullStrength by mutableStateOf(PullStrength.entries.firstOrNull { it.name == sp.getString("pullStrength", null) } ?: PullStrength.NORMAL)
+        private set
+    var dotLeftAction by mutableStateOf(Action.of(sp.getString("dotLeftAction", null)) ?: Action.NEXT_TAB)
+        private set
+    var dotRightAction by mutableStateOf(Action.of(sp.getString("dotRightAction", null)) ?: Action.PREV_TAB)
+        private set
+    var dotUpAction by mutableStateOf(Action.of(sp.getString("dotUpAction", null)) ?: Action.TABS)
         private set
     var dotOnLeft by mutableStateOf(sp.getBoolean("dotOnLeft", false))
         private set
@@ -125,6 +133,9 @@ class Prefs(ctx: Context) {
     fun putPullAction(v: Action) { pullAction = v; sp.edit().putString("pullAction", v.name).apply() }
     fun putDoubleTapAction(v: Action) { doubleTapAction = v; sp.edit().putString("doubleTapAction", v.name).apply() }
     fun putPullStrength(v: PullStrength) { pullStrength = v; sp.edit().putString("pullStrength", v.name).apply() }
+    fun putDotLeftAction(v: Action) { dotLeftAction = v; sp.edit().putString("dotLeftAction", v.name).apply() }
+    fun putDotRightAction(v: Action) { dotRightAction = v; sp.edit().putString("dotRightAction", v.name).apply() }
+    fun putDotUpAction(v: Action) { dotUpAction = v; sp.edit().putString("dotUpAction", v.name).apply() }
     fun putDotOnLeft(v: Boolean) { dotOnLeft = v; sp.edit().putBoolean("dotOnLeft", v).apply() }
     fun putAdblock(v: Boolean) { adblock = v; sp.edit().putBoolean("adblock", v).apply() }
     fun putBlockerApps(v: Set<String>) { blockerApps = v; sp.edit().putStringSet("blockerApps", v).apply() }
