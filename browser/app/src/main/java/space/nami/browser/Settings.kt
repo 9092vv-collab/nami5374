@@ -330,6 +330,9 @@ private fun GeneralSection(prefs: Prefs) {
     val colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = C.Accent, unfocusedBorderColor = C.Line, cursorColor = C.Accent)
     Card("일반") {
         BatteryRow()
+        SelectRow("분할 다운로드", listOf(0, 2, 4, 8), prefs.splitParts, { if (it == 0) "끔 (폰 기본)" else "${it}조각" }) { prefs.putSplitParts(it) }
+        Text("파일 하나를 여러 조각으로 나눠 동시에 받아요. 큰 파일일수록 빨라지고, 서버가 지원하지 않으면 자동으로 한 줄로 받아요.",
+            fontSize = 12.sp, color = C.Sub, lineHeight = 17.sp)
         Label("홈페이지 · 새 탭")
         OutlinedTextField(prefs.homeUrl, { prefs.putHomeUrl(it.trim()) }, Modifier.fillMaxWidth(), singleLine = true,
             shape = RoundedCornerShape(16.dp), colors = colors)

@@ -342,6 +342,15 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
 
     fun download(url: String, ua: String? = null, cd: String? = null, mime: String? = null) {
         if (!url.startsWith("http")) { Toast.makeText(act, "이 파일은 받을 수 없어요", Toast.LENGTH_SHORT).show(); return }
+        if (prefs.splitParts > 0) runCatching {
+            val name = URLUtil.guessFileName(url, cd, mime)
+            if (act.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED)
+                act.requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 11)
+            DownloadService.start(act, url, name, mime, CookieManager.getInstance().getCookie(url),
+                ua ?: tab?.web?.settings?.userAgentString, tab?.url, prefs.splitParts)
+            Toast.makeText(act, "받는 중: $name", Toast.LENGTH_SHORT).show()
+            return
+        }.onFailure { Toast.makeText(act, "분할 다운로드를 못 써서 기본 방식으로 받아요", Toast.LENGTH_SHORT).show() }
         runCatching {
             val name = URLUtil.guessFileName(url, cd, mime)
             val req = DownloadManager.Request(Uri.parse(url)).apply {
