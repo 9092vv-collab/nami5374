@@ -1,0 +1,91 @@
+name: Build Nami (browser)
+# Builds only when started by hand (Actions tab -> Run workflow, or Claude via the API).
+on:
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Probe Google translate endpoints (info only)
+        continue-on-error: true
+        run: |
+          U='https://translate.googleapis.com/translate_a'
+          echo "--- t, two q"; curl -s -m 15 -X POST "$U/t?client=gtx&sl=auto&tl=ko&dt=t&format=text" --data-urlencode "q=long hair" --data-urlencode "q=Hello, world! It's a test." ; echo
+          echo "--- t, one q"; curl -s -m 15 -X POST "$U/t?client=gtx&sl=auto&tl=ko&dt=t&format=text" --data-urlencode "q=Hello, world!" ; echo
+          echo "--- single"; curl -s -m 15 -X POST "$U/single?client=gtx&sl=auto&tl=ko&dt=t" --data-urlencode "q=Hello, world! How are you?" | head -c 400; echo
+      - name: Fonts (Pretendard GOV)
+        run: bash browser/fetch-fonts.sh
+      - name: Get Gradle 8.14.3 (GitHub mirror)
+        run: |
+          F=gradle-8.14.3-bin.zip
+          for i in 1 2 3; do
+            curl -fL --retry 3 -o "$HOME/$F" "https://github.com/gradle/gradle-distributions/releases/download/v8.14.3/$F" && break
+            curl -fL --retry 3 -o "$HOME/$F" "https://services.gradle.org/distributions/$F" && break
+            sleep 15
+          done
+          unzip -q "$HOME/$F" -d "$HOME"
+          echo "$HOME/gradle-8.14.3/bin" >> "$GITHUB_PATH"
+      - name: Use Google's Maven Central mirror
+        run: |
+          mkdir -p ~/.gradle/init.d
+          cat > ~/.gradle/init.d/sgu-mirror.gradle <<'EOF'
+          def MIRROR = 'https://maven-central.storage-download.googleapis.com/maven2/'
+          def patch = { repos ->
+            repos.withType(MavenArtifactRepository).configureEach { r ->
+              def u = r.url.toString()
+              if (u.contains('repo.maven.apache.org') || u.contains('repo1.maven.org')) { r.url = MIRROR }
+            }
+          }
+          beforeSettings { s ->
+            patch(s.pluginManagement.repositories)
+            patch(s.dependencyResolutionManagement.repositories)
+          }
+          EOF
+      - name: Build release APK
+        working-directory: browser
+        run: |
+          set -o pipefail
+          for i in 1 2 3; do
+            gradle assembleRelease --no-daemon --stacktrace 2>&1 | tee -a ../gradle-browser.log && exit 0
+            grep -q "Could not GET\|Gateway Time-out\|Connection reset\|Read timed out\|Could not download" ../gradle-browser.log || exit 1
+            echo "::warning::attempt $i failed on a download, retrying"; sleep 30
+          done
+          exit 1
+      - name: Publish (fixed link, tag browser-latest)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp browser/app/build/outputs/apk/release/app-release.apk Nami.apk
+          ls -la Nami.apk
+          gh release delete browser-latest -R "${{ github.repository }}" --cleanup-tag -y || true
+          gh release create browser-latest Nami.apk -R "${{ github.repository }}" --prerelease \
+            --title "Nami (빌드 ${{ github.run_number }})" --notes "commit ${{ github.sha }}"
+      - name: Save error log for Claude (branch build-logs)
+        if: failure()
+        run: |
+          mkdir -p /tmp/logs
+          {
+            echo "browser run: ${{ github.run_number }}  commit: ${{ github.sha }}"
+            if [ -f gradle-browser.log ]; then
+              echo "===== errors ====="
+              grep -n -B2 -A20 -E "^e: |What went wrong|error:|FAILED|Unresolved reference|Could not resolve" gradle-browser.log | head -400
+              echo "===== last 120 lines ====="
+              tail -120 gradle-browser.log
+            fi
+          } > /tmp/logs/latest.txt
+          cd /tmp/logs
+          git init -q && git checkout -q -b build-logs
+          git config user.name "build-bot" && git config user.email "build-bot@users.noreply.github.com"
+          git add latest.txt && git commit -qm "browser build log #${{ github.run_number }}"
+          git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" build-logs
