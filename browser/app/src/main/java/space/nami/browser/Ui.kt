@@ -111,6 +111,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.foundation.layout.offset
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.TextRange
@@ -285,7 +286,9 @@ fun NamiApp(b: Browser, prefs: Prefs, act: Activity) = NamiTheme {
                 o.y < -limit && kotlin.math.abs(o.y) > kotlin.math.abs(o.x) -> prefs.dotUpAction
                 else -> null
             }?.takeIf { it != Action.NONE }
-            Column(Modifier.align(if (prefs.dotOnLeft) Alignment.BottomStart else Alignment.BottomEnd).navigationBarsPadding().padding(14.dp),
+            val (dx, dy) = dotOffset(prefs, androidx.compose.ui.platform.LocalConfiguration.current)
+            Column(Modifier.align(if (prefs.dotOnLeft) Alignment.BottomStart else Alignment.BottomEnd).navigationBarsPadding().padding(14.dp)
+                .offset(dx.dp, (-dy).dp),
                 horizontalAlignment = if (prefs.dotOnLeft) Alignment.Start else Alignment.End) {
                 pending(drag)?.let { a ->
                     Surface(Modifier.padding(bottom = 6.dp), shape = CircleShape, color = C.Ink.copy(alpha = 0.85f)) {
@@ -730,4 +733,12 @@ private fun DownloadRow(name: String, sub: String, progress: Float?, onOpen: (()
             }
         }
     }
+}
+
+// Dot offset clamped so the dot stays on screen (folded and unfolded widths differ)
+fun dotOffset(prefs: Prefs, conf: android.content.res.Configuration): Pair<Int, Int> {
+    val maxX = (conf.screenWidthDp - 58).coerceAtLeast(0)
+    val maxY = (conf.screenHeightDp - 160).coerceAtLeast(0)
+    val x = if (prefs.dotOnLeft) prefs.dotX.coerceIn(0, maxX) else prefs.dotX.coerceIn(-maxX, 0)
+    return x to prefs.dotY.coerceIn(0, maxY)
 }

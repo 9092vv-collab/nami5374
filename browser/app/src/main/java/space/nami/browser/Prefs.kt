@@ -82,6 +82,11 @@ class Prefs(ctx: Context) {
         private set
     var dotOnLeft by mutableStateOf(sp.getBoolean("dotOnLeft", false))
         private set
+    // Dot offset from its corner in dp. x: + = right, y: + = up
+    var dotX by mutableStateOf(sp.getInt("dotX", 0))
+        private set
+    var dotY by mutableStateOf(sp.getInt("dotY", 0))
+        private set
     var hideStatusBar by mutableStateOf(sp.getBoolean("hideStatusBar", false))
         private set
     var adblock by mutableStateOf(sp.getBoolean("adblock", true))
@@ -139,7 +144,9 @@ class Prefs(ctx: Context) {
     fun putDotLeftAction(v: Action) { dotLeftAction = v; sp.edit().putString("dotLeftAction", v.name).apply() }
     fun putDotRightAction(v: Action) { dotRightAction = v; sp.edit().putString("dotRightAction", v.name).apply() }
     fun putDotUpAction(v: Action) { dotUpAction = v; sp.edit().putString("dotUpAction", v.name).apply() }
-    fun putDotOnLeft(v: Boolean) { dotOnLeft = v; sp.edit().putBoolean("dotOnLeft", v).apply() }
+    fun putDotOnLeft(v: Boolean) { dotOnLeft = v; dotX = 0; sp.edit().putBoolean("dotOnLeft", v).putInt("dotX", 0).apply() }
+    fun putDotX(v: Int) { dotX = v; sp.edit().putInt("dotX", v).apply() }
+    fun putDotY(v: Int) { dotY = v; sp.edit().putInt("dotY", v).apply() }
     fun putAdblock(v: Boolean) { adblock = v; sp.edit().putBoolean("adblock", v).apply() }
     fun putBlockerApps(v: Set<String>) { blockerApps = v; sp.edit().putStringSet("blockerApps", v).apply() }
     fun putFilterUrls(v: List<String>) { filterUrls = v.distinct(); sp.edit().putString("filterUrls", filterUrls.joinToString("\n")).apply() }

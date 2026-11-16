@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -107,7 +108,7 @@ fun SettingsScreen(b: Browser, prefs: Prefs) {
                         5 -> DisplaySection(prefs)
                         else -> {
                             GeneralSection(prefs)
-                            Text("Nami 0.4.0", color = C.Sub, fontSize = 13.sp, modifier = Modifier.padding(start = 6.dp))
+                            Text("Nami 0.4.1", color = C.Sub, fontSize = 13.sp, modifier = Modifier.padding(start = 6.dp))
                         }
                     }
                 }
@@ -211,7 +212,56 @@ private fun ToolbarSection(prefs: Prefs) {
             }
         }
         SelectRow("툴바 부르는 점", listOf(false, true), prefs.dotOnLeft, { if (it) "왼쪽 아래" else "오른쪽 아래" }) { prefs.putDotOnLeft(it) }
+        DotPosition(prefs)
     }
+}
+
+// Move the dot from its corner: X (left/right) and Y (up) with a small screen preview
+@Composable
+private fun DotPosition(prefs: Prefs) {
+    val conf = androidx.compose.ui.platform.LocalConfiguration.current
+    val w = conf.screenWidthDp; val h = conf.screenHeightDp
+    val maxX = (w - 58).coerceAtLeast(1); val maxY = (h - 160).coerceAtLeast(1)
+    val (dx, dy) = dotOffset(prefs, conf)
+    Label("점 위치")
+    Text("지금 자리에서 옮겨요. X는 가로(+ 오른쪽), Y는 세로(+ 위)예요.", fontSize = 12.sp, color = C.Sub)
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        // Preview of the screen
+        val pw = 72f; val ph = pw * h / w
+        Box(Modifier.size(pw.dp, ph.dp).clip(androidx.compose.foundation.shape.RoundedCornerShape(8.dp))
+            .background(C.Ink.copy(alpha = 0.06f))) {
+            val s = pw / w
+            val left = if (prefs.dotOnLeft) (14 + dx) * s else (w - 44 + dx) * s
+            val top = (h - 44 - dy) * s
+            Box(Modifier.offset(left.dp, top.dp).size((30 * s).coerceAtLeast(6f).dp)
+                .clip(androidx.compose.foundation.shape.CircleShape).background(C.Accent))
+        }
+        Spacer(Modifier.width(14.dp))
+        Column(Modifier.weight(1f)) {
+            Text("X  ${dx}dp", fontSize = 13.sp, color = C.Ink)
+            androidx.compose.material3.Slider(
+                value = dx.toFloat(),
+                onValueChange = { prefs.putDotX(it.toInt()) },
+                valueRange = if (prefs.dotOnLeft) 0f..maxX.toFloat() else -maxX.toFloat()..0f)
+            Text("Y  ${dy}dp", fontSize = 13.sp, color = C.Ink)
+            androidx.compose.material3.Slider(
+                value = dy.toFloat(),
+                onValueChange = { prefs.putDotY(it.toInt()) },
+                valueRange = 0f..maxY.toFloat())
+            Row {
+                listOf(-4 to "X −", 4 to "X +").forEach { (d, t) -> Nudge(t) { prefs.putDotX(if (prefs.dotOnLeft) (dx + d).coerceIn(0, maxX) else (dx + d).coerceIn(-maxX, 0)) } }
+                listOf(-4 to "Y −", 4 to "Y +").forEach { (d, t) -> Nudge(t) { prefs.putDotY((dy + d).coerceIn(0, maxY)) } }
+                Nudge("원래대로") { prefs.putDotX(0); prefs.putDotY(0) }
+            }
+        }
+    }
+}
+
+@Composable
+private fun Nudge(text: String, onClick: () -> Unit) {
+    Text(text, fontSize = 12.sp, color = C.Accent, fontWeight = FontWeight.SemiBold,
+        modifier = Modifier.padding(end = 6.dp).clip(androidx.compose.foundation.shape.RoundedCornerShape(6.dp))
+            .clickable(onClick = onClick).background(C.Accent.copy(alpha = 0.08f)).padding(horizontal = 7.dp, vertical = 5.dp))
 }
 
 @Composable
