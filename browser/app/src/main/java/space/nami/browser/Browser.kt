@@ -50,6 +50,8 @@ class BrowserTab(val id: Long, val web: WebView, val frame: PullFrame) {
     /** Translation wanted on this tab (stays on while moving around the same site). */
     var translateOn by mutableStateOf(false)
     var translating by mutableStateOf(false)
+    /** Small screenshot for the tab list (taken when leaving the tab). */
+    var thumb by mutableStateOf<Bitmap?>(null)
     @Volatile var host = ""
     var fellBackNoticed = false
     val blocked = java.util.concurrent.atomic.AtomicInteger(0)
@@ -219,7 +221,38 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
         tabs.forEach { if (it === t) it.web.onResume() else it.web.onPause() }
     }
 
-    fun select(i: Int) { if (i in tabs.indices) { current = i; attachCurrent() } }
+    fun select(i: Int) {
+        if (i !in tabs.indices) return
+        if (i != current) tab?.let { capture(it) }
+        current = i; attachCurrent()
+    }
+
+    /** Address-bar swipe: d = +1 next tab, -1 previous. */
+    fun switchBy(d: Int) {
+        val to = current + d
+        if (to !in tabs.indices) { showPill(if (d > 0) "마지막 탭이에요" else "첫 번째 탭이에요", 1000); return }
+        select(to)
+        val t = tabs[to]
+        showPill("${to + 1}/${tabs.size} · " + t.title.ifEmpty { Uri.parse(t.url).host ?: t.url }.take(28), 1300)
+    }
+
+    fun openTabs() { tab?.let { capture(it) }; showTabs = true }
+
+    /** Draws what the tab shows now into a small bitmap (40% size). */
+    fun capture(t: BrowserTab) {
+        val w = t.web
+        if (w.width <= 0 || w.height <= 0 || !w.isAttachedToWindow) return
+        runCatching {
+            val s = 0.4f
+            val bmp = Bitmap.createBitmap((w.width * s).toInt().coerceAtLeast(1), (w.height * s).toInt().coerceAtLeast(1), Bitmap.Config.ARGB_8888)
+            val c = android.graphics.Canvas(bmp)
+            c.drawColor(android.graphics.Color.WHITE)
+            c.scale(s, s)
+            c.translate(-w.scrollX.toFloat(), -w.scrollY.toFloat())
+            w.draw(c)
+            t.thumb = bmp
+        }
+    }
 
     fun newTab(url: String?, select: Boolean = true, append: Boolean = false): BrowserTab {
         val t = createTab()
@@ -235,6 +268,7 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
         tabs.removeAt(i)
         t.frame.removeAllViews(); t.web.destroy()
         if (tabs.isEmpty()) { current = 0; newTab(prefs.homeUrl); return }
+        t.thumb = null
         if (i < current) current -= 1
         if (current >= tabs.size) current = tabs.size - 1
         attachCurrent()

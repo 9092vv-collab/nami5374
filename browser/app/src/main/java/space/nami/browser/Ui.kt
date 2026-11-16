@@ -89,6 +89,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
@@ -194,7 +198,7 @@ fun NamiApp(b: Browser, prefs: Prefs, act: Activity) = NamiTheme {
         when (a) {
             Action.NONE -> {}
             Action.ADDRESS -> { b.toolbarVisible = true; b.editing = true }
-            Action.TABS -> b.showTabs = true
+            Action.TABS -> b.openTabs()
             Action.MENU -> { b.toolbarVisible = true; menuOpen = true }
             Action.BACK -> if (t != null && t.web.canGoBack()) t.web.goBack() else b.showPill("더 뒤로 갈 페이지가 없어요", 1200)
             Action.FORWARD -> if (t != null && t.web.canGoForward()) t.web.goForward()
@@ -313,7 +317,7 @@ private fun Toolbar(b: Browser, prefs: Prefs, menuOpen: Boolean, setMenu: (Boole
         Row(Modifier.height(56.dp).padding(horizontal = 6.dp), verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = if (hasAddress) Arrangement.spacedBy(2.dp) else Arrangement.SpaceEvenly) {
             for (a in prefs.toolbar) when (a) {
-                Action.ADDRESS -> AddressPill(tab, Modifier.weight(1f)) { run(Action.ADDRESS) }
+                Action.ADDRESS -> AddressPill(tab, Modifier.weight(1f), onSwipe = { b.switchBy(it) }) { run(Action.ADDRESS) }
                 Action.TABS -> Box(Modifier.size(44.dp).clip(CircleShape).clickable { run(Action.TABS) }, contentAlignment = Alignment.Center) {
                     Box(Modifier.size(22.dp).border(2.dp, C.Ink, RoundedCornerShape(6.dp)), contentAlignment = Alignment.Center) {
                         Text("${b.tabs.size}", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = C.Ink)
@@ -342,10 +346,20 @@ private fun Toolbar(b: Browser, prefs: Prefs, menuOpen: Boolean, setMenu: (Boole
 }
 
 @Composable
-private fun AddressPill(tab: BrowserTab?, modifier: Modifier, onClick: () -> Unit) {
+private fun AddressPill(tab: BrowserTab?, modifier: Modifier, onSwipe: (Int) -> Unit, onClick: () -> Unit) {
     val url = tab?.url ?: ""
     val host = runCatching { Uri.parse(url).host }.getOrNull()?.removePrefix("www.") ?: url
-    Row(modifier.height(42.dp).clip(CircleShape).background(C.Drawer).clickable(onClick = onClick).padding(horizontal = 14.dp),
+    // Swipe sideways on the address bar: left → next tab, right → previous tab (like Chrome).
+    var dx by remember { mutableStateOf(0f) }
+    val swipe = Modifier.pointerInput(Unit) {
+        val limit = 56.dp.toPx()
+        detectHorizontalDragGestures(
+            onDragEnd = { if (dx <= -limit) onSwipe(1) else if (dx >= limit) onSwipe(-1); dx = 0f },
+            onDragCancel = { dx = 0f },
+        ) { change, d -> change.consume(); dx += d }
+    }
+    Row(modifier.height(42.dp).then(swipe).graphicsLayer { translationX = dx * 0.35f }
+        .clip(CircleShape).background(C.Drawer).clickable(onClick = onClick).padding(horizontal = 14.dp),
         verticalAlignment = Alignment.CenterVertically) {
         if (url.startsWith("https://")) { Icon(Icons.Filled.Lock, null, tint = C.Sub, modifier = Modifier.size(14.dp)); Spacer(Modifier.width(6.dp)) }
         Text(host.ifEmpty { "주소 입력" }, color = if (host.isEmpty()) C.Sub else C.Ink, fontSize = 15.sp,
@@ -438,17 +452,23 @@ private fun TabsScreen(b: Browser) {
                 verticalArrangement = Arrangement.spacedBy(10.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 itemsIndexed(b.tabs, key = { _, t -> t.id }) { i, t ->
                     val sel = i == b.current
-                    Surface(Modifier.fillMaxWidth().height(120.dp).clickable { b.select(i); b.showTabs = false; b.toolbarVisible = false },
+                    Surface(Modifier.fillMaxWidth().height(250.dp).clickable { b.select(i); b.showTabs = false; b.toolbarVisible = false },
                         shape = RoundedCornerShape(22.dp), color = Color.White,
                         border = androidx.compose.foundation.BorderStroke(if (sel) 2.dp else 1.dp, if (sel) C.Accent else C.Line)) {
-                        Column(Modifier.padding(start = 14.dp, top = 6.dp, end = 4.dp, bottom = 12.dp)) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(Uri.parse(t.url).host?.removePrefix("www.") ?: "", fontSize = 12.sp, color = C.Sub,
+                        Column {
+                            Row(Modifier.padding(start = 14.dp, top = 4.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Text(t.title.ifEmpty { Uri.parse(t.url).host ?: t.url }, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = C.Ink,
                                     maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                                 IconButton({ b.closeTab(i) }, Modifier.size(36.dp)) { Icon(Icons.Filled.Close, "탭 닫기", tint = C.Sub, modifier = Modifier.size(18.dp)) }
                             }
-                            Text(t.title.ifEmpty { t.url }, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = C.Ink,
-                                maxLines = 3, overflow = TextOverflow.Ellipsis)
+                            Box(Modifier.fillMaxSize().padding(start = 6.dp, end = 6.dp, bottom = 6.dp).clip(RoundedCornerShape(16.dp)).background(C.Drawer),
+                                contentAlignment = Alignment.Center) {
+                                val th = t.thumb
+                                if (th != null) androidx.compose.foundation.Image(th.asImageBitmap(), null, Modifier.fillMaxSize(),
+                                    contentScale = androidx.compose.ui.layout.ContentScale.Crop, alignment = Alignment.TopCenter)
+                                else Text(Uri.parse(t.url).host?.removePrefix("www.") ?: "", fontSize = 13.sp, color = C.Sub, maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(12.dp))
+                            }
                         }
                     }
                 }
