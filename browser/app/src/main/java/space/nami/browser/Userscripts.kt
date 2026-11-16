@@ -249,8 +249,15 @@ class Userscripts(private val ctx: Context) {
   function GM_getResourceText(n) { return RES[n] || null; }
   function GM_getResourceURL(n) { var t = RES[n]; return t == null ? null : 'data:text/plain;charset=utf-8,' + encodeURIComponent(t); }
   function GM_download(d, name) { var url = (typeof d === 'object') ? d.url : d; var nm = (typeof d === 'object') ? d.name : name; B.gmDownload(String(url), nm ? String(nm) : ''); }
+  var RAN = window.__namiRan = window.__namiRan || [];
+  if (window.top === window && !RAN.some(function(x){ return x.sid === SID; })) RAN.push({ sid: SID, name: GM_info.script.name });
   var MENU = window.__namiMenu = window.__namiMenu || [];
-  function GM_registerMenuCommand(name, fn) { var id = SID + ':' + MENU.length; MENU.push({ id: id, name: String(name), fn: fn }); return id; }
+  var MSEQ = 0;
+  function GM_registerMenuCommand(name, fn) {
+    var id = SID + ':' + (MSEQ++);
+    for (var i = 0; i < MENU.length; i++) if (MENU[i].sid === SID && MENU[i].name === String(name)) { MENU[i].fn = fn; return MENU[i].id; }
+    MENU.push({ id: id, sid: SID, name: String(name), fn: fn }); return id;
+  }
   function GM_unregisterMenuCommand(id) { for (var i = 0; i < MENU.length; i++) if (MENU[i].id === id) { MENU.splice(i, 1); break; } }
   var CB = window.__namiGmCb = window.__namiGmCb || {};
   function GM_xmlhttpRequest(d) {

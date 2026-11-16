@@ -58,6 +58,8 @@ class BrowserTab(val id: Long, val web: WebView, val frame: PullFrame) {
 
 class LongPress(val link: String?, val image: String?)
 
+class PageScriptInfo(val sid: String, val name: String, val commands: List<Pair<String, String>>)
+
 /** Hides elements matched by the ad-block element-hiding rules; runs at document start in every frame. */
 private const val BLOCK_CSS_JS = """
 (function(){ try {
@@ -124,7 +126,8 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
     val scripts = Userscripts(act)
     /** A .user.js the user opened, waiting for "설치". */
     var pendingInstall by mutableStateOf<UScript?>(null)
-    var scriptCommands by mutableStateOf<List<String>?>(null)
+    /** "이 페이지의 유저스크립트" panel: scripts that ran on this page and their menu commands. */
+    var scriptPanel by mutableStateOf<List<PageScriptInfo>?>(null)
     private val docStart = WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)
 
     init {
@@ -168,20 +171,32 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
         }
     }
 
-    fun loadScriptCommands() {
+    fun loadScriptPanel() {
         val t = tab ?: return
-        t.web.evaluateJavascript("JSON.stringify((window.__namiMenu||[]).map(function(m){return m.name}))") { r ->
-            val list = runCatching {
-                val inner = org.json.JSONTokener(r).nextValue() as? String ?: "[]"
-                JSONArray(inner).let { a -> (0 until a.length()).map { a.getString(it) } }
+        val js = "JSON.stringify({ran:(window.__namiRan||[]),menu:(window.__namiMenu||[]).map(function(m){return {id:m.id,sid:m.sid,name:m.name}})})"
+        t.web.evaluateJavascript(js) { r ->
+            val panel = runCatching {
+                val o = org.json.JSONObject(org.json.JSONTokener(r).nextValue() as? String ?: "{}")
+                val ran = o.optJSONArray("ran") ?: JSONArray()
+                val menu = o.optJSONArray("menu") ?: JSONArray()
+                val cmds = (0 until menu.length()).map { menu.getJSONObject(it) }
+                val sids = LinkedHashMap<String, String>()
+                for (i in 0 until ran.length()) ran.getJSONObject(i).let { sids[it.optString("sid")] = it.optString("name") }
+                cmds.forEach { c -> if (c.optString("sid") !in sids) sids[c.optString("sid")] = "" }
+                sids.map { (sid, name) ->
+                    val sc = scripts.list.firstOrNull { it.id == sid }
+                    PageScriptInfo(sid, sc?.name ?: name, cmds.filter { it.optString("sid") == sid }.map { it.optString("id") to it.optString("name") })
+                }
             }.getOrDefault(emptyList())
-            scriptCommands = list
+            scriptPanel = panel
         }
     }
 
-    fun runScriptCommand(i: Int) {
-        scriptCommands = null
-        tab?.web?.evaluateJavascript("try{window.__namiMenu[$i].fn()}catch(e){console.error(e)}", null)
+    /** Runs a script's menu command, then refreshes the panel (scripts often relabel ON/OFF). */
+    fun runScriptCommand(id: String) {
+        val q = org.json.JSONObject.quote(id)
+        tab?.web?.evaluateJavascript("try{var m=(window.__namiMenu||[]).filter(function(x){return x.id===$q})[0]; if(m) m.fn()}catch(e){console.error(e)}", null)
+        scope.launch { delay(350); if (scriptPanel != null) loadScriptPanel() }
     }
     private var nextId = 1L
     private val density = act.resources.displayMetrics.density

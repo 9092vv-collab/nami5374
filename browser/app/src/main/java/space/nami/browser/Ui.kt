@@ -21,6 +21,8 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -61,6 +63,7 @@ import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Translate
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
@@ -259,7 +262,7 @@ fun NamiApp(b: Browser, prefs: Prefs, act: Activity) = NamiTheme {
         if (b.showSettings) SettingsScreen(b, prefs)
         b.longPress?.let { LongPressDialog(b, it) }
         b.pendingInstall?.let { InstallDialog(b, it) }
-        b.scriptCommands?.let { CommandsDialog(b, it) }
+        b.scriptPanel?.let { ScriptPanel(b, it) }
         b.customView?.let { v ->
             AndroidView(factory = { FrameLayout(it).apply { setBackgroundColor(android.graphics.Color.BLACK) } },
                 modifier = Modifier.fillMaxSize(),
@@ -382,7 +385,7 @@ private fun MainMenu(b: Browser, prefs: Prefs, open: Boolean, close: () -> Unit,
                 prefs.putAdblockOff(host, on); tab?.web?.reload()
             }
         }
-        if (b.scripts.list.any { it.enabled }) item("유저스크립트 명령", Icons.Filled.Code) { b.loadScriptCommands() }
+        if (b.scripts.list.isNotEmpty()) item("유저스크립트", Icons.Filled.Code) { b.loadScriptPanel() }
         item("공유", Action.SHARE.icon) { run(Action.SHARE) }
         item("맨 위로", Action.TOP.icon) { run(Action.TOP) }
         item("받은 파일", Icons.Filled.Download) {
@@ -500,15 +503,31 @@ private fun InstallDialog(b: Browser, s: UScript) {
 }
 
 @Composable
-private fun CommandsDialog(b: Browser, list: List<String>) {
-    AlertDialog(onDismissRequest = { b.scriptCommands = null }, confirmButton = {}, containerColor = Color.White, shape = RoundedCornerShape(24.dp),
-        title = { Text("유저스크립트 명령", fontWeight = FontWeight.Bold) },
+private fun ScriptPanel(b: Browser, list: List<PageScriptInfo>) {
+    AlertDialog(onDismissRequest = { b.scriptPanel = null }, containerColor = Color.White, shape = RoundedCornerShape(24.dp),
+        confirmButton = { TextButton({ b.scriptPanel = null }) { Text("닫기", color = C.Ink) } },
+        title = { Text("이 페이지의 유저스크립트", fontWeight = FontWeight.Bold) },
         text = {
-            Column {
-                if (list.isEmpty()) Text("이 페이지에는 스크립트가 등록한 명령이 없어요.", fontSize = 14.sp, color = C.Sub)
-                list.forEachIndexed { i, name ->
-                    Text(name, fontSize = 16.sp, color = C.Ink, modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
-                        .clickable { b.runScriptCommand(i) }.padding(horizontal = 8.dp, vertical = 13.dp))
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                if (list.isEmpty()) Text("이 페이지에서 실행 중인 스크립트가 없어요. 스크립트가 적용되는 사이트에서 열어 주세요.", fontSize = 14.sp, color = C.Sub)
+                list.forEach { p ->
+                    val sc = b.scripts.list.firstOrNull { it.id == p.sid }
+                    Row(Modifier.fillMaxWidth().padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text(p.name, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = C.Ink, modifier = Modifier.weight(1f))
+                        if (sc != null) androidx.compose.material3.Switch(sc.enabled, { on ->
+                            b.scripts.setEnabled(sc, on); b.showPill("새로고침하면 적용돼요", 1800)
+                        }, colors = androidx.compose.material3.SwitchDefaults.colors(checkedTrackColor = C.Accent, checkedThumbColor = Color.White,
+                            uncheckedTrackColor = C.Drawer, uncheckedBorderColor = C.Line))
+                    }
+                    if (p.commands.isEmpty()) Text("등록한 명령이 없어요", fontSize = 13.sp, color = C.Sub, modifier = Modifier.padding(start = 4.dp, bottom = 4.dp))
+                    p.commands.forEach { (id, name) ->
+                        Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable { b.runScriptCommand(id) }
+                            .padding(horizontal = 6.dp, vertical = 11.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Filled.Settings, null, tint = C.Sub, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(10.dp))
+                            Text(name, fontSize = 15.sp, color = C.Ink)
+                        }
+                    }
                 }
             }
         })
