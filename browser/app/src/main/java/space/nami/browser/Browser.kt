@@ -115,6 +115,9 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
     var editing by mutableStateOf(false)
     var showTabs by mutableStateOf(false)
     var showSettings by mutableStateOf(false)
+    var showDownloads by mutableStateOf(false)
+    /** Optional tappable word on the status pill (e.g. "열기"). */
+    var pillAction by mutableStateOf<Pair<String, () -> Unit>?>(null)
     var pull by mutableFloatStateOf(0f)
     var pill by mutableStateOf<String?>(null)
     var longPress by mutableStateOf<LongPress?>(null)
@@ -139,6 +142,9 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
 
     init {
         scripts.onChange = { tabs.forEach { applyScripts(it) } }
+        Downloads.onDone = { uri, name, mime ->
+            showPill("다 받았어요 · " + name.take(24), 4500, "열기" to { Downloads.open(act, uri, mime, name) })
+        }
         applyNetwork()
         scope.launch {
             if (!prefs.blockerAppsChosen) {
@@ -231,8 +237,8 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
     /** The one container the UI shows; holds the current tab's frame. */
     val container = FrameLayout(act)
 
-    fun showPill(text: String?, ms: Long = 2200) {
-        pillJob?.cancel(); pill = text
+    fun showPill(text: String?, ms: Long = 2200, action: Pair<String, () -> Unit>? = null) {
+        pillJob?.cancel(); pill = text; pillAction = action
         if (text != null && ms > 0) pillJob = scope.launch { delay(ms); pill = null }
     }
 

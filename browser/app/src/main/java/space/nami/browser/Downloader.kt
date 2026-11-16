@@ -118,6 +118,8 @@ class DownloadService : Service() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         val got = AtomicLong(0)
         var total = -1L
+        val totalRef = AtomicLong(-1)
+        Downloads.active[id] = DlActive(req.name, got, totalRef)
         val started = System.currentTimeMillis()
         val ticker = scope.launch {
             var lastBytes = 0L; var lastT = System.currentTimeMillis()
@@ -155,6 +157,7 @@ class DownloadService : Service() {
                     total = c.contentLengthLong
                 } else throw IOException("서버 응답 $code")
             } finally { c.disconnect() }
+            totalRef.set(total)
             // 2) space
             if (total > 0) {
                 val free = StatFs(Environment.getExternalStorageDirectory().path).availableBytes
@@ -183,8 +186,10 @@ class DownloadService : Service() {
             runCatching { contentResolver.openInputStream(uri)?.use { it.read(head) } }
             ticker.cancel()
             nm.cancel(id)
+            Downloads.active.remove(id)
             BlobSaver.finish(this, uri, req.name, req.guessed, head)
         } catch (e: Throwable) {
+            Downloads.active.remove(id)
             ticker.cancel()
             nm.cancel(id)
             uri?.let { u -> runCatching { contentResolver.delete(u, null, null) } }

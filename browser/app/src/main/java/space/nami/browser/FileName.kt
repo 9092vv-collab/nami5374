@@ -176,6 +176,7 @@ class BlobSaver(private val ctx: Context) {
                 put(MediaStore.Downloads.IS_PENDING, 0)
             }
             runCatching { ctx.contentResolver.update(uri, v, null, null) }
+            Downloads.notifyDone(uri, final, FileName.mimeFor(final))
             val nm = ctx.getSystemService(NotificationManager::class.java)
             nm.createNotificationChannel(NotificationChannel("dl_done", "다운로드 완료", NotificationManager.IMPORTANCE_DEFAULT))
             val open = Intent(Intent.ACTION_VIEW).setDataAndType(uri, FileName.mimeFor(final) ?: ctx.contentResolver.getType(uri))

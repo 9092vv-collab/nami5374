@@ -62,6 +62,14 @@ import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.FolderZip
+import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.InsertDriveFile
+import androidx.compose.material.icons.filled.Movie
+import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material.icons.filled.PictureAsPdf
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Refresh
@@ -217,6 +225,7 @@ fun NamiApp(b: Browser, prefs: Prefs, act: Activity) = NamiTheme {
             Action.TOP -> t?.web?.evaluateJavascript("window.scrollTo({top:0,behavior:'smooth'})", null)
             Action.TOOLBAR -> b.toolbarVisible = !b.toolbarVisible
             Action.SETTINGS -> b.showSettings = true
+            Action.DOWNLOADS -> b.showDownloads = true
         }
     }
     SideEffect { b.runAction = { run(it) } }
@@ -226,6 +235,7 @@ fun NamiApp(b: Browser, prefs: Prefs, act: Activity) = NamiTheme {
             b.customView != null -> b.exitCustomView()
             b.longPress != null -> b.longPress = null
             b.showSettings -> b.showSettings = false
+            b.showDownloads -> b.showDownloads = false
             b.showTabs -> b.showTabs = false
             b.editing -> b.editing = false
             menuOpen -> menuOpen = false
@@ -272,6 +282,7 @@ fun NamiApp(b: Browser, prefs: Prefs, act: Activity) = NamiTheme {
         }
 
         if (b.showTabs) TabsScreen(b)
+        if (b.showDownloads) DownloadsScreen(b)
         if (b.showSettings) SettingsScreen(b, prefs)
         b.longPress?.let { LongPressDialog(b, it) }
         b.pendingInstall?.let { InstallDialog(b, it) }
@@ -308,7 +319,12 @@ private fun Pill(text: String, tab: BrowserTab?, b: Browser) {
     Surface(Modifier.padding(bottom = 8.dp), shape = CircleShape, color = C.Ink.copy(alpha = 0.88f)) {
         Row(Modifier.padding(horizontal = 16.dp, vertical = 9.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(text, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Medium)
-            if (translated) {
+            val act = b.pillAction
+            if (act != null) {
+                Spacer(Modifier.width(12.dp))
+                Text(act.first, color = Color(0xFFF2B8A0), fontSize = 13.sp, fontWeight = FontWeight.Bold,
+                    modifier = Modifier.clickable { b.showPill(null); act.second() })
+            } else if (translated) {
                 Spacer(Modifier.width(12.dp))
                 Text("원문", color = Color(0xFFF2B8A0), fontSize = 13.sp, fontWeight = FontWeight.Bold,
                     modifier = Modifier.clickable { b.toggleTranslate(tab!!) })
@@ -411,9 +427,7 @@ private fun MainMenu(b: Browser, prefs: Prefs, open: Boolean, close: () -> Unit,
         if (b.scripts.list.isNotEmpty()) item("유저스크립트", Icons.Filled.Code) { b.loadScriptPanel() }
         item("공유", Action.SHARE.icon) { run(Action.SHARE) }
         item("맨 위로", Action.TOP.icon) { run(Action.TOP) }
-        item("받은 파일", Icons.Filled.Download) {
-            runCatching { ctx.startActivity(Intent(DownloadManager.ACTION_VIEW_DOWNLOADS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
-        }
+        item("받은 파일", Icons.Filled.Download) { run(Action.DOWNLOADS) }
         item("설정", Action.SETTINGS.icon) { run(Action.SETTINGS) }
     }
 }
@@ -595,4 +609,95 @@ private fun ScriptPanel(b: Browser, list: List<PageScriptInfo>) {
                 }
             }
         })
+}
+
+@Composable
+private fun DownloadsScreen(b: Browser) {
+    val ctx = LocalContext.current
+    var items by remember { mutableStateOf<List<DlItem>>(emptyList()) }
+    var running by remember { mutableStateOf<List<DlActive>>(emptyList()) }
+    var tick by remember { mutableStateOf(0) }
+    LaunchedEffect(tick) {
+        while (true) {
+            items = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { Downloads.list(ctx) }
+            running = Downloads.active.values.toList()
+            kotlinx.coroutines.delay(1000)
+        }
+    }
+    Surface(Modifier.fillMaxSize(), color = C.Bg) {
+        Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding()) {
+            Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 8.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("받은 파일", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = C.Ink, modifier = Modifier.weight(1f))
+                TextButton({ runCatching { ctx.startActivity(Intent(DownloadManager.ACTION_VIEW_DOWNLOADS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) } }) {
+                    Text("폴더 열기", color = C.Accent, fontWeight = FontWeight.SemiBold)
+                }
+                IconButton({ b.showDownloads = false }) { Icon(Icons.Filled.Close, "닫기", tint = C.Ink) }
+            }
+            androidx.compose.foundation.lazy.LazyColumn(Modifier.fillMaxSize().padding(horizontal = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(running.size) { i ->
+                    val a = running[i]
+                    val got = a.got.get(); val total = a.total.get()
+                    DownloadRow(name = a.name, sub = if (total > 0) "받는 중 · ${DownloadService.size(got)} / ${DownloadService.size(total)}" else "받는 중 · ${DownloadService.size(got)}",
+                        progress = if (total > 0) got.toFloat() / total else null, onOpen = null, onShare = null, onDelete = null)
+                }
+                items(items.size) { i ->
+                    val it = items[i]
+                    if (it.running) {
+                        DownloadRow(it.name, "받는 중 · ${DownloadService.size(it.got)}" + if (it.size > 0) " / ${DownloadService.size(it.size)}" else "",
+                            if (it.size > 0) it.got.toFloat() / it.size else null, null, null, null)
+                    } else {
+                        val date = java.text.SimpleDateFormat("M월 d일 HH:mm", java.util.Locale.KOREA).format(java.util.Date(it.time))
+                        DownloadRow(it.name, "${DownloadService.size(it.size)} · $date", null,
+                            onOpen = { it.uri?.let { u -> Downloads.open(ctx, u, it.mime, it.name) } },
+                            onShare = { Downloads.share(ctx, it) },
+                            onDelete = { if (Downloads.delete(ctx, it)) tick++ else Toast.makeText(ctx, "지우지 못했어요", Toast.LENGTH_SHORT).show() })
+                    }
+                }
+                if (items.isEmpty() && running.isEmpty()) item {
+                    Text("아직 받은 파일이 없어요.", fontSize = 14.sp, color = C.Sub, modifier = Modifier.padding(12.dp))
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DownloadRow(name: String, sub: String, progress: Float?, onOpen: (() -> Unit)?, onShare: (() -> Unit)?, onDelete: (() -> Unit)?) {
+    var confirm by remember(name) { mutableStateOf(false) }
+    val ext = name.substringAfterLast('.', "").lowercase()
+    val icon = when (ext) {
+        "jpg", "jpeg", "png", "gif", "webp", "avif", "heic", "bmp" -> Icons.Filled.Image
+        "mp4", "mkv", "webm", "mov", "avi" -> Icons.Filled.Movie
+        "mp3", "m4a", "ogg", "flac", "wav" -> Icons.Filled.MusicNote
+        "zip", "7z", "rar", "gz" -> Icons.Filled.FolderZip
+        "pdf" -> Icons.Filled.PictureAsPdf
+        else -> Icons.Filled.InsertDriveFile
+    }
+    Surface(Modifier.fillMaxWidth().then(if (onOpen != null) Modifier.clickable { onOpen() } else Modifier),
+        shape = RoundedCornerShape(20.dp), color = Color.White, border = androidx.compose.foundation.BorderStroke(1.dp, C.Line)) {
+        Column(Modifier.padding(start = 14.dp, end = 4.dp, top = 10.dp, bottom = 10.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.size(38.dp).clip(RoundedCornerShape(12.dp)).background(C.AccentSoft), contentAlignment = Alignment.Center) {
+                    Icon(icon, null, tint = C.Accent, modifier = Modifier.size(22.dp))
+                }
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(name, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = C.Ink, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    Text(sub, fontSize = 12.sp, color = C.Sub)
+                }
+                if (onShare != null) IconButton(onShare) { Icon(Icons.Filled.Share, "공유", tint = C.Sub, modifier = Modifier.size(20.dp)) }
+                if (onDelete != null) {
+                    if (!confirm) IconButton({ confirm = true }) { Icon(Icons.Filled.Delete, "삭제", tint = C.Sub, modifier = Modifier.size(20.dp)) }
+                    else TextButton({ confirm = false; onDelete() }) { Text("삭제", color = Color(0xFFC0392B), fontWeight = FontWeight.Bold) }
+                }
+            }
+            if (progress != null) {
+                Spacer(Modifier.height(8.dp))
+                Box(Modifier.fillMaxWidth().padding(end = 10.dp).height(4.dp).clip(CircleShape).background(C.Drawer)) {
+                    Box(Modifier.fillMaxWidth(progress.coerceIn(0f, 1f)).height(4.dp).background(C.Accent))
+                }
+            }
+        }
+    }
 }
