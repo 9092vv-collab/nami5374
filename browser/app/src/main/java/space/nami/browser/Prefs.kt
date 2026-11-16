@@ -173,6 +173,11 @@ class Prefs(ctx: Context) {
             putAdblockOff("kio.ac", true)
             sp.edit().putBoolean("seed_adblockOff_kioac", true).apply()
         }
+        // kio.ac needs its service worker (downloads are relayed instead) → take it out of 호환 모드 once
+        if (!sp.getBoolean("seed_swOn_kioac", false)) {
+            putSwOff("kio.ac", false)
+            sp.edit().putBoolean("seed_swOn_kioac", true).apply()
+        }
     }
     fun putOpenApps(v: Boolean) { openApps = v; sp.edit().putBoolean("openApps", v).apply() }
     fun swOffFor(host: String): Boolean {

@@ -10,7 +10,7 @@ package space.nami.browser
 object PageScript {
     /** The script with this launch's bridge key filled in. */
     fun js(key: String) = TEMPLATE.replace("__NAMI_KEY__", key)
-        .replace("__NAMI_FNS__", "['translate','idle','doubleTap','scriptVersion','blobBegin','blobChunk','blobEnd','blobFail','claimBlob','downloadHint','forceZoom','fsOpen','fsWrite','fsSeek','fsTrunc','fsClose','fsAbort']")
+        .replace("__NAMI_FNS__", "['translate','idle','doubleTap','scriptVersion','blobBegin','blobChunk','blobEnd','blobFail','claimBlob','downloadHint','forceZoom','fsOpen','fsWrite','fsSeek','fsTrunc','fsClose','fsAbort','relayOpen','relayFail']")
 
     private val TEMPLATE = """
 (function(){
@@ -254,6 +254,41 @@ object PageScript {
     var known = N.blobs.get(href);
     if (known) go(known); else fetch(href).then(function(r){ return r.blob(); }).then(go).catch(function(){ nb('blobFail', ['']); });
   };
+  // ---- downloads a site's service worker makes up (kio.ac: /_service-worker-responsify?id=…) ----
+  // Android's downloader can't reach the service worker, so fetch it here and stream it to a file.
+  var isSw = function(u){ try { var x = new URL(u, location.href); return x.origin === location.origin && /_service-worker-responsify$/.test(x.pathname); } catch(e) { return false; } };
+  N.relay = function(url, hint){
+    fetch(url).then(function(r){
+      if (!r.ok || !r.body) throw new Error('HTTP ' + r.status);
+      var cd = r.headers.get('Content-Disposition') || '', name = hint || '';
+      var m = /filename\*=UTF-8''([^;]+)/i.exec(cd) || /filename="?([^";]+)"?/i.exec(cd);
+      if (m) { try { name = decodeURIComponent(m[1]); } catch(e) { name = m[1]; } }
+      var id = 'r' + Date.now() + Math.random().toString(36).slice(2);
+      if (!nb('relayOpen', [id, name, (r.headers.get('Content-Type') || '').split(';')[0]])) throw new Error('save');
+      var rd = r.body.getReader(), buf = [], size = 0, CH = 1024 * 1024;
+      var flush = function(){
+        if (!size) return Promise.resolve();
+        var b = new Blob(buf); buf = []; size = 0;
+        return new Promise(function(ok, bad){ var fr = new FileReader(); fr.onload = function(){ var s = fr.result; if (!nb('fsWrite', [id, s.substring(s.indexOf(',') + 1), -1])) bad(new Error('write')); else ok(); }; fr.onerror = function(){ bad(fr.error); }; fr.readAsDataURL(b); });
+      };
+      var pump = function(){
+        return rd.read().then(function(x){
+          if (x.done) return flush().then(function(){ nb('fsClose', [id]); });
+          buf.push(x.value); size += x.value.byteLength;
+          return (size >= CH ? flush() : Promise.resolve()).then(pump);
+        });
+      };
+      return pump().catch(function(e){ nb('fsAbort', [id]); throw e; });
+    }).catch(function(e){ nb('relayFail', [String(e && e.message || e)]); });
+  };
+  try {
+    var oOpen = window.open;
+    window.open = function(u){ if (u && isSw(u)) { N.relay(String(u), ''); return null; } return oOpen.apply(window, arguments); };
+  } catch(e) {}
+  document.addEventListener('click', function(e){
+    var a = e.target && e.target.closest && e.target.closest('a[href]');
+    if (a && isSw(a.href)) { e.preventDefault(); e.stopImmediatePropagation(); N.relay(a.href, a.getAttribute('download') || ''); }
+  }, true);
   function onDownloadLink(a){
     try {
       if (!a || !a.hasAttribute || !a.hasAttribute('download')) return;
@@ -265,7 +300,7 @@ object PageScript {
   document.addEventListener('click', function(e){ var a = e.target && e.target.closest && e.target.closest('a[download]'); if (a) onDownloadLink(a); }, true);
   try {
     var oClick = HTMLAnchorElement.prototype.click;
-    HTMLAnchorElement.prototype.click = function(){ if (!this.isConnected) onDownloadLink(this); return oClick.apply(this, arguments); };
+    HTMLAnchorElement.prototype.click = function(){ if (this.href && isSw(this.href)) { N.relay(this.href, this.getAttribute('download') || ''); return; } if (!this.isConnected) onDownloadLink(this); return oClick.apply(this, arguments); };
   } catch(e) {}
 
   // ---- "확대/축소 항상 허용": undo viewport rules that block pinch zoom ----
@@ -289,7 +324,8 @@ object PageScript {
     stop: function(k){ if (k === NK) N.stop(); },
     done: function(id, arr){ N.done(id, arr); },
     fail: function(id){ N.fail(id); },
-    saveBlob: function(k, href, name){ if (k === NK) N.saveBlob(href, name); }
+    saveBlob: function(k, href, name){ if (k === NK) N.saveBlob(href, name); },
+    relay: function(k, url, name){ if (k === NK) N.relay(url, name); }
   });
   try { Object.defineProperty(window, '__nami', { value: API, writable: false, configurable: false }); } catch(e) {}
 

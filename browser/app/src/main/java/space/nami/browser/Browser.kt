@@ -161,7 +161,7 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
         Downloads.onFail = { url, code ->
             val h = Uri.parse(url).host ?: ""
             val site = tabs.firstOrNull { it.host.isNotEmpty() && Blocker.Engine.registrable(it.host) == Blocker.Engine.registrable(h) }
-            if (code == 404 && h.isNotEmpty() && site != null && !prefs.swOffFor(h)) {
+            if (code == 404 && h.isNotEmpty() && site != null && !prefs.swOffFor(h) && !isSwUrl(url)) {
                 showPill("이 사이트는 호환 모드로 받아야 해요", 9000, "켜기" to {
                     prefs.putSwOff(Blocker.Engine.registrable(h), true)
                     tabs.filter { Blocker.Engine.registrable(it.host) == Blocker.Engine.registrable(h) }.forEach { it.web.reload() }
@@ -469,6 +469,14 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
             if (ok) scope.launch { showPill("받는 중: $name", 2000) }
             return ok
         }
+        @JavascriptInterface fun relayOpen(k: String, id: String, name: String, mime: String): Boolean {
+            if (k != key) return false
+            val (n, _) = FileName.build("", null, mime.ifEmpty { null }, name.ifEmpty { null })
+            val ok = fs.open(id, "", n, mime)
+            scope.launch { if (ok) Toast.makeText(act, "받는 중: $n", Toast.LENGTH_SHORT).show() else Toast.makeText(act, "받기 실패", Toast.LENGTH_SHORT).show() }
+            return ok
+        }
+        @JavascriptInterface fun relayFail(k: String, msg: String) { if (k != key) return; scope.launch { Toast.makeText(act, "받기 실패: $msg", Toast.LENGTH_SHORT).show() } }
         @JavascriptInterface fun fsWrite(k: String, id: String, b64: String, pos: Double): Boolean = k == key && fs.write(id, b64, pos)
         @JavascriptInterface fun fsSeek(k: String, id: String, pos: Double): Boolean = k == key && fs.seek(id, pos)
         @JavascriptInterface fun fsTrunc(k: String, id: String, size: Double): Boolean = k == key && fs.truncate(id, size)
@@ -673,6 +681,20 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
     val blobs = BlobSaver(act)
     val fs = FsSaver(act)
 
+    /** URLs a site's service worker answers (service-worker-responsify, used by kio.ac). Our downloader can't fetch them. */
+    fun isSwUrl(url: String) = runCatching { Uri.parse(url).path?.endsWith("_service-worker-responsify") == true }.getOrDefault(false)
+
+    /** Have a page of the same site fetch it (through its service worker) and stream it to a file. */
+    fun relay(url: String, hint: String?) {
+        val h = Uri.parse(url).host ?: ""
+        val t = tabs.filter { it.host == h && it.web.url != url }.let { l -> l.firstOrNull { it === tab } ?: l.lastOrNull() }
+        if (t == null) { Toast.makeText(act, "이 파일은 받을 수 없어요", Toast.LENGTH_SHORT).show(); return }
+        val q = org.json.JSONObject.quote(url); val n = org.json.JSONObject.quote(hint ?: "")
+        t.web.evaluateJavascript("(window.__nami&&__nami.relay)?(__nami.relay('$key',$q,$n),'ok'):'no'") { r ->
+            if (r?.contains("ok") != true) Toast.makeText(act, "이 파일은 받을 수 없어요", Toast.LENGTH_SHORT).show()
+        }
+    }
+
     fun download(url: String, ua: String? = null, cd: String? = null, mime: String? = null) {
         val hint = downloadHints.remove(url)
         if (url.startsWith("data:")) {
@@ -688,6 +710,7 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
             return
         }
         if (!url.startsWith("http")) { Toast.makeText(act, "이 파일은 받을 수 없어요", Toast.LENGTH_SHORT).show(); return }
+        if (isSwUrl(url)) { relay(url, hint); return }
         val (name, guessed) = FileName.build(url, cd, mime, hint)
         if (prefs.splitParts > 0) runCatching {
             if (act.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED)
