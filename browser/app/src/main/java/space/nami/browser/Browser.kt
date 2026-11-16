@@ -55,6 +55,8 @@ class BrowserTab(val id: Long, val web: WebView, val frame: PullFrame) {
     @Volatile var host = ""
     var fellBackNoticed = false
     val blocked = java.util.concurrent.atomic.AtomicInteger(0)
+    /** Hosts whose requests failed on this page (to find which ones need the proxy). */
+    val failed: MutableSet<String> = java.util.Collections.synchronizedSet(LinkedHashSet())
     val handlers = ArrayList<androidx.webkit.ScriptHandler>()
 }
 
@@ -132,14 +134,35 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
     var scriptPanel by mutableStateOf<List<PageScriptInfo>?>(null)
     private val docStart = WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)
 
+    var netStatus by mutableStateOf("")
+
     init {
         scripts.onChange = { tabs.forEach { applyScripts(it) } }
+        applyNetwork()
         scope.launch {
             if (!prefs.blockerAppsChosen) {
                 val found = blocker.findApps()
                 if (found.isNotEmpty()) prefs.putBlockerApps(found.map { it.pkg }.toSet())
             }
             blocker.refresh(true)
+        }
+    }
+
+    /** Points every WebView at LocalProxy when DNS / bypass / site proxy is on; otherwise goes direct. */
+    fun applyNetwork() {
+        if (!WebViewFeature.isFeatureSupported(WebViewFeature.PROXY_OVERRIDE)) { netStatus = "이 폰의 웹뷰가 지원하지 않아요"; LocalProxy.stop(); return }
+        val need = prefs.dnsMode != DnsMode.OFF || prefs.dpiBypass || prefs.proxySites.isNotEmpty()
+        val pc = androidx.webkit.ProxyController.getInstance()
+        if (need) {
+            val port = runCatching { LocalProxy.start(prefs) }.getOrNull()
+            if (port == null) { netStatus = "중계기를 켜지 못했어요"; return }
+            val cfg = androidx.webkit.ProxyConfig.Builder().addProxyRule("127.0.0.1:$port").build()
+            runCatching { pc.setProxyOverride(cfg, { it.run() }) { } }
+            netStatus = "중계기 동작 중"
+        } else {
+            runCatching { pc.clearProxyOverride({ it.run() }) { } }
+            LocalProxy.stop()
+            netStatus = "꺼짐 (바로 연결)"
         }
     }
 
@@ -435,6 +458,14 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
                 return r
             }
 
+            override fun onReceivedError(view: WebView, req: WebResourceRequest, err: android.webkit.WebResourceError) {
+                req.url.host?.let { t.failed.add(it) }
+            }
+
+            override fun onReceivedHttpError(view: WebView, req: WebResourceRequest, resp: android.webkit.WebResourceResponse) {
+                if (resp.statusCode == 403 || resp.statusCode == 451 || resp.statusCode == 401) req.url.host?.let { t.failed.add(it) }
+            }
+
             override fun shouldOverrideUrlLoading(view: WebView, req: WebResourceRequest): Boolean {
                 val u = req.url
                 if (req.isForMainFrame && isUserJs(u.toString())) { offerInstall(u.toString()); return true }
@@ -460,6 +491,7 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
                 t.translating = false
                 t.host = h
                 t.blocked.set(0)
+                t.failed.clear()
             }
 
             override fun onPageFinished(view: WebView, url: String) {

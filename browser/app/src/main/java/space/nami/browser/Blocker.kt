@@ -92,7 +92,7 @@ class Blocker(private val ctx: Context, private val prefs: Prefs) {
     fun intercept(url: String, pageHost: String): WebResourceResponse? {
         if (!active(pageHost)) return null
         if (!engine.blocks(url, pageHost)) return null
-        return WebResourceResponse("text/plain", "utf-8", 403, "Blocked", emptyMap(), ByteArrayInputStream(ByteArray(0)))
+        return WebResourceResponse("text/plain", "utf-8", 204, "No Content", emptyMap(), ByteArrayInputStream(ByteArray(0)))
     }
 
     fun css(pageHost: String): String = if (active(pageHost)) engine.css(pageHost) else ""

@@ -50,6 +50,8 @@ enum class Action(val label: String, val icon: ImageVector?) {
 /** Pull distance (dp) for "세게 끌어내리기". */
 enum class PullStrength(val label: String, val dp: Int) { LIGHT("약하게", 120), NORMAL("보통", 190), STRONG("세게", 280) }
 
+enum class DnsMode(val label: String) { CLOUDFLARE("Cloudflare (1.1.1.1)"), GOOGLE("Google (8.8.8.8)"), OFF("끔 (통신사 DNS)") }
+
 enum class Engine(val label: String) { GOOGLE("구글 (무료)"), VERTEX("Vertex (Gemini)"), DEVICE("폰 안에서 (ML Kit)") }
 
 /** App settings, backed by SharedPreferences and exposed as Compose state. */
@@ -83,6 +85,23 @@ class Prefs(ctx: Context) {
     var adblockOff by mutableStateOf(sp.getStringSet("adblockOff", emptySet())?.toSet() ?: emptySet())
         private set
     var splitParts by mutableStateOf(sp.getInt("splitParts", 4))
+        private set
+    // ---- network (LocalProxy) ----
+    var dnsMode by mutableStateOf(DnsMode.entries.firstOrNull { it.name == sp.getString("dnsMode", null) } ?: DnsMode.CLOUDFLARE)
+        private set
+    var dpiBypass by mutableStateOf(sp.getBoolean("dpiBypass", true))
+        private set
+    var bypassOff by mutableStateOf(sp.getStringSet("bypassOff", emptySet())?.toSet() ?: emptySet())
+        private set
+    var socksHost by mutableStateOf(sp.getString("socksHost", "127.0.0.1") ?: "127.0.0.1")
+        private set
+    var socksPort by mutableStateOf(sp.getInt("socksPort", 1080))
+        private set
+    var socksUser by mutableStateOf(sp.getString("socksUser", "") ?: "")
+        private set
+    var socksPass by mutableStateOf(sp.getString("socksPass", "") ?: "")
+        private set
+    var proxySites by mutableStateOf(sp.getStringSet("proxySites", setOf("iwara.tv"))?.toSet() ?: emptySet())
         private set
     var textZoom by mutableStateOf(sp.getInt("textZoom", 100))
         private set
@@ -139,6 +158,20 @@ class Prefs(ctx: Context) {
         }
     }
     fun putSplitParts(v: Int) { splitParts = v; sp.edit().putInt("splitParts", v).apply() }
+    fun putDnsMode(v: DnsMode) { dnsMode = v; sp.edit().putString("dnsMode", v.name).apply() }
+    fun putDpiBypass(v: Boolean) { dpiBypass = v; sp.edit().putBoolean("dpiBypass", v).apply() }
+    fun putBypassOff(host: String, off: Boolean) {
+        val h = host.lowercase().removePrefix("www.")
+        bypassOff = if (off) bypassOff + h else bypassOff - h; sp.edit().putStringSet("bypassOff", bypassOff).apply()
+    }
+    fun putSocksHost(v: String) { socksHost = v; sp.edit().putString("socksHost", v).apply() }
+    fun putSocksPort(v: Int) { socksPort = v; sp.edit().putInt("socksPort", v).apply() }
+    fun putSocksUser(v: String) { socksUser = v; sp.edit().putString("socksUser", v).apply() }
+    fun putSocksPass(v: String) { socksPass = v; sp.edit().putString("socksPass", v).apply() }
+    fun putProxySite(host: String, on: Boolean) {
+        val h = host.lowercase().removePrefix("www.")
+        proxySites = if (on) proxySites + h else proxySites - h; sp.edit().putStringSet("proxySites", proxySites).apply()
+    }
     fun putTextZoom(v: Int) { textZoom = v; sp.edit().putInt("textZoom", v).apply() }
     fun putForceZoom(v: Boolean) { forceZoom = v; sp.edit().putBoolean("forceZoom", v).apply() }
     fun putHighRefresh(v: Boolean) { highRefresh = v; sp.edit().putBoolean("highRefresh", v).apply() }

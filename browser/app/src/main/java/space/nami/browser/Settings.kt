@@ -87,7 +87,7 @@ fun SettingsScreen(b: Browser, prefs: Prefs) {
             }
             Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 6.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf("툴바", "동작", "번역", "확장", "디스플레이", "일반").forEachIndexed { i, t ->
+                listOf("툴바", "동작", "번역", "확장", "네트워크", "디스플레이", "일반").forEachIndexed { i, t ->
                     val sel = i == page
                     Text(t, fontSize = 15.sp, fontWeight = if (sel) FontWeight.Bold else FontWeight.Medium,
                         color = if (sel) Color.White else C.Ink, textAlign = TextAlign.Center,
@@ -103,7 +103,8 @@ fun SettingsScreen(b: Browser, prefs: Prefs) {
                         1 -> GestureSection(prefs)
                         2 -> TranslateSection(b, prefs)
                         3 -> ExtensionsSection(b, prefs)
-                        4 -> DisplaySection(prefs)
+                        4 -> NetworkSection(b, prefs)
+                        5 -> DisplaySection(prefs)
                         else -> {
                             GeneralSection(prefs)
                             Text("Nami 0.2.5", color = C.Sub, fontSize = 13.sp, modifier = Modifier.padding(start = 6.dp))
@@ -488,6 +489,86 @@ private fun ExtensionsSection(b: Browser, prefs: Prefs) {
                     }
                     if (!confirm) TextButton({ confirm = true }) { Text("삭제", color = C.Sub, fontSize = 13.sp) }
                     else TextButton({ b.scripts.remove(sc) }) { Text("정말 삭제", color = Color(0xFFC0392B), fontSize = 13.sp, fontWeight = FontWeight.Bold) }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun HostList(title: String, hint: String, hosts: Set<String>, placeholder: String, onAdd: (String) -> Unit, onRemove: (String) -> Unit) {
+    val colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = C.Accent, unfocusedBorderColor = C.Line, cursorColor = C.Accent)
+    Label(title)
+    if (hint.isNotEmpty()) Text(hint, fontSize = 12.sp, color = C.Sub, lineHeight = 17.sp)
+    var site by remember { mutableStateOf("") }
+    fun add() {
+        val h = site.trim().let { if (it.contains("://")) Uri.parse(it).host ?: "" else it.substringBefore('/') }.lowercase()
+        if (h.contains('.')) { onAdd(h); site = "" }
+    }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        OutlinedTextField(site, { site = it }, Modifier.weight(1f), singleLine = true, placeholder = { Text(placeholder, color = C.Sub) },
+            shape = RoundedCornerShape(16.dp), colors = colors,
+            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Uri,
+                imeAction = androidx.compose.ui.text.input.ImeAction.Done),
+            keyboardActions = androidx.compose.foundation.text.KeyboardActions(onDone = { add() }))
+        TextButton({ add() }) { Text("등록", color = C.Accent) }
+    }
+    hosts.sorted().forEach { h ->
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text(h, fontSize = 15.sp, color = C.Ink, modifier = Modifier.weight(1f))
+            IconButton({ onRemove(h) }) { Icon(Icons.Filled.Close, "빼기", tint = C.Sub) }
+        }
+    }
+}
+
+@Composable
+private fun NetworkSection(b: Browser, prefs: Prefs) {
+    val scope = rememberCoroutineScope()
+    val colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = C.Accent, unfocusedBorderColor = C.Line, cursorColor = C.Accent)
+    Text("상태: ${b.netStatus}", fontSize = 13.sp, color = C.Sub, modifier = Modifier.padding(start = 6.dp))
+
+    Card("보안 DNS", "사이트 주소를 통신사 대신 아래 곳에 암호화해서 물어봐요. Nami 안에서만 적용돼요.") {
+        SelectRow("DNS", DnsMode.entries, prefs.dnsMode, { it.label }) { prefs.putDnsMode(it); LocalProxy.clearDns() }
+    }
+
+    Card("차단 우회", "유니콘 HTTPS처럼, 사이트에 처음 보내는 인사 패킷을 둘로 쪼개서 통신사가 사이트 이름을 읽고 막는 걸 피해요. 새로고침하면 적용돼요.") {
+        SwitchRow("차단 우회", prefs.dpiBypass) { prefs.putDpiBypass(it) }
+        HostList("우회에서 뺄 사이트", "쪼갠 패킷 때문에 안 열리는 사이트가 있으면 여기 등록해요.", prefs.bypassOff, "예: example.com",
+            { prefs.putBypassOff(it, true) }, { prefs.putBypassOff(it, false) })
+    }
+
+    var result by remember { mutableStateOf<String?>(null) }
+    var testing by remember { mutableStateOf(false) }
+    Card("사이트별 프록시 (SOCKS5)", "등록한 사이트만 이 프록시를 거쳐요. 애드가드 VPN이면 '작동 모드'를 SOCKS5로 바꾸고 연결해 둔 뒤, 거기 나온 값을 넣어 주세요. 터먹스 등으로 띄운 SOCKS5도 돼요.") {
+        OutlinedTextField(prefs.socksHost, { prefs.putSocksHost(it.trim()) }, Modifier.fillMaxWidth(), singleLine = true,
+            label = { Text("호스트") }, shape = RoundedCornerShape(16.dp), colors = colors)
+        OutlinedTextField(if (prefs.socksPort > 0) prefs.socksPort.toString() else "", { prefs.putSocksPort(it.filter(Char::isDigit).take(5).toIntOrNull() ?: 0) },
+            Modifier.fillMaxWidth(), singleLine = true, label = { Text("포트") }, shape = RoundedCornerShape(16.dp), colors = colors,
+            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number))
+        OutlinedTextField(prefs.socksUser, { prefs.putSocksUser(it.trim()) }, Modifier.fillMaxWidth(), singleLine = true,
+            label = { Text("아이디 (없으면 비워 두기)") }, shape = RoundedCornerShape(16.dp), colors = colors)
+        var show by remember { mutableStateOf(false) }
+        OutlinedTextField(prefs.socksPass, { prefs.putSocksPass(it.trim()) }, Modifier.fillMaxWidth(), singleLine = true,
+            label = { Text("비밀번호") }, shape = RoundedCornerShape(16.dp), colors = colors,
+            visualTransformation = if (show) androidx.compose.ui.text.input.VisualTransformation.None else androidx.compose.ui.text.input.PasswordVisualTransformation(),
+            trailingIcon = { TextButton({ show = !show }) { Text(if (show) "숨기기" else "보기", color = C.Sub, fontSize = 13.sp) } })
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            TextButton({
+                testing = true; result = null
+                scope.launch { result = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { LocalProxy.testSocks(prefs) }; testing = false }
+            }, enabled = !testing) { Text(if (testing) "확인 중…" else "연결 확인", color = C.Accent, fontWeight = FontWeight.SemiBold) }
+        }
+        result?.let { Text(it, fontSize = 13.sp, color = if (it.startsWith("연결됨")) C.Accent else Color(0xFFC0392B)) }
+        HostList("프록시로 보낼 사이트", "하위 주소도 같이 가요 (iwara.tv → www.iwara.tv, files.iwara.tv …).", prefs.proxySites, "예: iwara.tv",
+            { prefs.putProxySite(it, true) }, { prefs.putProxySite(it, false) })
+        val failed = b.tab?.failed?.toList()?.filter { it !in prefs.proxySites } ?: emptyList()
+        if (failed.isNotEmpty()) {
+            Label("지금 페이지에서 실패한 주소")
+            Text("영상이나 그림이 안 나오면 여기 있는 주소를 프록시에 추가해 보세요.", fontSize = 12.sp, color = C.Sub)
+            failed.take(12).forEach { h ->
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text(h, fontSize = 14.sp, color = C.Ink, modifier = Modifier.weight(1f))
+                    TextButton({ prefs.putProxySite(h, true) }) { Text("+ 추가", color = C.Accent, fontSize = 13.sp) }
                 }
             }
         }

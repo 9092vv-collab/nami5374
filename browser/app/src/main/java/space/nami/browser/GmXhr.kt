@@ -11,7 +11,7 @@ import java.net.URL
 object GmXhr {
     fun run(o: JSONObject, ua: String): JSONObject = try {
         val url = o.getString("url")
-        val c = URL(url).openConnection() as HttpURLConnection
+        val c = URL(url).openConnection(LocalProxy.javaProxy()) as HttpURLConnection
         try {
             val method = o.optString("method", "GET").uppercase()
             runCatching { c.requestMethod = method }.onFailure {

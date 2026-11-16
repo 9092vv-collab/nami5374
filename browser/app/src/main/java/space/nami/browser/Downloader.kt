@@ -102,7 +102,7 @@ class DownloadService : Service() {
                       val referer: String?, val parts: Int, var guessed: Boolean)
 
     private fun open(req: Req, range: String?): HttpURLConnection {
-        val c = URL(req.url).openConnection() as HttpURLConnection
+        val c = URL(req.url).openConnection(LocalProxy.javaProxy()) as HttpURLConnection
         c.connectTimeout = 20_000; c.readTimeout = 30_000; c.instanceFollowRedirects = true
         req.cookie?.let { c.setRequestProperty("Cookie", it) }
         req.ua?.let { c.setRequestProperty("User-Agent", it) }
