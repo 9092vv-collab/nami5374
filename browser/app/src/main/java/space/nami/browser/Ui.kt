@@ -169,6 +169,21 @@ fun NamiApp(b: Browser, prefs: Prefs, act: Activity) = NamiTheme {
         }
     }
 
+    // 120Hz: ask for the fastest mode at the current resolution (recomputed when the phone folds/unfolds).
+    val config = androidx.compose.ui.platform.LocalConfiguration.current
+    LaunchedEffect(prefs.highRefresh, config.screenWidthDp, config.screenHeightDp) {
+        runCatching {
+            val d = act.display ?: return@runCatching
+            val cur = d.mode
+            val best = d.supportedModes
+                .filter { it.physicalWidth == cur.physicalWidth && it.physicalHeight == cur.physicalHeight }
+                .maxByOrNull { it.refreshRate }
+            val lp = act.window.attributes
+            lp.preferredDisplayModeId = if (prefs.highRefresh && best != null) best.modeId else 0
+            act.window.attributes = lp
+        }
+    }
+
     fun run(a: Action) {
         val t = b.tab
         when (a) {

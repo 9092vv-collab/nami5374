@@ -4,6 +4,7 @@ package space.nami.browser
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -72,13 +73,14 @@ fun SettingsScreen(b: Browser, prefs: Prefs) {
                 IconButton({ b.showSettings = false }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "뒤로", tint = C.Ink) }
                 Text("설정", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = C.Ink)
             }
-            Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf("툴바", "동작", "번역", "화면").forEachIndexed { i, t ->
+            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 6.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf("툴바", "동작", "번역", "디스플레이", "일반").forEachIndexed { i, t ->
                     val sel = i == page
                     Text(t, fontSize = 15.sp, fontWeight = if (sel) FontWeight.Bold else FontWeight.Medium,
                         color = if (sel) Color.White else C.Ink, textAlign = TextAlign.Center,
-                        modifier = Modifier.weight(1f).clip(CircleShape).background(if (sel) C.Ink else Color.White)
-                            .clickable { page = i }.padding(vertical = 10.dp))
+                        modifier = Modifier.clip(CircleShape).background(if (sel) C.Ink else Color.White)
+                            .clickable { page = i }.padding(horizontal = 18.dp, vertical = 10.dp))
                 }
             }
             Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp).padding(bottom = 40.dp),
@@ -88,8 +90,9 @@ fun SettingsScreen(b: Browser, prefs: Prefs) {
                         0 -> ToolbarSection(prefs)
                         1 -> GestureSection(prefs)
                         2 -> TranslateSection(b, prefs)
+                        3 -> DisplaySection(prefs)
                         else -> {
-                            ScreenSection(prefs)
+                            GeneralSection(prefs)
                             Text("Nami 0.1.1", color = C.Sub, fontSize = 13.sp, modifier = Modifier.padding(start = 6.dp))
                         }
                     }
@@ -272,10 +275,19 @@ private fun VertexFields(prefs: Prefs) {
 }
 
 @Composable
-private fun ScreenSection(prefs: Prefs) {
-    val colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = C.Accent, unfocusedBorderColor = C.Line, cursorColor = C.Accent)
-    Card("화면") {
+private fun DisplaySection(prefs: Prefs) {
+    Card("디스플레이") {
+        SwitchRow("120Hz 고정", prefs.highRefresh) { prefs.putHighRefresh(it) }
+        Text("켜면 Nami가 떠 있는 동안 폰에 가장 높은 주사율을 요청해서 스크롤이 항상 부드러워요. 배터리를 조금 더 써요. " +
+            "끄면 폰의 '부드러운 화면 움직임' 설정대로 움직여요.", fontSize = 12.sp, color = C.Sub, lineHeight = 17.sp)
         SwitchRow("상태 표시줄 숨기기", prefs.hideStatusBar) { prefs.putHideStatusBar(it) }
+    }
+}
+
+@Composable
+private fun GeneralSection(prefs: Prefs) {
+    val colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = C.Accent, unfocusedBorderColor = C.Line, cursorColor = C.Accent)
+    Card("일반") {
         Label("홈페이지 · 새 탭")
         OutlinedTextField(prefs.homeUrl, { prefs.putHomeUrl(it.trim()) }, Modifier.fillMaxWidth(), singleLine = true,
             shape = RoundedCornerShape(16.dp), colors = colors)

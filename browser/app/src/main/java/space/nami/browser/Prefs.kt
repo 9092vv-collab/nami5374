@@ -72,6 +72,8 @@ class Prefs(ctx: Context) {
         private set
     var hideStatusBar by mutableStateOf(sp.getBoolean("hideStatusBar", false))
         private set
+    var highRefresh by mutableStateOf(sp.getBoolean("highRefresh", true))
+        private set
     var engine by mutableStateOf(Engine.entries.firstOrNull { it.name == sp.getString("engine", null) } ?: Engine.GOOGLE)
         private set
     var vertexJson by mutableStateOf(sp.getString("vertexJson", "") ?: "")
@@ -93,6 +95,7 @@ class Prefs(ctx: Context) {
     fun putDoubleTapAction(v: Action) { doubleTapAction = v; sp.edit().putString("doubleTapAction", v.name).apply() }
     fun putPullStrength(v: PullStrength) { pullStrength = v; sp.edit().putString("pullStrength", v.name).apply() }
     fun putDotOnLeft(v: Boolean) { dotOnLeft = v; sp.edit().putBoolean("dotOnLeft", v).apply() }
+    fun putHighRefresh(v: Boolean) { highRefresh = v; sp.edit().putBoolean("highRefresh", v).apply() }
     fun putHideStatusBar(v: Boolean) { hideStatusBar = v; sp.edit().putBoolean("hideStatusBar", v).apply() }
     fun putEngine(v: Engine) { engine = v; sp.edit().putString("engine", v.name).apply() }
     fun putVertexJson(v: String) { vertexJson = v; sp.edit().putString("vertexJson", v).apply() }
