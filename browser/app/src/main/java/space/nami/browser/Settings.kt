@@ -106,7 +106,7 @@ fun SettingsScreen(b: Browser, prefs: Prefs) {
                         4 -> DisplaySection(prefs)
                         else -> {
                             GeneralSection(prefs)
-                            Text("Nami 0.2.2", color = C.Sub, fontSize = 13.sp, modifier = Modifier.padding(start = 6.dp))
+                            Text("Nami 0.2.3", color = C.Sub, fontSize = 13.sp, modifier = Modifier.padding(start = 6.dp))
                         }
                     }
                 }
@@ -297,6 +297,39 @@ private fun DisplaySection(prefs: Prefs) {
     }
 }
 
+/** "기본 브라우저로 설정": asks Android for the browser role (system dialog); falls back to the default-apps screen. */
+@Composable
+private fun DefaultBrowserRow() {
+    val ctx = LocalContext.current
+    val rm = ctx.getSystemService(android.app.role.RoleManager::class.java)
+    fun held() = runCatching { rm.isRoleHeld(android.app.role.RoleManager.ROLE_BROWSER) }.getOrDefault(false)
+    var isDefault by remember { mutableStateOf(held()) }
+    val owner = ctx as? ComponentActivity
+    DisposableEffect(owner) {
+        val obs = LifecycleEventObserver { _, e -> if (e == Lifecycle.Event.ON_RESUME) isDefault = held() }
+        owner?.lifecycle?.addObserver(obs)
+        onDispose { owner?.lifecycle?.removeObserver(obs) }
+    }
+    val ask = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { isDefault = held() }
+    fun openDefaultApps() = runCatching { ctx.startActivity(Intent(Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS)) }
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f).padding(end = 10.dp)) {
+            Text("기본 브라우저", fontSize = 15.sp, color = C.Ink)
+            Text(if (isDefault) "Nami가 기본 브라우저예요. 다른 앱의 링크가 Nami 새 탭에서 열려요." else "다른 앱에서 링크를 누르면 지금은 다른 브라우저가 열려요.",
+                fontSize = 12.sp, color = if (isDefault) C.Accent else C.Sub)
+        }
+        if (!isDefault) TextButton({
+            val ok = runCatching {
+                if (rm.isRoleAvailable(android.app.role.RoleManager.ROLE_BROWSER)) {
+                    ask.launch(rm.createRequestRoleIntent(android.app.role.RoleManager.ROLE_BROWSER)); true
+                } else false
+            }.getOrDefault(false)
+            if (!ok) openDefaultApps()
+        }) { Text("설정", color = C.Accent, fontWeight = FontWeight.SemiBold) }
+        else TextButton({ openDefaultApps() }) { Text("바꾸기", color = C.Sub) }
+    }
+}
+
 /** Samsung "배터리 사용량 제한 없음": asks Android to stop optimizing (pausing) Nami in the background. */
 @Composable
 private fun BatteryRow() {
@@ -332,6 +365,7 @@ private fun BatteryRow() {
 private fun GeneralSection(prefs: Prefs) {
     val colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = C.Accent, unfocusedBorderColor = C.Line, cursorColor = C.Accent)
     Card("일반") {
+        DefaultBrowserRow()
         BatteryRow()
         SelectRow("분할 다운로드", listOf(0, 2, 4, 8), prefs.splitParts, { if (it == 0) "끔 (폰 기본)" else "${it}조각" }) { prefs.putSplitParts(it) }
         Text("파일 하나를 여러 조각으로 나눠 동시에 받아요. 큰 파일일수록 빨라지고, 서버가 지원하지 않으면 자동으로 한 줄로 받아요.",
