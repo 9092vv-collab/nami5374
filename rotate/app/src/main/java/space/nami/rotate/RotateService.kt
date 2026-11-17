@@ -42,6 +42,11 @@ object Prefs {
         of(c).edit().putInt(PREV_ACCEL, accel).putInt(PREV_USER, user).apply()
     fun prevAccel(c: Context) = of(c).getInt(PREV_ACCEL, 1)
     fun prevUser(c: Context) = of(c).getInt(PREV_USER, Surface.ROTATION_0)
+    // Cover screen: portrait lock until we've seen its real setting.
+    fun saveCover(c: Context, accel: Int, user: Int) =
+        of(c).edit().putInt("coverAccel", accel).putInt("coverUser", user).apply()
+    fun coverAccel(c: Context) = of(c).getInt("coverAccel", 0)
+    fun coverUser(c: Context) = of(c).getInt("coverUser", Surface.ROTATION_0)
     fun prevIgnore(c: Context) = of(c).getBoolean(PREV_IGNORE, false)
     fun setPrevIgnore(c: Context, v: Boolean) = of(c).edit().putBoolean(PREV_IGNORE, v).apply()
 }
@@ -106,7 +111,10 @@ class RotateService : AccessibilityService() {
     private val main = Handler(Looper.getMainLooper())
     private val thread = HandlerThread("rotate").apply { start() }
     private val bg = Handler(thread.looper)
-    private var enforcing = false
+    // Persisted so a restart while folded never mistakes our lock for the cover screen's own setting.
+    private var enforcing: Boolean
+        get() = Prefs.of(this).getBoolean("enforcing", false)
+        set(v) { Prefs.of(this).edit().putBoolean("enforcing", v).commit() }
     // Persisted: if the service dies while apps are told to be ignored, the next start undoes it.
     private var ignoring: Boolean
         get() = Prefs.of(this).getBoolean("ignoring", false)
@@ -125,8 +133,10 @@ class RotateService : AccessibilityService() {
         override fun onDisplayChanged(id: Int) {
             if (id != Display.DEFAULT_DISPLAY) return
             // Folding: let apps rotate again right away so the cover screen is never stuck sideways.
-            if (ignoring && !isUnfolded(this@RotateService)) bg.post { releaseIgnore() }
-            schedule()
+            if (!isUnfolded(this@RotateService)) {
+                if (ignoring) bg.post { releaseIgnore() }
+                schedule(30) // give the cover screen its own setting back right away
+            } else schedule()
         }
     }
     private val settings = object : ContentObserver(main) {
@@ -206,6 +216,15 @@ class RotateService : AccessibilityService() {
         Sh.run("cmd", "window", "set-ignore-orientation-request", Prefs.prevIgnore(this).toString())
     }
 
+    private fun restore(accel: Int, user: Int) {
+        val cmd = if (accel == 1) arrayOf("cmd", "window", "set-user-rotation", "free")
+        else arrayOf("cmd", "window", "set-user-rotation", "lock", user.toString())
+        if (Sh.run(*cmd) == null) {
+            put(Settings.System.USER_ROTATION, user)
+            put(Settings.System.ACCELEROMETER_ROTATION, accel)
+        }
+    }
+
     private fun apply() {
         val shizuku = Sh.ready()
         if (!shizuku && !Settings.System.canWrite(this)) return
@@ -220,23 +239,24 @@ class RotateService : AccessibilityService() {
             }
             if (shizuku && Prefs.force(this)) holdIgnore() else releaseIgnore()
             lock(Prefs.rotation(this))
-        } else if (enforcing) {
+            return
+        }
+        releaseIgnore()
+        if (enforcing) {
             enforcing = false
-            releaseIgnore()
-            // Turned off by the user while unfolded: give back what was there before.
-            // Folded: leave it alone, One UI restores the cover screen's own setting.
-            if (unfolded && disabledByUser) {
-                val accel = Prefs.prevAccel(this)
-                val user = Prefs.prevUser(this)
-                val cmd = if (accel == 1) arrayOf("cmd", "window", "set-user-rotation", "free")
-                else arrayOf("cmd", "window", "set-user-rotation", "lock", user.toString())
-                if (Sh.run(*cmd) == null) {
-                    put(Settings.System.USER_ROTATION, user)
-                    put(Settings.System.ACCELEROMETER_ROTATION, accel)
-                }
+            if (!unfolded) {
+                // Folded: the lock lives on the same display, so put the cover screen's own setting back.
+                restore(Prefs.coverAccel(this), Prefs.coverUser(this))
+            } else if (disabledByUser) {
+                // Turned off by the user while unfolded: give back what was there before.
+                restore(Prefs.prevAccel(this), Prefs.prevUser(this))
             }
-            disabledByUser = false
-        } else releaseIgnore()
+        } else if (!unfolded) {
+            // Remember how the cover screen is set while we're not touching it.
+            Prefs.saveCover(this, get(Settings.System.ACCELEROMETER_ROTATION, 0),
+                get(Settings.System.USER_ROTATION, Surface.ROTATION_0))
+        }
+        disabledByUser = false
     }
 
     companion object {
