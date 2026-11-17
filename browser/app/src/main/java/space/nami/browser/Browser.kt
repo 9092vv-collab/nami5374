@@ -531,7 +531,7 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
             val fb = relayFallback.remove(url)
             scope.launch {
                 when {
-                    got > 0 && msg == "stalled" -> Toast.makeText(act, "사이트가 ${DownloadService.size(got.toLong())}에서 90초 넘게 멈춰서 그만뒀어요", Toast.LENGTH_LONG).show()
+                    got > 0 && msg == "stalled" -> Toast.makeText(act, "사이트가 ${DownloadService.size(got.toLong())}에서 30초 넘게 멈춰서 그만뒀어요", Toast.LENGTH_LONG).show()
                     got > 0 -> Toast.makeText(act, "받다가 끊겼어요 (${DownloadService.size(got.toLong())}에서) · 다시 받아 주세요", Toast.LENGTH_LONG).show()
                     fb != null -> fb()
                     else -> Toast.makeText(act, "받기 실패: $msg", Toast.LENGTH_SHORT).show()

@@ -190,7 +190,7 @@ object PageScript {
     };
     // the site stopped sending for a long time → give up instead of hanging forever
     var last = Date.now(), dead = false;
-    var watch = setInterval(function(){ if (Date.now() - last > 90000) { dead = true; clearInterval(watch); try { rd.cancel('stalled'); } catch(e) {} } }, 5000);
+    var watch = setInterval(function(){ if (Date.now() - last > 30000) { dead = true; clearInterval(watch); try { rd.cancel('stalled'); } catch(e) {} } }, 5000);
     var pump = function(){
       return rd.read().then(function(x){
         last = Date.now();
@@ -270,26 +270,50 @@ object PageScript {
     return null;
   };
   N.relayZip = function(url, z){
-    var folder = z.name.replace(/\.zip$/i, '') || 'download', i = 0, ok = 0, bad = 0, total = 0;
+    var parts = function(e){ return String(nameIn(e)).replace(/\\/g, '/').split('/').filter(function(s){ return s && s !== '.' && s !== '..'; }); };
+    // the folder: the zip's name, else the entries' own top folder, else the site's name
+    var folder = z.name.replace(/\.zip$/i, ''), top = null;
+    z.entries.forEach(function(e){ var p = parts(e); var t = p.length > 1 ? p[0] : ''; top = top === null ? t : (top === t ? top : ''); });
+    var base = folder && folder !== top ? folder : '';
+    var label = folder || top || location.hostname;
+    if (!base && !top) base = location.hostname;
+    var i = 0, ok = 0, bad = 0;
     var ping = setInterval(poke, 10000);
-    nb('relayBatch', [folder, z.entries.length, 0, 0, 0]);
-    var next = function(){
-      if (i >= z.entries.length) { clearInterval(ping); nb('relayBatch', [folder, z.entries.length, ok, bad, 1]); return; }
-      var e = z.entries[i++], p = {}, src = e.request && e.request.url ? e.request : { url: urlIn(e, 0) };
+    nb('relayBatch', [label, z.entries.length, 0, 0, 0]);
+    // One file. If the site stalls or the connection drops, ask again from where we stopped (Range);
+    // if the site can't resume, start that file over. Up to 5 tries.
+    var one = function(e, n){
+      var p = {}, src = e.request && e.request.url ? e.request : { url: urlIn(e, 0) };
       Object.keys(src).forEach(function(k){ if (k !== 'url' && k !== 'reuse' && k !== 'signal') p[k] = src[k]; });
       if (p.mode === 'navigate') p.mode = 'same-origin';
-      var path = String(nameIn(e)).replace(/\\/g, '/').split('/').filter(function(s){ return s && s !== '.' && s !== '..'; });
-      if (path.length > 1 && path[0] === folder) path.shift();
-      var name = path.pop() || ('file' + i), dir = [folder].concat(path).join('/'), id = newId(), opened = false;
       if (e.request && e.request.body == null) delete p.body;
-      fetch(src.url, p).then(function(r){
-        if (!r.ok || !r.body) throw new Error('HTTP ' + r.status);
-        if (!nb('relayOpenIn', [id, dir, name, (r.headers.get('Content-Type') || '').split(';')[0], i, z.entries.length])) throw new Error('save');
-        opened = true;
-        return streamTo(r, id, function(n){ total += n; });
-      }).then(function(){ nb('fsClose', [id]); nb('relayDone', ['']); ok++; },
-               function(err){ if (opened) { nb('fsAbort', [id]); nb('relayDone', ['']); } bad++; })
-        .then(next);
+      var path = parts(e); if (base && path.length > 1 && path[0] === base) path.shift();
+      var name = path.pop() || ('file' + n), dir = (base ? [base] : []).concat(path).join('/');
+      var id = null, got = 0, tries = 5;
+      var attempt = function(){
+        var q = Object.assign({}, p);
+        if (id && got > 0) { var hd = new Headers(p.headers || {}); hd.set('Range', 'bytes=' + got + '-'); q.headers = hd; }
+        return fetch(src.url, q).then(function(r){
+          if (!r.ok || !r.body) throw new Error('HTTP ' + r.status);
+          if (id && got > 0 && r.status !== 206) { nb('fsAbort', [id]); nb('relayDone', ['']); id = null; got = 0; }   // can't resume → over
+          if (!id) {
+            id = newId();
+            if (!nb('relayOpenIn', [id, dir, name, (r.headers.get('Content-Type') || '').split(';')[0], n, z.entries.length])) { id = null; throw new Error('save'); }
+          }
+          return streamTo(r, id, function(k){ got += k; });
+        }).then(function(){ nb('fsClose', [id]); nb('relayDone', ['']); return true; },
+                 function(err){
+                   if (--tries > 0) return new Promise(function(ok){ setTimeout(ok, 2000); }).then(attempt);
+                   if (id) { nb('fsAbort', [id]); nb('relayDone', ['']); }
+                   return false;
+                 });
+      };
+      return attempt();
+    };
+    var next = function(){
+      if (i >= z.entries.length) { clearInterval(ping); nb('relayBatch', [label, z.entries.length, ok, bad, 1]); return; }
+      var e = z.entries[i++];
+      one(e, i).then(function(good){ if (good) ok++; else bad++; next(); });
     };
     next();
   };
