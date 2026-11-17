@@ -170,7 +170,8 @@ object PageScript {
   var PW = [], PIPE = window.NamiPipe || null;
   if (PIPE) PIPE.onmessage = function(e){ var w = PW.shift(); if (w) w(e.data === 'ok'); };
   // Writes a response body into the already opened file `id`. progress(bytes) after each piece.
-  var streamTo = function(r, id, progress){
+  N.gen = 0;   // bumped by "취소" on Nami's note: everything started before stops
+  var streamTo = function(r, id, progress, gen){
     var rd = r.body.getReader(), buf = [], size = 0;
     var viaBridge = function(parts, n){
       var b = new Blob(parts);
@@ -195,6 +196,7 @@ object PageScript {
       return rd.read().then(function(x){
         last = Date.now();
         if (dead) throw new Error('stalled');
+        if (gen !== undefined && N.gen !== gen) { try { rd.cancel('cancelled'); } catch(e) {} throw new Error('cancelled'); }
         if (x.done) return flush();
         buf.push(x.value); size += x.value.byteLength;
         return (size >= (PIPE ? 4194304 : 1048576) ? flush() : Promise.resolve()).then(pump);
@@ -298,7 +300,7 @@ object PageScript {
         if (nb('nativeBatch', [JSON.stringify({ label: label, items: nat })])) { N.nativeItems = { label: label, items: items }; return; }
       } catch(e) {}
     }
-    var i = start, ok = start, bad = 0, total = items.length;
+    var i = start, ok = start, bad = 0, total = items.length, gen = N.gen;
     var ping = setInterval(poke, 10000);
     nb('relayBatch', [label, total, 0, 0, 0]);
     try { nb('batchSave', [JSON.stringify({ label: label, items: items })]); } catch(e) {}
@@ -315,9 +317,10 @@ object PageScript {
             if (!nb('relayOpenIn', [id, it.dir, it.name, (r.headers.get('Content-Type') || '').split(';')[0], n, total])) { id = null; throw new Error('save'); }
           } else if (!nb('relayAdopt', [id])) throw new Error('save');
           nb('batchAt', [n - 1, id]);
-          return streamTo(r, id, function(k){ got += k; });
+          return streamTo(r, id, function(k){ got += k; }, gen);
         }).then(function(){ nb('fsClose', [id]); nb('relayDone', ['']); return true; },
                  function(err){
+                   if (N.gen !== gen) { if (id) nb('fsAbort', [id]); return false; }
                    if (--tries > 0) return new Promise(function(okk){ setTimeout(okk, 2000); }).then(attempt);
                    if (id) { nb('fsAbort', [id]); nb('relayDone', ['']); }
                    return false;
@@ -326,6 +329,7 @@ object PageScript {
       return attempt();
     };
     var next = function(){
+      if (N.gen !== gen) { clearInterval(ping); nb('relayBatch', [label, total, ok, bad, 2]); return; }
       if (i >= total) { clearInterval(ping); nb('relayBatch', [label, total, ok, bad, 1]); return; }
       var it = items[i], n = ++i, id = null, got = 0;
       if (n - 1 === start && firstId) { id = firstId; got = firstGot; }
@@ -337,16 +341,16 @@ object PageScript {
   N.relay = function(url, hint){
     var z = zipFor(url);
     if (z) return N.relayZip(url, z);
-    var got = 0, opened = false, ping = null;
+    var got = 0, opened = false, ping = null, gen = N.gen;
     fetch(url).then(function(r){
       if (!r.ok || !r.body) throw new Error('HTTP ' + r.status);
       var id = newId();
       if (!nb('relayOpen', [id, cdName(r, hint), (r.headers.get('Content-Type') || '').split(';')[0]])) throw new Error('save');
       opened = true; ping = setInterval(poke, 10000);
-      return streamTo(r, id, function(n){ got += n; }).then(function(){
+      return streamTo(r, id, function(n){ got += n; }, gen).then(function(){
         clearInterval(ping); nb('fsClose', [id]); nb('relayDone', [url]);
       }, function(e){ nb('fsAbort', [id]); throw e; });
-    }).catch(function(e){ if (ping) clearInterval(ping); nb('relayFail', [String(e && e.message || e), url, got, opened]); });
+    }).catch(function(e){ if (ping) clearInterval(ping); if (N.gen !== gen) return; nb('relayFail', [String(e && e.message || e), url, got, opened]); });
   };
   try {
     var oOpen = window.open;
@@ -393,6 +397,7 @@ object PageScript {
     fail: function(id){ N.fail(id); },
     saveBlob: function(k, href, name){ if (k === NK) N.saveBlob(href, name); },
     relay: function(k, url, name){ if (k === NK) N.relay(url, name); },
+    cancelAll: function(k){ if (k === NK) N.gen++; },
     resumeBatch: function(k, json, idx, id, got, mode){ if (k === NK) { var b = JSON.parse(json); if (mode === 'page' && N.nativeItems && N.nativeItems.label === b.label) b.items = N.nativeItems.items; else if (mode === 'page' && b.items && b.items[0] && b.items[0].h) b.items = b.items.map(function(x){ return { u: x.u, p: { headers: x.h, credentials: 'include' }, dir: x.dir, name: x.name, size: x.size }; }); N.runBatch(b.label, b.items, idx, id || null, got || 0, mode || 'page'); } }
   });
   try { Object.defineProperty(window, '__nami', { value: API, writable: false, configurable: false }); } catch(e) {}

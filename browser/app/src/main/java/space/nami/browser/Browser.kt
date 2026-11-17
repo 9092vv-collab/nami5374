@@ -171,6 +171,14 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
             }
         }
         Downloads.onBatchDone = { msg -> batchPending.clear(); showPill(msg, 5000) }
+        RelayService.onCancel = {
+            tabs.filter { it.relays > 0 || it.batchJson != null }.forEach { t ->
+                t.web.evaluateJavascript("window.__nami&&__nami.cancelAll('$key')", null)
+                t.relays = 0; t.batchJson = null; t.batchId = null; t.batchBroken = false
+                relayKeep(t)
+            }
+            showPill("다운로드를 취소했어요", 2500)
+        }
         Downloads.onDone = { uri, name, mime ->
             showPill("다 받았어요 · " + name.take(24), 4500, "열기" to { Downloads.open(act, uri, mime, name) })
         }
@@ -568,6 +576,7 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
                 relayKeep(t)
                 if (done < 1) Toast.makeText(act, "zip 대신 파일 ${n.toInt()}개를 하나씩 받을게요 · Download/$folder", Toast.LENGTH_LONG).show()
                 else {
+                    if (done >= 2) return@launch   // cancelled from the note
                     val msg = if (bad < 1) "다 받았어요: $folder (${ok.toInt()}개)" else "받았어요: $folder (${ok.toInt()}개, 실패 ${bad.toInt()}개)"
                     showPill(msg, 5000)
                     val nm = act.getSystemService(android.app.NotificationManager::class.java)

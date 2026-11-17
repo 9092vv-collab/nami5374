@@ -88,6 +88,9 @@ class FsSaver(private val ctx: Context) {
         return true
     }
 
+    /** "취소" on the progress note: drop every half-written file. */
+    fun abortAll() { sinks.keys.toList().forEach { abort(it) } }
+
     fun abort(id: String) {
         val s = sinks.remove(id) ?: return
         runCatching { s.ch.close() }; runCatching { s.pfd.close() }
@@ -124,11 +127,21 @@ class RelayService : android.app.Service() {
             .addFlags(android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP), android.app.PendingIntent.FLAG_IMMUTABLE)
         return androidx.core.app.NotificationCompat.Builder(this, CH).setSmallIcon(android.R.drawable.stat_sys_download)
             .setContentTitle(title).setContentText(DownloadService.size(list.sumOf { it.second }) + " · 그 사이트 탭은 닫지 말아 주세요")
-            .setProgress(0, 0, true).setOngoing(true).setSilent(true).setContentIntent(open).build()
+            .setProgress(0, 0, true).setOngoing(true).setSilent(true).setContentIntent(open)
+            .addAction(0, "취소", android.app.PendingIntent.getService(this, 1, android.content.Intent(this, RelayService::class.java)
+                .setAction(ACTION_CANCEL), android.app.PendingIntent.FLAG_IMMUTABLE)).build()
     }
 
     override fun onBind(intent: android.content.Intent?): android.os.IBinder? = null
     override fun onStartCommand(intent: android.content.Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action == ACTION_CANCEL) {
+            holds.set(0)
+            saver?.abortAll()
+            h.post { onCancel?.invoke() }
+            running = false
+            stopSelf()
+            return START_NOT_STICKY
+        }
         nm.createNotificationChannel(android.app.NotificationChannel(CH, "다운로드 진행", android.app.NotificationManager.IMPORTANCE_LOW))
         androidx.core.app.ServiceCompat.startForeground(this, FG_ID, note(saver?.active().orEmpty()),
             android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
@@ -154,6 +167,9 @@ class RelayService : android.app.Service() {
     companion object {
         private const val CH = "dl_progress"
         private const val FG_ID = 7002
+        private const val ACTION_CANCEL = "space.nami.browser.RELAY_CANCEL"
+        /** Tell the pages to stop (they'd otherwise retry). */
+        @Volatile var onCancel: (() -> Unit)? = null
         @Volatile private var saver: FsSaver? = null
         @Volatile private var running = false
         private val holds = java.util.concurrent.atomic.AtomicInteger(0)
