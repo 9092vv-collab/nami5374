@@ -4,6 +4,9 @@
     <!-- to set the screen rotation lock (user grants it in "modify system settings") -->
     <uses-permission android:name="android.permission.WRITE_SETTINGS"
         tools:ignore="ProtectedPermissions" />
+    <queries>
+        <package android:name="moe.shizuku.privileged.api" />
+    </queries>
     <application
         android:label="회전 고정"
         android:icon="@mipmap/ic_launcher"
@@ -32,5 +35,12 @@
                 android:name="android.accessibilityservice"
                 android:resource="@xml/rotate_service" />
         </service>
+        <provider
+            android:name="rikka.shizuku.ShizukuProvider"
+            android:authorities="${applicationId}.shizuku"
+            android:enabled="true"
+            android:exported="true"
+            android:multiprocess="false"
+            android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
     </application>
 </manifest>

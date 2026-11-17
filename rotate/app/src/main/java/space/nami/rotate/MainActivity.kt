@@ -5,6 +5,8 @@ import android.net.Uri
 import android.os.Bundle
 import android.provider.Settings
 import android.view.Surface
+import android.widget.Toast
+import rikka.shizuku.Shizuku
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -71,9 +73,39 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private val permResult = Shizuku.OnRequestPermissionResultListener { _, _ -> tick++ }
+    private val binderUp = Shizuku.OnBinderReceivedListener { tick++ }
+
+    override fun onStart() {
+        super.onStart()
+        runCatching {
+            Shizuku.addRequestPermissionResultListener(permResult)
+            Shizuku.addBinderReceivedListenerSticky(binderUp)
+        }
+    }
+
+    override fun onStop() {
+        runCatching {
+            Shizuku.removeRequestPermissionResultListener(permResult)
+            Shizuku.removeBinderReceivedListener(binderUp)
+        }
+        super.onStop()
+    }
+
     override fun onResume() {
         super.onResume()
         tick++ // re-read permissions after coming back from system settings
+    }
+}
+
+private fun connectShizuku(c: android.content.Context) {
+    val running = runCatching { Shizuku.pingBinder() }.getOrDefault(false)
+    if (running) {
+        runCatching { Shizuku.requestPermission(1) }
+    } else {
+        val open = c.packageManager.getLaunchIntentForPackage("moe.shizuku.privileged.api")
+        if (open != null) c.startActivity(open)
+        else Toast.makeText(c, "Shizuku 앱이 없어요", Toast.LENGTH_SHORT).show()
     }
 }
 
@@ -87,6 +119,7 @@ private fun Screen(tick: Int) {
     val c = LocalContext.current
     val canWrite = remember(tick) { Settings.System.canWrite(c) }
     val service = remember(tick) { serviceOn(c) }
+    val shizuku = remember(tick) { Sh.ready() }
     var enabled by remember { mutableStateOf(Prefs.enabled(c)) }
     var rotation by remember { mutableIntStateOf(Prefs.rotation(c)) }
     var force by remember { mutableStateOf(Prefs.force(c)) }
@@ -103,12 +136,19 @@ private fun Screen(tick: Int) {
                 color = Gray, fontSize = 14.sp, modifier = Modifier.fillMaxWidth(),
                 textAlign = androidx.compose.ui.text.style.TextAlign.Center)
 
-            if (!canWrite || !service) {
+            if (!shizuku || !service) {
                 Card {
                     Text("처음 한 번만 허용해 주세요", color = Ink, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
                     Spacer(Modifier.height(10.dp))
-                    Step("1. 시스템 설정 변경 허용", done = canWrite) {
-                        c.startActivity(Intent(Settings.ACTION_MANAGE_WRITE_SETTINGS, Uri.parse("package:" + c.packageName)))
+                    Step("1. Shizuku 연결", done = shizuku) { connectShizuku(c) }
+                    if (!shizuku) {
+                        Spacer(Modifier.height(8.dp))
+                        Step("또는 시스템 설정 변경 허용", done = canWrite) {
+                            c.startActivity(Intent(Settings.ACTION_MANAGE_WRITE_SETTINGS, Uri.parse("package:" + c.packageName)))
+                        }
+                        Spacer(Modifier.height(6.dp))
+                        Text("Shizuku 없이도 돌아가지만, 방향을 정해 둔 앱은 못 막고 잘 안 먹힐 수 있어요. Shizuku가 꺼져 있으면 Shizuku 앱이 열려요.",
+                            color = Gray, fontSize = 13.sp, lineHeight = 19.sp)
                     }
                     Spacer(Modifier.height(8.dp))
                     Step("2. 접근성에서 '회전 고정' 켜기", done = service) {
@@ -140,10 +180,16 @@ private fun Screen(tick: Int) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Text("모든 앱에 강제", color = Ink, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
-                        Text(if (force) "방향을 정해 둔 앱도 따라와요" else "앱이 정한 방향은 그대로 둬요", color = Gray, fontSize = 13.sp)
+                        Text(
+                            when {
+                                !shizuku -> "Shizuku 연결이 필요해요"
+                                force -> "방향을 정해 둔 앱도 따라와요"
+                                else -> "앱이 정한 방향은 그대로 둬요"
+                            }, color = Gray, fontSize = 13.sp)
                     }
                     Switch(
-                        checked = force,
+                        checked = force && shizuku,
+                        enabled = shizuku,
                         onCheckedChange = { force = it; Prefs.setForce(c, it) },
                         colors = SwitchDefaults.colors(checkedTrackColor = Accent),
                     )
