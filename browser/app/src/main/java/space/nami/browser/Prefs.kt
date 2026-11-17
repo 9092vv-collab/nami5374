@@ -104,7 +104,7 @@ class Prefs(ctx: Context) {
     var dualNetwork by mutableStateOf(sp.getBoolean("dualNetwork", false))
         private set
     /** Shrink to a small window when leaving the app while a page streams a download (keeps it running). */
-    var pipWhileRelay by mutableStateOf(sp.getBoolean("pipWhileRelay", true))
+    var pipWhileRelay by mutableStateOf(sp.getBoolean("pipWhileRelay", false))
         private set
     var splitParts by mutableStateOf(sp.getInt("splitParts", 4))
         private set
