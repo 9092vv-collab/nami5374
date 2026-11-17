@@ -511,6 +511,17 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
                 }
             }
         }
+        /** The folder's file list wasn't recognised: offer to copy what the page sent its service worker. */
+        @JavascriptInterface fun zipMiss(k: String, log: String) {
+            if (k != key) return
+            scope.launch {
+                showPill("폴더 파일 목록을 못 찾았어요", 15000, "정보 복사" to {
+                    val cm = act.getSystemService(android.content.ClipboardManager::class.java)
+                    cm.setPrimaryClip(android.content.ClipData.newPlainText("Nami zip", log.ifEmpty { "(기록 없음)" }))
+                    Toast.makeText(act, "복사했어요 · 대화창에 붙여 넣어 주세요", Toast.LENGTH_SHORT).show()
+                })
+            }
+        }
         @JavascriptInterface fun relayFail(k: String, msg: String, url: String, got: Double, opened: Boolean) {
             if (k != key) return
             if (opened) { t.relays = (t.relays - 1).coerceAtLeast(0); scope.launch { relayKeep(t) } }

@@ -10,7 +10,7 @@ package space.nami.browser
 object PageScript {
     /** The script with this launch's bridge key filled in. */
     fun js(key: String) = TEMPLATE.replace("__NAMI_KEY__", key)
-        .replace("__NAMI_FNS__", "['translate','idle','doubleTap','scriptVersion','blobBegin','blobChunk','blobEnd','blobFail','claimBlob','downloadHint','forceZoom','fsWrite','fsClose','fsAbort','relayOpen','relayOpenIn','relayBatch','relayFail','relayDone']")
+        .replace("__NAMI_FNS__", "['translate','idle','doubleTap','scriptVersion','blobBegin','blobChunk','blobEnd','blobFail','claimBlob','downloadHint','forceZoom','fsWrite','fsClose','fsAbort','relayOpen','relayOpenIn','relayBatch','zipMiss','relayFail','relayDone']")
 
     private val TEMPLATE = """
 (function(){
@@ -211,24 +211,54 @@ object PageScript {
 
   // ---- folder zips: the site asks its service worker to zip files (kio.ac). Big zips stall in every browser,
   // so we remember what was going to be zipped and fetch the files one by one into a folder instead. ----
-  var ZIPS = {}, ZIPREQ = {}, lastZip = null;
-  var zipOf = function(o){
-    for (var d = 0, x = o; d < 3 && x && typeof x === 'object'; d++, x = x.payload || x.data) {
-      var es = x.entries;
-      if (Array.isArray(es) && es.length && es[0] && typeof es[0].name === 'string' && (es[0].request && es[0].request.url || es[0].url))
-        return { name: String(x.name || 'download'), entries: es };
+  var ZIPS = {}, ZIPREQ = {}, lastZip = null, LOG = [];
+  var urlIn = function(o, d){
+    if (!o || typeof o !== 'object' || d > 2) return '';
+    for (var k in o) { try { var v = o[k];
+      if (typeof v === 'string' && /url|href|link|src/i.test(k) && /^(https?:|\/)/.test(v)) return v;
+      if (v && typeof v === 'object' && !(v instanceof Blob) && !ArrayBuffer.isView(v)) { var r = urlIn(v, d + 1); if (r) return r; }
+    } catch(e) {} }
+    return '';
+  };
+  var nameIn = function(o){ return o && (o.name || o.path || o.filename || o.fileName || o.title || (o.file && (o.file.name || o.file.path))) || ''; };
+  var zipOf = function(o, d){
+    d = d || 0;
+    if (!o || typeof o !== 'object' || d > 4 || o instanceof Blob || ArrayBuffer.isView(o) || o instanceof ArrayBuffer) return null;
+    if (Array.isArray(o)) {
+      if (o.length && o[0] && typeof o[0] === 'object' && urlIn(o[0], 0) && nameIn(o[0])) return { name: '', entries: o };
+      for (var i = 0; i < Math.min(o.length, 4); i++) { var a = zipOf(o[i], d + 1); if (a) return a; }
+      return null;
     }
+    for (var k in o) { try {
+      var z = zipOf(o[k], d + 1);
+      if (z) { if (!z.name) z.name = String(o.name || o.filename || o.title || ''); return z; }
+    } catch(e) {} }
     return null;
   };
-  var seeZip = function(m){ try { var z = zipOf(m); if (z) { lastZip = { z: z, at: Date.now() }; if (m && m.id) ZIPREQ[m.id] = z; } } catch(e) {} };
+  var peek = function(where, m){
+    try {
+      var s = typeof m === 'string' ? m : JSON.stringify(m, function(k, v){ return (v instanceof Blob) ? '[Blob ' + v.size + ']' : (v && (ArrayBuffer.isView(v) || v instanceof ArrayBuffer)) ? '[bytes]' : (typeof ReadableStream !== 'undefined' && v instanceof ReadableStream) ? '[stream]' : v; });
+      if (s && s.length > 4) { LOG.push(where + ': ' + s.slice(0, 1500)); if (LOG.length > 12) LOG.shift(); }
+    } catch(e) {}
+  };
+  var seeZip = function(where, m){
+    peek(where, m);
+    try { var z = zipOf(typeof m === 'string' ? JSON.parse(m) : m); if (z) { lastZip = { z: z, at: Date.now() }; if (m && m.id) ZIPREQ[m.id] = z; } } catch(e) {}
+  };
   try {
-    [window.ServiceWorker, window.MessagePort, window.BroadcastChannel, window.Worker].forEach(function(C){
+    [['sw', window.ServiceWorker], ['port', window.MessagePort], ['bc', window.BroadcastChannel], ['worker', window.Worker]].forEach(function(p){
+      var C = p[1];
       if (!C || !C.prototype || !C.prototype.postMessage) return;
       var o = C.prototype.postMessage;
-      C.prototype.postMessage = function(m){ seeZip(m); return o.apply(this, arguments); };
+      C.prototype.postMessage = function(m){ seeZip(p[0], m); return o.apply(this, arguments); };
     });
+    var oFetch = window.fetch;
+    window.fetch = function(u, init){
+      try { var s = String(u && u.url || u); if (/\/sw\/|zip/i.test(s) || (init && init.body && typeof init.body === 'string')) seeZip('fetch ' + (init && init.method || 'GET') + ' ' + s, init && init.body || ''); } catch(e) {}
+      return oFetch.apply(this, arguments);
+    };
     if (navigator.serviceWorker) navigator.serviceWorker.addEventListener('message', function(e){
-      try { var d = e.data, z = d && d.id && ZIPREQ[d.id], u = z && d.payload && (d.payload.url || d.payload);
+      try { var d = e.data; peek('from-sw', d); var z = d && d.id && ZIPREQ[d.id], u = z && d.payload && (d.payload.url || d.payload);
         if (z && typeof u === 'string') { ZIPS[new URL(u, location.href).href] = z; delete ZIPREQ[d.id]; } } catch(x) {}
     });
   } catch(e) {}
@@ -236,6 +266,7 @@ object PageScript {
     var u; try { u = new URL(url, location.href).href; } catch(e) { return null; }
     if (ZIPS[u]) { var z = ZIPS[u]; delete ZIPS[u]; return z; }
     if (lastZip && Date.now() - lastZip.at < 120000 && /zip/i.test(u)) { var l = lastZip.z; lastZip = null; return l; }
+    if (/zip/i.test(u)) nb('zipMiss', [LOG.join('\n\n')]);   // couldn't find the file list → let the user send it to us
     return null;
   };
   N.relayZip = function(url, z){
@@ -244,10 +275,10 @@ object PageScript {
     nb('relayBatch', [folder, z.entries.length, 0, 0, 0]);
     var next = function(){
       if (i >= z.entries.length) { clearInterval(ping); nb('relayBatch', [folder, z.entries.length, ok, bad, 1]); return; }
-      var e = z.entries[i++], p = {}, src = e.request || { url: e.url };
-      Object.keys(src).forEach(function(k){ if (k !== 'url' && k !== 'reuse') p[k] = src[k]; });
+      var e = z.entries[i++], p = {}, src = e.request && e.request.url ? e.request : { url: urlIn(e, 0) };
+      Object.keys(src).forEach(function(k){ if (k !== 'url' && k !== 'reuse' && k !== 'signal') p[k] = src[k]; });
       if (p.mode === 'navigate') p.mode = 'same-origin';
-      var path = String(e.name).replace(/\\/g, '/').split('/').filter(function(s){ return s && s !== '.' && s !== '..'; });
+      var path = String(nameIn(e)).replace(/\\/g, '/').split('/').filter(function(s){ return s && s !== '.' && s !== '..'; });
       if (path.length > 1 && path[0] === folder) path.shift();
       var name = path.pop() || ('file' + i), dir = [folder].concat(path).join('/'), id = newId(), opened = false;
       if (e.request && e.request.body == null) delete p.body;
