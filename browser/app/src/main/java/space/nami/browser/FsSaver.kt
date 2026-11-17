@@ -174,3 +174,22 @@ class RelayService : android.app.Service() {
         }
     }
 }
+
+
+/** Battery status of the WebView app (the page engine), which Nami can only show and open, not change. */
+object WebViewPower {
+    fun label(ctx: Context): String {
+        val p = runCatching { android.webkit.WebView.getCurrentWebViewPackage() }.getOrNull() ?: return "Android System WebView"
+        return runCatching { p.applicationInfo?.loadLabel(ctx.packageManager)?.toString() }.getOrNull() ?: p.packageName
+    }
+    /** true = unrestricted, false = optimized, null = unknown */
+    fun free(ctx: Context): Boolean? {
+        val p = runCatching { android.webkit.WebView.getCurrentWebViewPackage()?.packageName }.getOrNull() ?: return null
+        return runCatching { ctx.getSystemService(android.os.PowerManager::class.java).isIgnoringBatteryOptimizations(p) }.getOrNull()
+    }
+    fun open(ctx: Context) {
+        val p = runCatching { android.webkit.WebView.getCurrentWebViewPackage()?.packageName }.getOrNull() ?: return
+        runCatching { ctx.startActivity(android.content.Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+            Uri.parse("package:$p")).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
+    }
+}

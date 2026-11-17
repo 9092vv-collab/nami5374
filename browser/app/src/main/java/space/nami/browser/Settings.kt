@@ -108,7 +108,7 @@ fun SettingsScreen(b: Browser, prefs: Prefs) {
                         5 -> DisplaySection(prefs)
                         else -> {
                             GeneralSection(prefs)
-                            Text("Nami 0.5.8", color = C.Sub, fontSize = 13.sp, modifier = Modifier.padding(start = 6.dp))
+                            Text("Nami 0.5.9", color = C.Sub, fontSize = 13.sp, modifier = Modifier.padding(start = 6.dp))
                         }
                     }
                 }
@@ -420,6 +420,27 @@ private fun BatteryRow() {
     }
 }
 
+/** The WebView app (the page engine) has its own battery setting; Nami can't change it, only show it and open it. */
+@Composable
+private fun WebViewBatteryRow() {
+    val ctx = LocalContext.current
+    var free by remember { mutableStateOf(WebViewPower.free(ctx)) }
+    val owner = ctx as? ComponentActivity
+    DisposableEffect(owner) {
+        val obs = LifecycleEventObserver { _, e -> if (e == Lifecycle.Event.ON_RESUME) free = WebViewPower.free(ctx) }
+        owner?.lifecycle?.addObserver(obs)
+        onDispose { owner?.lifecycle?.removeObserver(obs) }
+    }
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f).padding(end = 10.dp)) {
+            Text(WebViewPower.label(ctx), fontSize = 15.sp, color = C.Ink)
+            Text(when (free) { true -> "제한 없음이에요. 앱을 내려도 페이지가 계속 돌아요."; false -> "최적화예요. 앱 정보 → 배터리 → 제한 없음으로 바꿔 주세요."; null -> "확인할 수 없어요." },
+                fontSize = 12.sp, color = if (free == true) C.Accent else C.Sub)
+        }
+        TextButton({ WebViewPower.open(ctx) }) { Text(if (free == true) "앱 정보" else "설정 열기", color = if (free == true) C.Sub else C.Accent, fontWeight = FontWeight.SemiBold) }
+    }
+}
+
 @Composable
 private fun GeneralSection(prefs: Prefs) {
     val colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = C.Accent, unfocusedBorderColor = C.Line, cursorColor = C.Accent)
@@ -590,6 +611,10 @@ private fun HostList(title: String, hint: String, hosts: Set<String>, placeholde
 @Composable
 private fun NetworkSection(b: Browser, prefs: Prefs) {
     Text("상태: ${b.netStatus}", fontSize = 13.sp, color = C.Sub, modifier = Modifier.padding(start = 6.dp))
+
+    Card("웹뷰 배터리", "페이지는 Nami가 아니라 Android System WebView 앱이 돌려요. 그 앱이 '최적화'면 앱을 내렸을 때 kio.ac 같은 다운로드가 멈출 수 있어요.") {
+        WebViewBatteryRow()
+    }
 
     Card("보안 DNS", "사이트 주소를 통신사 대신 아래 곳에 암호화해서 물어봐요. Nami 안에서만 적용돼요.") {
         SelectRow("DNS", DnsMode.entries, prefs.dnsMode, { it.label }) { prefs.putDnsMode(it); LocalProxy.clearDns() }

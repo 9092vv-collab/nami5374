@@ -340,8 +340,13 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
     @Volatile private var resumeStamp = 0L
 
     /** A tab whose page is streaming a file to us keeps running at full priority even when hidden. */
+    private var warnedWebView = false
     fun relayKeep(t: BrowserTab) {
         (t.web as? KeepWebView)?.awake = t.relays > 0
+        if (t.relays > 0 && !warnedWebView && WebViewPower.free(act) == false) {
+            warnedWebView = true
+            showPill("웹뷰가 배터리 최적화라 앱을 내리면 멈출 수 있어요", 9000, "설정 열기" to { WebViewPower.open(act) })
+        }
         host.relaying(tabs.any { it.relays > 0 })
         if (t.relays > 0) {
             t.web.setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_IMPORTANT, false)
