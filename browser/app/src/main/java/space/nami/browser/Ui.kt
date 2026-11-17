@@ -220,7 +220,9 @@ fun NamiApp(b: Browser, prefs: Prefs, act: Activity) = NamiTheme {
             Action.MENU -> { b.toolbarVisible = true; menuOpen = true }
             Action.BACK -> if (t != null && t.web.canGoBack()) t.web.goBack() else b.showPill("더 뒤로 갈 페이지가 없어요", 1200)
             Action.FORWARD -> if (t != null && t.web.canGoForward()) t.web.goForward()
-            Action.RELOAD -> { t?.web?.reload(); b.showPill("새로고침", 900) }
+            Action.RELOAD -> if (t != null && t.relays > 0)
+                b.showPill("받는 중이라 새로고침하면 끊겨요", 4000, "그래도" to { t.web.reload() })
+                else { t?.web?.reload(); b.showPill("새로고침", 900) }
             Action.TRANSLATE -> t?.let { b.toggleTranslate(it) }
             Action.NEW_TAB -> { b.newTab(prefs.homeUrl); b.toolbarVisible = true; b.editing = true }
             Action.HOME -> t?.let { b.load(it, prefs.homeUrl) }

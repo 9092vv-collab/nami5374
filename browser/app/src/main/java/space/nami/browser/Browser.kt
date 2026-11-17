@@ -44,6 +44,11 @@ import java.net.URLEncoder
 class BrowserTab(val id: Long, val web: WebView, val frame: PullFrame) {
     /** Files this tab's page is streaming to us right now (keep it running even when hidden). */
     @Volatile var relays = 0
+    /** Folder being fetched file by file (JSON list), where it is, and whether a reload cut it off. */
+    @Volatile var batchJson: String? = null
+    @Volatile var batchIdx = 0
+    @Volatile var batchId: String? = null
+    @Volatile var batchBroken = false
     var title by mutableStateOf("")
     var url by mutableStateOf("")
     var progress by mutableIntStateOf(100)
@@ -285,6 +290,29 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
         }
     }
 
+    /** After a reload cut a folder download off: offer to carry on; give up (and clean up) after a while. */
+    fun offerResume(t: BrowserTab) {
+        val json = t.batchJson ?: return
+        val n = runCatching { org.json.JSONObject(json).getJSONArray("items").length() }.getOrDefault(0)
+        val stamp = System.nanoTime().also { resumeStamp = it }
+        showPill("폴더 받기가 끊겼어요 (${t.batchIdx + 1}/$n)", 60000, "이어 받기" to {
+            if (t.batchBroken && t.batchJson != null) {
+                t.batchBroken = false
+                val id = t.batchId; val got = id?.let { fs.written(it) } ?: -1L
+                val q = org.json.JSONObject.quote(json)
+                val idArg = if (id != null && got >= 0) org.json.JSONObject.quote(id) else "null"
+                t.web.evaluateJavascript("window.__nami&&__nami.resumeBatch('$key',$q,${t.batchIdx},$idArg,${got.coerceAtLeast(0)})", null)
+            }
+        })
+        ui.postDelayed({
+            if (resumeStamp == stamp && t.batchBroken) {   // not resumed → drop the half-written file
+                t.batchId?.let { fs.abort(it) }
+                t.batchJson = null; t.batchId = null; t.batchBroken = false
+            }
+        }, 65000)
+    }
+    @Volatile private var resumeStamp = 0L
+
     /** A tab whose page is streaming a file to us keeps running at full priority even when hidden. */
     fun relayKeep(t: BrowserTab) {
         if (t.relays > 0) {
@@ -499,7 +527,10 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
         @JavascriptInterface fun relayBatch(k: String, folder: String, n: Double, ok: Double, bad: Double, done: Double) {
             if (k != key) return
             // hold the service and keep this tab running for the whole folder, not just while a file is open
-            if (done < 1) { RelayService.hold(act, fs, 1); t.relays++ } else { RelayService.hold(act, fs, -1); t.relays = (t.relays - 1).coerceAtLeast(0) }
+            if (done < 1) { RelayService.hold(act, fs, 1); t.relays++ } else {
+                RelayService.hold(act, fs, -1); t.relays = (t.relays - 1).coerceAtLeast(0)
+                t.batchJson = null; t.batchId = null
+            }
             scope.launch {
                 relayKeep(t)
                 if (done < 1) Toast.makeText(act, "zip 대신 파일 ${n.toInt()}개를 하나씩 받을게요 · Download/$folder", Toast.LENGTH_LONG).show()
@@ -524,6 +555,14 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
                     Toast.makeText(act, "복사했어요 · 대화창에 붙여 넣어 주세요", Toast.LENGTH_SHORT).show()
                 })
             }
+        }
+        @JavascriptInterface fun batchSave(k: String, json: String) { if (k == key) { t.batchJson = json; t.batchBroken = false } }
+        @JavascriptInterface fun batchAt(k: String, idx: Double, id: String) { if (k == key) { t.batchIdx = idx.toInt(); t.batchId = id } }
+        /** Carry on writing a half-written file after a reload. */
+        @JavascriptInterface fun relayAdopt(k: String, id: String): Boolean {
+            if (k != key || fs.written(id) < 0) return false
+            t.relays++; scope.launch { relayKeep(t) }
+            return true
         }
         @JavascriptInterface fun relayFail(k: String, msg: String, url: String, got: Double, opened: Boolean) {
             if (k != key) return
@@ -668,6 +707,11 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
             }
 
             override fun onPageStarted(view: WebView, url: String, favicon: Bitmap?) {
+                // the page that was fetching a folder is going away: its batch stops here (it can be resumed)
+                if (t.batchJson != null && !t.batchBroken) {
+                    t.batchBroken = true
+                    RelayService.hold(act, fs, -1); t.relays = 0; relayKeep(t)
+                }
                 t.url = url; t.progress = 5
                 val h = Uri.parse(url).host ?: ""
                 // Like Chrome: keep translating while staying on the same site; "always" sites start on.
@@ -679,6 +723,7 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
 
             override fun onPageFinished(view: WebView, url: String) {
                 t.url = url; t.progress = 100
+                if (t.batchBroken && t.batchJson != null) offerResume(t)
                 t.canBack = view.canGoBack(); t.canForward = view.canGoForward()
                 view.evaluateJavascript(pageJs, null)
                 if (!docStart) {

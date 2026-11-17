@@ -10,7 +10,7 @@ package space.nami.browser
 object PageScript {
     /** The script with this launch's bridge key filled in. */
     fun js(key: String) = TEMPLATE.replace("__NAMI_KEY__", key)
-        .replace("__NAMI_FNS__", "['translate','idle','doubleTap','scriptVersion','blobBegin','blobChunk','blobEnd','blobFail','claimBlob','downloadHint','forceZoom','fsWrite','fsClose','fsAbort','relayOpen','relayOpenIn','relayBatch','zipMiss','relayFail','relayDone']")
+        .replace("__NAMI_FNS__", "['translate','idle','doubleTap','scriptVersion','blobBegin','blobChunk','blobEnd','blobFail','claimBlob','downloadHint','forceZoom','fsWrite','fsClose','fsAbort','relayOpen','relayOpenIn','relayAdopt','relayBatch','batchSave','batchAt','zipMiss','relayFail','relayDone']")
 
     private val TEMPLATE = """
 (function(){
@@ -275,35 +275,43 @@ object PageScript {
     var folder = z.name.replace(/\.zip$/i, ''), top = null;
     z.entries.forEach(function(e){ var p = parts(e); var t = p.length > 1 ? p[0] : ''; top = top === null ? t : (top === t ? top : ''); });
     var base = folder && folder !== top ? folder : '';
-    var label = folder || top || location.hostname;
     if (!base && !top) base = location.hostname;
-    var i = 0, ok = 0, bad = 0;
-    var ping = setInterval(poke, 10000);
-    nb('relayBatch', [label, z.entries.length, 0, 0, 0]);
-    // One file. If the site stalls or the connection drops, ask again from where we stopped (Range);
-    // if the site can't resume, start that file over. Up to 5 tries.
-    var one = function(e, n){
+    var items = z.entries.map(function(e, n){
       var p = {}, src = e.request && e.request.url ? e.request : { url: urlIn(e, 0) };
-      Object.keys(src).forEach(function(k){ if (k !== 'url' && k !== 'reuse' && k !== 'signal') p[k] = src[k]; });
+      Object.keys(src).forEach(function(k){ if (k !== 'url' && k !== 'reuse' && k !== 'signal' && k !== 'body') p[k] = src[k]; });
       if (p.mode === 'navigate') p.mode = 'same-origin';
-      if (e.request && e.request.body == null) delete p.body;
+      if (p.headers && !Array.isArray(p.headers) && typeof p.headers === 'object' && !(p.headers instanceof Headers)) p.headers = Object.assign({}, p.headers);
       var path = parts(e); if (base && path.length > 1 && path[0] === base) path.shift();
-      var name = path.pop() || ('file' + n), dir = (base ? [base] : []).concat(path).join('/');
-      var id = null, got = 0, tries = 5;
+      var name = path.pop() || ('file' + (n + 1));
+      return { u: new URL(src.url, location.href).href, p: p, dir: (base ? [base] : []).concat(path).join('/'), name: name };
+    });
+    N.runBatch(folder || top || location.hostname, items, 0, null, 0);
+  };
+
+  // Fetch a list of files one by one. Nami remembers the list, so after a reload it can carry on
+  // from the same file (and the same half-written file, with Range).
+  N.runBatch = function(label, items, start, firstId, firstGot){
+    var i = start, ok = start, bad = 0, total = items.length;
+    var ping = setInterval(poke, 10000);
+    nb('relayBatch', [label, total, 0, 0, 0]);
+    try { nb('batchSave', [JSON.stringify({ label: label, items: items })]); } catch(e) {}
+    var one = function(it, n, id, got){
+      var tries = 5;
       var attempt = function(){
-        var q = Object.assign({}, p);
-        if (id && got > 0) { var hd = new Headers(p.headers || {}); hd.set('Range', 'bytes=' + got + '-'); q.headers = hd; }
-        return fetch(src.url, q).then(function(r){
+        var q = Object.assign({}, it.p);
+        if (id && got > 0) { var hd = new Headers(it.p.headers || {}); hd.set('Range', 'bytes=' + got + '-'); q.headers = hd; }
+        return fetch(it.u, q).then(function(r){
           if (!r.ok || !r.body) throw new Error('HTTP ' + r.status);
           if (id && got > 0 && r.status !== 206) { nb('fsAbort', [id]); nb('relayDone', ['']); id = null; got = 0; }   // can't resume → over
           if (!id) {
             id = newId();
-            if (!nb('relayOpenIn', [id, dir, name, (r.headers.get('Content-Type') || '').split(';')[0], n, z.entries.length])) { id = null; throw new Error('save'); }
-          }
+            if (!nb('relayOpenIn', [id, it.dir, it.name, (r.headers.get('Content-Type') || '').split(';')[0], n, total])) { id = null; throw new Error('save'); }
+          } else if (!nb('relayAdopt', [id])) throw new Error('save');
+          nb('batchAt', [n - 1, id]);
           return streamTo(r, id, function(k){ got += k; });
         }).then(function(){ nb('fsClose', [id]); nb('relayDone', ['']); return true; },
                  function(err){
-                   if (--tries > 0) return new Promise(function(ok){ setTimeout(ok, 2000); }).then(attempt);
+                   if (--tries > 0) return new Promise(function(okk){ setTimeout(okk, 2000); }).then(attempt);
                    if (id) { nb('fsAbort', [id]); nb('relayDone', ['']); }
                    return false;
                  });
@@ -311,9 +319,10 @@ object PageScript {
       return attempt();
     };
     var next = function(){
-      if (i >= z.entries.length) { clearInterval(ping); nb('relayBatch', [label, z.entries.length, ok, bad, 1]); return; }
-      var e = z.entries[i++];
-      one(e, i).then(function(good){ if (good) ok++; else bad++; next(); });
+      if (i >= total) { clearInterval(ping); nb('relayBatch', [label, total, ok, bad, 1]); return; }
+      var it = items[i], n = ++i, id = null, got = 0;
+      if (n - 1 === start && firstId) { id = firstId; got = firstGot; }
+      one(it, n, id, got).then(function(good){ if (good) ok++; else bad++; next(); });
     };
     next();
   };
@@ -376,7 +385,8 @@ object PageScript {
     done: function(id, arr){ N.done(id, arr); },
     fail: function(id){ N.fail(id); },
     saveBlob: function(k, href, name){ if (k === NK) N.saveBlob(href, name); },
-    relay: function(k, url, name){ if (k === NK) N.relay(url, name); }
+    relay: function(k, url, name){ if (k === NK) N.relay(url, name); },
+    resumeBatch: function(k, json, idx, id, got){ if (k === NK) { var b = JSON.parse(json); N.runBatch(b.label, b.items, idx, id || null, got || 0); } }
   });
   try { Object.defineProperty(window, '__nami', { value: API, writable: false, configurable: false }); } catch(e) {}
 
