@@ -58,6 +58,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
@@ -231,6 +232,7 @@ fun NamiApp(b: Browser, prefs: Prefs, act: Activity) = NamiTheme {
             Action.TOOLBAR -> b.toolbarVisible = !b.toolbarVisible
             Action.SETTINGS -> b.showSettings = true
             Action.DOWNLOADS -> b.showDownloads = true
+            Action.VIDEO -> b.openVideos()
             Action.NEXT_TAB -> b.switchBy(1)
             Action.PREV_TAB -> b.switchBy(-1)
         }
@@ -241,6 +243,7 @@ fun NamiApp(b: Browser, prefs: Prefs, act: Activity) = NamiTheme {
         when {
             b.customView != null -> b.exitCustomView()
             b.longPress != null -> b.longPress = null
+            b.showVideos -> b.showVideos = false
             b.showSettings -> b.showSettings = false
             b.showDownloads -> b.showDownloads = false
             b.showTabs -> b.showTabs = false
@@ -292,6 +295,12 @@ fun NamiApp(b: Browser, prefs: Prefs, act: Activity) = NamiTheme {
             Column(Modifier.align(if (prefs.dotOnLeft) Alignment.BottomStart else Alignment.BottomEnd).navigationBarsPadding().padding(14.dp)
                 .offset(dx.dp, (-dy).dp),
                 horizontalAlignment = if (prefs.dotOnLeft) Alignment.Start else Alignment.End) {
+                if (tab != null && tab.media.isNotEmpty()) {
+                    Box(Modifier.padding(bottom = 8.dp).size(30.dp).clip(CircleShape).background(C.Accent.copy(alpha = 0.85f))
+                        .clickable { b.openVideos() }, contentAlignment = Alignment.Center) {
+                        Icon(Icons.Filled.PlayArrow, "동영상", tint = Color.White, modifier = Modifier.size(18.dp))
+                    }
+                }
                 pending(drag)?.let { a ->
                     Surface(Modifier.padding(bottom = 6.dp), shape = CircleShape, color = C.Ink.copy(alpha = 0.85f)) {
                         Text(a.label, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
@@ -319,6 +328,7 @@ fun NamiApp(b: Browser, prefs: Prefs, act: Activity) = NamiTheme {
         if (b.showDownloads) DownloadsScreen(b)
         if (b.showSettings) SettingsScreen(b, prefs)
         b.longPress?.let { LongPressDialog(b, it) }
+        if (b.showVideos) VideoSheet(b)
         b.pendingInstall?.let { InstallDialog(b, it) }
         b.scriptPanel?.let { ScriptPanel(b, it) }
         b.customView?.let { v ->
@@ -461,6 +471,8 @@ private fun MainMenu(b: Browser, prefs: Prefs, open: Boolean, close: () -> Unit,
         if (b.scripts.list.isNotEmpty()) item("유저스크립트", Icons.Filled.Code) { b.loadScriptPanel() }
         item("공유", Action.SHARE.icon) { run(Action.SHARE) }
         item("맨 위로", Action.TOP.icon) { run(Action.TOP) }
+        val nv = tab?.media?.size ?: 0
+        item(if (nv > 0) "동영상 · ${nv}개" else "동영상", Action.VIDEO.icon) { run(Action.VIDEO) }
         item("받은 파일", Icons.Filled.Download) { run(Action.DOWNLOADS) }
         item("설정", Action.SETTINGS.icon) { run(Action.SETTINGS) }
     }
@@ -568,6 +580,29 @@ private fun TabsScreen(b: Browser) {
             }
         }
     }
+}
+
+@Composable
+private fun VideoSheet(b: Browser) {
+    val list = b.tab?.media?.toList().orEmpty()
+    AlertDialog(onDismissRequest = { b.showVideos = false }, containerColor = Color.White, shape = RoundedCornerShape(24.dp),
+        confirmButton = { TextButton({ b.showVideos = false }) { Text("닫기", color = C.Ink) } },
+        title = { Text("이 페이지의 동영상", fontWeight = FontWeight.Bold) },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                if (list.isEmpty()) Text("찾은 동영상이 없어요. 페이지에서 영상을 한 번 재생한 뒤 다시 열어 주세요.", fontSize = 14.sp, color = C.Sub)
+                list.forEach { m ->
+                    Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text(m.label, fontSize = 15.sp, color = C.Ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text((if (m.hls) "HLS" else "파일") + " · " + m.host, fontSize = 12.sp, color = C.Sub, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                        TextButton({ b.showVideos = false; b.playVideo(m) }) { Text("재생", color = C.Accent, fontWeight = FontWeight.Bold) }
+                        TextButton({ b.showVideos = false; b.saveVideo(m) }) { Text("받기", color = C.Ink) }
+                    }
+                }
+            }
+        })
 }
 
 @Composable

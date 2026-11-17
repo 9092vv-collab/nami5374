@@ -12,8 +12,8 @@ android {
         applicationId = "space.nami.browser"
         minSdk = 31
         targetSdk = 36
-        versionCode = 48
-        versionName = "0.6.9"
+        versionCode = 49
+        versionName = "0.7.0"
         ndk { abiFilters.add("arm64-v8a") }
     }
 
@@ -52,4 +52,10 @@ dependencies {
     implementation("androidx.webkit:webkit:1.12.1")
     implementation("com.google.mlkit:translate:17.0.3")
     implementation("com.google.mlkit:language-id:17.0.6")
+    val media3 = "1.6.1"
+    implementation("androidx.media3:media3-exoplayer:$media3")
+    implementation("androidx.media3:media3-exoplayer-hls:$media3")
+    implementation("androidx.media3:media3-ui:$media3")
+    implementation("androidx.media3:media3-datasource-okhttp:$media3")
+    implementation("androidx.media3:media3-transformer:$media3")
 }

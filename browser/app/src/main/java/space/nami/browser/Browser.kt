@@ -65,6 +65,8 @@ class BrowserTab(val id: Long, val web: WebView, val frame: PullFrame) {
     var lastGesture = 0L
     val blocked = java.util.concurrent.atomic.AtomicInteger(0)
     val handlers = ArrayList<androidx.webkit.ScriptHandler>()
+    /** Videos this page loaded (for 동영상: play in the Android player / save). */
+    val media = mutableStateListOf<MediaFound>()
 }
 
 class LongPress(val link: String?, val image: String?)
@@ -718,8 +720,12 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
         web.webViewClient = object : WebViewClient() {
             override fun shouldInterceptRequest(view: WebView, req: WebResourceRequest): android.webkit.WebResourceResponse? {
                 if (req.isForMainFrame) return null
-                val r = blocker.intercept(req.url.toString(), t.host)
+                val u = req.url.toString()
+                val r = blocker.intercept(u, t.host)
                 if (r != null) t.blocked.incrementAndGet()
+                else VideoSniff.kind(u).let { k ->
+                    if (k > 0) { val h = VideoSniff.keep(req.requestHeaders); act.runOnUiThread { addMedia(t, MediaFound(u, k == 1, h)) } }
+                }
                 return r
             }
 
@@ -782,6 +788,7 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
                 t.translating = false
                 t.host = h
                 t.blocked.set(0)
+                t.media.clear()
             }
 
             override fun onPageFinished(view: WebView, url: String) {
@@ -854,6 +861,55 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REQUIRE_NON_BROWSER))
         true
     } catch (e: ActivityNotFoundException) { false } catch (e: Exception) { false }
+
+    var showVideos by mutableStateOf(false)
+
+    fun addMedia(t: BrowserTab, m: MediaFound) {
+        if (t.media.any { it.url == m.url } || t.media.size >= 30) return
+        t.media.add(m)
+    }
+
+    /** Also picks up <video> addresses the network watcher missed, then shows the list. */
+    fun openVideos() {
+        val t = tab ?: return
+        t.web.evaluateJavascript(VideoSniff.SCAN_JS) { r ->
+            runCatching {
+                val arr = JSONArray(org.json.JSONTokener(r).nextValue() as String)
+                val h = mapOf("Referer" to t.url, "User-Agent" to (t.web.settings.userAgentString ?: ""))
+                for (i in 0 until arr.length()) {
+                    val u = arr.getString(i)
+                    addMedia(t, MediaFound(u, VideoSniff.kind(u) == 1, h))
+                }
+            }
+            showVideos = true
+        }
+    }
+
+    private fun withPage(m: MediaFound): Map<String, String> {
+        val h = LinkedHashMap(m.headers)
+        if (h.keys.none { it.equals("referer", true) }) tab?.url?.let { h["Referer"] = it }
+        if (h.keys.none { it.equals("user-agent", true) }) tab?.web?.settings?.userAgentString?.let { h["User-Agent"] = it }
+        return h
+    }
+
+    fun playVideo(m: MediaFound) = PlayerActivity.open(act, MediaFound(m.url, m.hls, withPage(m)))
+
+    fun saveVideo(m: MediaFound) {
+        val h = withPage(m)
+        val title = FileName.clean(tab?.title)?.take(80) ?: FileName.clean(m.label)?.substringBeforeLast('.') ?: "video"
+        if (act.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED)
+            act.requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 11)
+        runCatching {
+            if (m.hls) DownloadService.startHls(act, m.url, "$title.mp4", h)
+            else {
+                val ext = Uri.parse(m.url).path?.substringAfterLast('.', "mp4")?.lowercase()?.take(5) ?: "mp4"
+                DownloadService.start(act, m.url, "$title.$ext", FileName.mimeFor("x.$ext"), CookieManager.getInstance().getCookie(m.url),
+                    h.entries.firstOrNull { it.key.equals("user-agent", true) }?.value, h.entries.firstOrNull { it.key.equals("referer", true) }?.value,
+                    prefs.splitParts.coerceAtLeast(1), false, prefs.dualNetwork)
+            }
+            showPill("받는 중: $title", 1800)
+        }.onFailure { Toast.makeText(act, "받기 실패: ${it.message}", Toast.LENGTH_SHORT).show() }
+    }
 
     fun exitCustomView() { customCb?.onCustomViewHidden(); customView = null; customCb = null }
 

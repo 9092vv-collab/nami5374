@@ -81,6 +81,18 @@ class DownloadService : Service() {
                 jobs[id] = job
                 job.invokeOnCompletion { jobs.remove(id); stopIfIdle() }
             }
+            ACTION_HLS -> {
+                val id = nextId.incrementAndGet()
+                val url = intent.getStringExtra("url") ?: return START_NOT_STICKY
+                val cancel = PendingIntent.getService(this, id, Intent(this, DownloadService::class.java).setAction(ACTION_CANCEL).putExtra("id", id),
+                    PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+                val job = scope.launch {
+                    HlsJob(this@DownloadService, nm).run(id, url, intent.getStringExtra("name") ?: "video.mp4",
+                        VideoSniff.fromJson(intent.getStringExtra("headers")), cancel)
+                }
+                jobs[id] = job
+                job.invokeOnCompletion { jobs.remove(id); stopIfIdle() }
+            }
             ACTION_START -> {
                 val id = nextId.incrementAndGet()
                 val req = Req(
@@ -373,6 +385,7 @@ class DownloadService : Service() {
         const val ACTION_START = "space.nami.browser.DOWNLOAD"
         const val ACTION_CANCEL = "space.nami.browser.CANCEL"
         const val ACTION_BATCH = "space.nami.browser.BATCH"
+        const val ACTION_HLS = "space.nami.browser.HLS"
         /** The first file of a native folder batch wasn't the real file → let the page fetch the list (token). */
         @Volatile var onBatchFallback: ((String, String) -> Unit)? = null
         private const val CH_PROGRESS = "dl_progress"
@@ -385,6 +398,11 @@ class DownloadService : Service() {
             b >= 1L shl 20 -> String.format("%.1f MB", b / (1024.0 * 1024))
             b >= 1L shl 10 -> String.format("%.0f KB", b / 1024.0)
             else -> "$b B"
+        }
+
+        fun startHls(ctx: Context, url: String, name: String, headers: Map<String, String>) {
+            ctx.startForegroundService(Intent(ctx, DownloadService::class.java).setAction(ACTION_HLS)
+                .putExtra("url", url).putExtra("name", name).putExtra("headers", VideoSniff.toJson(headers)))
         }
 
         fun start(ctx: Context, url: String, name: String, mime: String?, cookie: String?, ua: String?, referer: String?, parts: Int, guessed: Boolean = false, dual: Boolean = false) {
