@@ -176,20 +176,38 @@ object PageScript {
       var id = 'r' + Date.now() + Math.random().toString(36).slice(2);
       if (!nb('relayOpen', [id, name, (r.headers.get('Content-Type') || '').split(';')[0]])) throw new Error('save');
       opened = true; ping = setInterval(poke, 10000);
-      var rd = r.body.getReader(), buf = [], size = 0, CH = 1024 * 1024;
+      var rd = r.body.getReader(), buf = [], size = 0;
+      var P = window.NamiPipe, waits = [];
+      // raw bytes over NamiPipe (no base64, doesn't block the page); old bridge as a fallback
+      if (P) P.onmessage = function(e){ var w = waits.shift(); if (w) w(e.data === 'ok'); };
+      var CH = P ? 4 * 1024 * 1024 : 1024 * 1024;
+      var join = function(){ var a = new Uint8Array(size), o = 0; buf.forEach(function(c){ a.set(c, o); o += c.byteLength; }); return a; };
       var flush = function(){
         if (!size) return Promise.resolve();
-        var b = new Blob(buf), n = size; buf = []; size = 0;
+        var n = size;
+        if (P) {
+          var a = join(); buf = []; size = 0;
+          return new Promise(function(ok, bad){
+            waits.push(function(good){ if (good) { got += n; ok(); } else bad(new Error('write')); });
+            P.postMessage('w:' + id); P.postMessage(a.buffer, [a.buffer]);
+          });
+        }
+        var b = new Blob(buf); buf = []; size = 0;
         return new Promise(function(ok, bad){ var fr = new FileReader(); fr.onload = function(){ var s = fr.result; if (!nb('fsWrite', [id, s.substring(s.indexOf(',') + 1), -1])) bad(new Error('write')); else { got += n; ok(); } }; fr.onerror = function(){ bad(fr.error); }; fr.readAsDataURL(b); });
       };
+      // the site stopped sending for a long time → give up instead of hanging forever
+      var last = Date.now(), dead = false;
+      var watch = setInterval(function(){ if (Date.now() - last > 90000) { dead = true; clearInterval(watch); try { rd.cancel('stalled'); } catch(e) {} } }, 5000);
       var pump = function(){
         return rd.read().then(function(x){
-          if (x.done) return flush().then(function(){ clearInterval(ping); nb('fsClose', [id]); nb('relayDone', [url]); });
+          last = Date.now();
+          if (dead) throw new Error('stalled');
+          if (x.done) return flush().then(function(){ clearInterval(ping); clearInterval(watch); nb('fsClose', [id]); nb('relayDone', [url]); });
           buf.push(x.value); size += x.value.byteLength;
           return (size >= CH ? flush() : Promise.resolve()).then(pump);
         });
       };
-      return pump().catch(function(e){ nb('fsAbort', [id]); throw e; });
+      return pump().catch(function(e){ clearInterval(watch); nb('fsAbort', [id]); throw dead ? new Error('stalled') : e; });
     }).catch(function(e){ if (ping) clearInterval(ping); nb('relayFail', [String(e && e.message || e), url, got, opened]); });
   };
   try {

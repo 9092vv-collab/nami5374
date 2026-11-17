@@ -255,6 +255,36 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
         tabs.forEach { if (it === t || it.relays > 0) it.web.onResume() else it.web.onPause() }
     }
 
+    /** Disk writes for relayed downloads, one at a time and in order, off the UI thread. */
+    private val pipeIo = java.util.concurrent.Executors.newSingleThreadExecutor()
+    private val ui = android.os.Handler(android.os.Looper.getMainLooper())
+
+    /**
+     * window.NamiPipe: the page hands us raw bytes (ArrayBuffer) for a relayed download without base64 and
+     * without blocking its main thread. "w:<id>" names the file the next buffer belongs to; we answer "ok"/"err"
+     * after each write so the page never runs ahead of the disk.
+     */
+    private fun addPipe(web: WebView) {
+        if (!WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER) ||
+            !WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_ARRAY_BUFFER)) return
+        var cur = ""
+        runCatching {
+            WebViewCompat.addWebMessageListener(web, "NamiPipe", setOf("*")) { _, msg, _, isMain, reply ->
+                if (!isMain) return@addWebMessageListener
+                if (msg.type == androidx.webkit.WebMessageCompat.TYPE_ARRAY_BUFFER) {
+                    val id = cur; val bytes = msg.arrayBuffer
+                    pipeIo.execute {
+                        val ok = fs.writeBytes(id, bytes)
+                        ui.post { runCatching { reply.postMessage(if (ok) "ok" else "err") } }
+                    }
+                } else {
+                    val d = msg.data ?: return@addWebMessageListener
+                    if (d.startsWith("w:")) cur = d.substring(2)
+                }
+            }
+        }
+    }
+
     /** A tab whose page is streaming a file to us keeps running at full priority even when hidden. */
     fun relayKeep(t: BrowserTab) {
         if (t.relays > 0) {
@@ -464,6 +494,7 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
             val fb = relayFallback.remove(url)
             scope.launch {
                 when {
+                    got > 0 && msg == "stalled" -> Toast.makeText(act, "사이트가 ${DownloadService.size(got.toLong())}에서 90초 넘게 멈춰서 그만뒀어요", Toast.LENGTH_LONG).show()
                     got > 0 -> Toast.makeText(act, "받다가 끊겼어요 (${DownloadService.size(got.toLong())}에서) · 다시 받아 주세요", Toast.LENGTH_LONG).show()
                     fb != null -> fb()
                     else -> Toast.makeText(act, "받기 실패: $msg", Toast.LENGTH_SHORT).show()
@@ -541,6 +572,7 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
         if (docStart) {
             runCatching { WebViewCompat.addDocumentStartJavaScript(web, BLOCK_CSS_JS, setOf("*")) }
             runCatching { WebViewCompat.addDocumentStartJavaScript(web, pageJs, setOf("*")) }
+            addPipe(web)
             applyScripts(t)
         }
 

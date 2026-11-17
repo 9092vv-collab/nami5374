@@ -47,10 +47,12 @@ class FsSaver(private val ctx: Context) {
     }.getOrDefault(false)
 
     /** pos < 0 = where the last write ended. */
-    fun write(id: String, b64: String, pos: Double): Boolean {
+    fun write(id: String, b64: String, pos: Double): Boolean =
+        sinks.containsKey(id) && runCatching { Base64.decode(b64, Base64.DEFAULT) }.getOrNull()?.let { writeBytes(id, it, pos) } == true
+
+    fun writeBytes(id: String, bytes: ByteArray, pos: Double = -1.0): Boolean {
         val s = sinks[id] ?: return false
         return runCatching {
-            val bytes = Base64.decode(b64, Base64.DEFAULT)
             var at = if (pos >= 0) pos.toLong() else s.pos
             if (at == 0L && s.head.size() == 0) s.head.write(bytes, 0, minOf(bytes.size, 32))
             val buf = ByteBuffer.wrap(bytes)
