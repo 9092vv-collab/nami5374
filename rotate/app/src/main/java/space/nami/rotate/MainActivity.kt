@@ -8,7 +8,14 @@ import android.view.Surface
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.size
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -132,15 +139,15 @@ private fun Screen(tick: Int) {
                 Text("방향", color = Ink, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.height(10.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Pill("가로 ↺ 90°", rotation == Surface.ROTATION_90, Modifier.weight(1f)) {
+                    Pill(holeBottomRight = true, rotation == Surface.ROTATION_90, Modifier.weight(1f)) {
                         rotation = Surface.ROTATION_90; Prefs.setRotation(c, rotation)
                     }
-                    Pill("가로 ↻ 270°", rotation == Surface.ROTATION_270, Modifier.weight(1f)) {
+                    Pill(holeBottomRight = false, rotation == Surface.ROTATION_270, Modifier.weight(1f)) {
                         rotation = Surface.ROTATION_270; Prefs.setRotation(c, rotation)
                     }
                 }
                 Spacer(Modifier.height(10.dp))
-                Text("누르면 바로 바뀌어요. 펀치홀이 원하는 쪽에 오는 걸 고르면 돼요.",
+                Text("누르면 바로 바뀌어요.",
                     color = Gray, fontSize = 13.sp)
             }
         }
@@ -168,14 +175,25 @@ private fun Step(text: String, done: Boolean, onClick: () -> Unit) {
 }
 
 @Composable
-private fun Pill(text: String, selected: Boolean, modifier: Modifier, onClick: () -> Unit) {
-    Text(
-        text,
-        color = if (selected) Color.White else Ink,
-        fontSize = 15.sp,
-        fontWeight = FontWeight.SemiBold,
-        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-        modifier = modifier.clip(RoundedCornerShape(50)).background(if (selected) Accent else Bg)
-            .clickable(onClick = onClick).padding(vertical = 13.dp),
-    )
+private fun Pill(holeBottomRight: Boolean, selected: Boolean, modifier: Modifier, onClick: () -> Unit) {
+    val ink = if (selected) Color.White else Ink
+    Box(
+        modifier.clip(RoundedCornerShape(50)).background(if (selected) Accent else Bg)
+            .clickable(onClick = onClick).padding(vertical = 12.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        // A tall phone: outline, a line across the middle (the fold), and the punch hole.
+        Canvas(Modifier.size(width = 30.dp, height = 46.dp)) {
+            val sw = 2.5.dp.toPx()
+            val r = 6.dp.toPx()
+            drawRoundRect(ink, topLeft = Offset(sw / 2, sw / 2),
+                size = Size(size.width - sw, size.height - sw),
+                cornerRadius = CornerRadius(r, r), style = Stroke(sw))
+            drawLine(ink, Offset(sw, size.height / 2), Offset(size.width - sw, size.height / 2),
+                strokeWidth = 1.5.dp.toPx())
+            val inset = 7.dp.toPx()
+            val c = if (holeBottomRight) Offset(size.width - inset, size.height - inset) else Offset(inset, inset)
+            drawCircle(ink, radius = 2.6.dp.toPx(), center = c)
+        }
+    }
 }
