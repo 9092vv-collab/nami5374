@@ -502,15 +502,8 @@ private fun TabsScreen(b: Browser) {
     var drag by remember { mutableStateOf(androidx.compose.ui.geometry.Offset.Zero) }
     Surface(Modifier.fillMaxSize(), color = C.Bg) {
         Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding()) {
-            Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 8.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("탭 ${b.tabs.size}개", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = C.Ink, modifier = Modifier.weight(1f))
-                TextButton({ b.newTab(b.prefs.homeUrl, append = true); b.showTabs = false; b.toolbarVisible = true; b.editing = true }) {
-                    Icon(Icons.Filled.Add, null, tint = C.Accent); Spacer(Modifier.width(4.dp)); Text("새 탭", color = C.Accent, fontWeight = FontWeight.SemiBold)
-                }
-                IconButton({ b.showTabs = false }) { Icon(Icons.Filled.Close, "닫기", tint = C.Ink) }
-            }
-            Text("꾹 눌러서 끌면 순서를 바꿀 수 있어요", fontSize = 12.sp, color = C.Sub, modifier = Modifier.padding(start = 20.dp, bottom = 6.dp))
-            LazyVerticalGrid(GridCells.Adaptive(170.dp), Modifier.fillMaxSize().padding(horizontal = 12.dp), state = grid,
+            Text("꾹 눌러서 끌면 순서를 바꿀 수 있어요", fontSize = 12.sp, color = C.Sub, modifier = Modifier.padding(start = 20.dp, top = 10.dp, bottom = 6.dp))
+            LazyVerticalGrid(GridCells.Adaptive(170.dp), Modifier.fillMaxWidth().weight(1f).padding(horizontal = 12.dp), state = grid,
                 verticalArrangement = Arrangement.spacedBy(10.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 itemsIndexed(b.tabs, key = { _, t -> t.id }) { i, t ->
                     val sel = i == b.current
@@ -564,6 +557,14 @@ private fun TabsScreen(b: Browser) {
                         }
                     }
                 }
+            }
+            // 아래쪽 바: 손가락이 닿기 쉽게 (탭 수 · 새 탭 · 닫기)
+            Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 6.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("탭 ${b.tabs.size}개", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = C.Ink, modifier = Modifier.weight(1f))
+                TextButton({ b.newTab(b.prefs.homeUrl, append = true); b.showTabs = false; b.toolbarVisible = true; b.editing = true }) {
+                    Icon(Icons.Filled.Add, null, tint = C.Accent); Spacer(Modifier.width(4.dp)); Text("새 탭", color = C.Accent, fontWeight = FontWeight.SemiBold)
+                }
+                IconButton({ b.showTabs = false }) { Icon(Icons.Filled.Close, "닫기", tint = C.Ink) }
             }
         }
     }
