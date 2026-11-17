@@ -154,6 +154,10 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
         DownloadService.onBatchFallback = { token, why ->
             batchPending.remove(token)?.let { (t, json) ->
                 lastNativeFail = why
+                runCatching {
+                    val fh = Uri.parse(org.json.JSONObject(json).getJSONArray("items").getJSONObject(0).getString("u")).host ?: ""
+                    if (fh.isNotEmpty()) misc.edit().putStringSet("noNative", misc.getStringSet("noNative", emptySet())!! + fh).apply()
+                }
                 showPill("직접 받기가 안 돼서 사이트를 거쳐 받을게요", 8000, "이유 복사" to {
                     act.getSystemService(android.content.ClipboardManager::class.java)
                         .setPrimaryClip(android.content.ClipData.newPlainText("Nami", why))
@@ -303,6 +307,7 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
     }
 
     @Volatile var lastNativeFail = ""
+    private val misc by lazy { act.getSharedPreferences("nami_misc", android.content.Context.MODE_PRIVATE) }
     /** Native folder batches waiting to see if their first file works (token → tab, list). */
     private val batchPending = java.util.concurrent.ConcurrentHashMap<String, Pair<BrowserTab, String>>()
     private val ua: String by lazy { android.webkit.WebSettings.getDefaultUserAgent(act).replace("; wv", "").replace(Regex("Version/\\d+(\\.\\d+)* "), "") }
@@ -582,6 +587,9 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
             if (items.length() == 0) return false
             val first = items.getJSONObject(0).optString("u")
             if (!first.startsWith("http")) return false
+            // sites whose files only exist inside their service worker (kio.ac): don't try again
+            val fh = Uri.parse(first).host ?: ""
+            if (fh in misc.getStringSet("noNative", emptySet())!!) return false
             val token = java.util.UUID.randomUUID().toString()
             batchPending[token] = t to json
             val cookie = runCatching { CookieManager.getInstance().getCookie(first) }.getOrNull()
