@@ -39,6 +39,8 @@ import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import kotlinx.coroutines.delay
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -211,6 +213,24 @@ private fun Screen(tick: Int) {
                 Text("누르면 바로 바뀌어요.",
                     color = Gray, fontSize = 13.sp)
             }
+
+            // Status line for finding problems (screenshot this when something is off).
+            var status by remember { mutableStateOf("") }
+            LaunchedEffect(Unit) {
+                while (true) {
+                    val r = c.getSystemService(android.hardware.display.DisplayManager::class.java)
+                        ?.getDisplay(android.view.Display.DEFAULT_DISPLAY)?.rotation ?: -1
+                    val accel = Settings.System.getInt(c.contentResolver, Settings.System.ACCELEROMETER_ROTATION, -1)
+                    val user = Settings.System.getInt(c.contentResolver, Settings.System.USER_ROTATION, -1)
+                    status = "상태 · 서비스 " + (if (RotateService.running) "실행 중" else "꺼짐") +
+                        " · Shizuku " + (if (Sh.ready()) "연결" else "없음") +
+                        " · " + (if (isUnfolded(c)) "펼침" else "접힘") +
+                        "\n화면 ${r * 90}° · 자동 회전 $accel · 잠금 값 ${user * 90}°" +
+                        (if (Sh.last.isNotEmpty()) "\n마지막 명령: ${Sh.last}" else "")
+                    delay(1000)
+                }
+            }
+            Text(status, color = Gray, fontSize = 12.sp, lineHeight = 17.sp, modifier = Modifier.padding(horizontal = 6.dp))
         }
     }
 }

@@ -16,6 +16,7 @@ import android.view.Display
 import android.view.Surface
 import android.view.accessibility.AccessibilityEvent
 import rikka.shizuku.Shizuku
+import kotlin.math.max
 import kotlin.math.min
 
 /** Saved choices. */
@@ -59,25 +60,39 @@ object Sh {
     }
 
     /** Output, or null when it could not run. */
+    /** What the last command did, shown on the app screen to find problems. */
+    @Volatile var last = ""
+
     fun run(vararg cmd: String): String? {
-        if (!ready()) return null
+        val name = cmd.drop(2).joinToString(" ")
+        if (!ready()) { last = "$name → Shizuku 안 됨"; return null }
         return runCatching {
             val p = newProcess.invoke(null, arrayOf(*cmd), null, null) as Process
             val out = p.inputStream.bufferedReader().readText()
+            val err = p.errorStream.bufferedReader().readText()
             p.waitFor()
-            if (p.exitValue() == 0) out else null
-        }.getOrNull()
+            val code = p.exitValue()
+            last = "$name → " + (if (code == 0) "성공" else "실패($code) ${err.ifBlank { out }.trim().take(160)}")
+            if (code == 0) out else null
+        }.getOrElse {
+            val e = (it as? java.lang.reflect.InvocationTargetException)?.targetException ?: it
+            last = "$name → 오류 ${e.javaClass.simpleName}: ${e.message?.take(160)}"
+            null
+        }
     }
 }
 
-/** True when the default display is the big inner screen (smallest side 600dp or more). */
+/** True when the default display is the big inner screen. */
 fun isUnfolded(c: Context): Boolean {
     val dm = c.getSystemService(DisplayManager::class.java) ?: return false
     val d = dm.getDisplay(Display.DEFAULT_DISPLAY) ?: return false
     val m = DisplayMetrics()
     @Suppress("DEPRECATION") d.getRealMetrics(m)
-    if (m.density <= 0f) return false
-    return min(m.widthPixels, m.heightPixels) / m.density >= 600f
+    val small = min(m.widthPixels, m.heightPixels)
+    if (small <= 0) return false
+    // Inner screen is almost square, the cover screen is long and thin.
+    // (Ratio instead of dp so display zoom doesn't matter.)
+    return max(m.widthPixels, m.heightPixels).toFloat() / small < 1.6f
 }
 
 /**
