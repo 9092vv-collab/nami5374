@@ -129,6 +129,8 @@ class DownloadService : Service() {
         return c
     }
 
+    @Volatile private var lastError = ""
+
     private suspend fun runJob(id: Int, req: Req): Boolean {
         var uri: Uri? = null
         val cancel = PendingIntent.getService(this, id, Intent(this, DownloadService::class.java).setAction(ACTION_CANCEL).putExtra("id", id),
@@ -225,6 +227,7 @@ class DownloadService : Service() {
             nm.cancel(id)
             uri?.let { u -> runCatching { contentResolver.delete(u, null, null) } }
             if (e is kotlinx.coroutines.CancellationException) throw e
+            lastError = (e.message ?: e.javaClass.simpleName)
             if (!req.quiet) nm.notify(id + 100000, NotificationCompat.Builder(this, CH_DONE).setSmallIcon(android.R.drawable.stat_notify_error)
                 .setContentTitle("받기 실패: ${req.name}").setContentText(e.message ?: e.javaClass.simpleName).setAutoCancel(true).build())
             return false
@@ -253,7 +256,10 @@ class DownloadService : Service() {
                 dir = it.optString("dir", ""), headers = hs, quiet = true, expect = it.optLong("size", -1L), strict = true)
             val id = nextId.incrementAndGet()
             val good = runJob(id, req)
-            if (!good && i == 0) { android.os.Handler(android.os.Looper.getMainLooper()).post { onBatchFallback?.invoke(token) }; return }
+            if (!good && i == 0) {
+                val why = lastError + " · " + (android.net.Uri.parse(req.url).path ?: "").takeLast(50)
+                android.os.Handler(android.os.Looper.getMainLooper()).post { onBatchFallback?.invoke(token, why) }; return
+            }
             if (good) ok++ else bad++
         }
         val msg = if (bad == 0) "다 받았어요: $label (${ok}개)" else "받았어요: $label (${ok}개, 실패 ${bad}개)"
@@ -368,7 +374,7 @@ class DownloadService : Service() {
         const val ACTION_CANCEL = "space.nami.browser.CANCEL"
         const val ACTION_BATCH = "space.nami.browser.BATCH"
         /** The first file of a native folder batch wasn't the real file → let the page fetch the list (token). */
-        @Volatile var onBatchFallback: ((String) -> Unit)? = null
+        @Volatile var onBatchFallback: ((String, String) -> Unit)? = null
         private const val CH_PROGRESS = "dl_progress"
         private const val CH_DONE = "dl_done"
         private const val FG_ID = 7001

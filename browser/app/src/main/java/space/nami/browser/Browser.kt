@@ -151,9 +151,14 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
 
     init {
         scripts.onChange = { tabs.forEach { applyScripts(it) } }
-        DownloadService.onBatchFallback = { token ->
+        DownloadService.onBatchFallback = { token, why ->
             batchPending.remove(token)?.let { (t, json) ->
-                showPill("직접 받기가 안 돼서 사이트를 거쳐 받을게요", 3000)
+                lastNativeFail = why
+                showPill("직접 받기가 안 돼서 사이트를 거쳐 받을게요", 8000, "이유 복사" to {
+                    act.getSystemService(android.content.ClipboardManager::class.java)
+                        .setPrimaryClip(android.content.ClipData.newPlainText("Nami", why))
+                    Toast.makeText(act, "복사했어요: $why", Toast.LENGTH_LONG).show()
+                })
                 t.web.evaluateJavascript("window.__nami&&__nami.resumeBatch('$key'," + org.json.JSONObject.quote(json) + ",0,null,0,'page')", null)
             }
         }
@@ -297,6 +302,7 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
         }
     }
 
+    @Volatile var lastNativeFail = ""
     /** Native folder batches waiting to see if their first file works (token → tab, list). */
     private val batchPending = java.util.concurrent.ConcurrentHashMap<String, Pair<BrowserTab, String>>()
     private val ua: String by lazy { android.webkit.WebSettings.getDefaultUserAgent(act).replace("; wv", "").replace(Regex("Version/\\d+(\\.\\d+)* "), "") }
@@ -326,6 +332,7 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
 
     /** A tab whose page is streaming a file to us keeps running at full priority even when hidden. */
     fun relayKeep(t: BrowserTab) {
+        (t.web as? KeepWebView)?.awake = t.relays > 0
         if (t.relays > 0) {
             t.web.setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_IMPORTANT, false)
             t.web.onResume()
@@ -647,7 +654,7 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
 
     @SuppressLint("SetJavaScriptEnabled")
     private fun createTab(): BrowserTab {
-        val web = WebView(act)
+        val web = KeepWebView(act)
         val frame = PullFrame(act, web,
             threshold = { prefs.pullStrength.dp * density },
             onPull = { if (prefs.pullAction != Action.NONE && tab?.web === web) pull = it },
@@ -900,5 +907,19 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
             (act.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager).enqueue(req)
             Toast.makeText(act, "받는 중: $name", Toast.LENGTH_SHORT).show()
         }.onFailure { Toast.makeText(act, "받기 실패: ${it.message}", Toast.LENGTH_SHORT).show() }
+    }
+}
+
+/**
+ * A WebView that can keep telling Chromium its window is visible while a page is streaming a download to us,
+ * so the page isn't slowed down or frozen when Nami is in the background. Back to the real state afterwards.
+ */
+class KeepWebView(ctx: android.content.Context) : WebView(ctx) {
+    private var real = View.VISIBLE
+    var awake = false
+        set(v) { if (field != v) { field = v; super.onWindowVisibilityChanged(if (v) View.VISIBLE else real) } }
+    override fun onWindowVisibilityChanged(visibility: Int) {
+        real = visibility
+        super.onWindowVisibilityChanged(if (awake) View.VISIBLE else visibility)
     }
 }
