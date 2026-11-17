@@ -89,6 +89,7 @@ private fun Screen(tick: Int) {
     val service = remember(tick) { serviceOn(c) }
     var enabled by remember { mutableStateOf(Prefs.enabled(c)) }
     var rotation by remember { mutableIntStateOf(Prefs.rotation(c)) }
+    var force by remember { mutableStateOf(Prefs.force(c)) }
 
     Column(
         Modifier.fillMaxSize().background(Bg).safeDrawingPadding()
@@ -130,6 +131,20 @@ private fun Screen(tick: Int) {
                     Switch(
                         checked = enabled,
                         onCheckedChange = { enabled = it; Prefs.setEnabled(c, it) },
+                        colors = SwitchDefaults.colors(checkedTrackColor = Accent),
+                    )
+                }
+            }
+
+            Card {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("모든 앱에 강제", color = Ink, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                        Text(if (force) "방향을 정해 둔 앱도 따라와요" else "앱이 정한 방향은 그대로 둬요", color = Gray, fontSize = 13.sp)
+                    }
+                    Switch(
+                        checked = force,
+                        onCheckedChange = { force = it; Prefs.setForce(c, it) },
                         colors = SwitchDefaults.colors(checkedTrackColor = Accent),
                     )
                 }

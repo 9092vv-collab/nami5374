@@ -8,7 +8,11 @@ import android.database.ContentObserver
 import android.hardware.display.DisplayManager
 import android.os.Handler
 import android.os.Looper
+import android.content.pm.ActivityInfo
+import android.graphics.PixelFormat
 import android.provider.Settings
+import android.view.View
+import android.view.WindowManager
 import android.util.DisplayMetrics
 import android.view.Display
 import android.view.Surface
@@ -20,6 +24,7 @@ object Prefs {
     const val FILE = "rotate"
     const val ENABLED = "enabled"
     const val ROTATION = "rotation"
+    const val FORCE = "force"
     private const val PREV_ACCEL = "prevAccel"
     private const val PREV_USER = "prevUser"
 
@@ -28,6 +33,9 @@ object Prefs {
     fun rotation(c: Context) = of(c).getInt(ROTATION, Surface.ROTATION_90)
     fun setEnabled(c: Context, v: Boolean) = of(c).edit().putBoolean(ENABLED, v).apply()
     fun setRotation(c: Context, v: Int) = of(c).edit().putInt(ROTATION, v).apply()
+    /** Also override apps that fix their own orientation (invisible overlay). */
+    fun force(c: Context) = of(c).getBoolean(FORCE, true)
+    fun setForce(c: Context, v: Boolean) = of(c).edit().putBoolean(FORCE, v).apply()
 
     fun savePrev(c: Context, accel: Int, user: Int) =
         of(c).edit().putInt(PREV_ACCEL, accel).putInt(PREV_USER, user).apply()
@@ -64,7 +72,12 @@ class RotateService : AccessibilityService() {
     private val displays = object : DisplayManager.DisplayListener {
         override fun onDisplayAdded(id: Int) {}
         override fun onDisplayRemoved(id: Int) {}
-        override fun onDisplayChanged(id: Int) { if (id == Display.DEFAULT_DISPLAY) schedule() }
+        override fun onDisplayChanged(id: Int) {
+            if (id != Display.DEFAULT_DISPLAY) return
+            // Folding: drop the overlay right away so the cover screen never turns sideways.
+            if (!isUnfolded(this@RotateService)) hideOverlay()
+            schedule()
+        }
     }
     private val settings = object : ContentObserver(h) {
         override fun onChange(selfChange: Boolean) { schedule() }
@@ -96,10 +109,66 @@ class RotateService : AccessibilityService() {
     override fun onDestroy() {
         running = false
         h.removeCallbacks(check)
+        hideOverlay()
         getSystemService(DisplayManager::class.java)?.unregisterDisplayListener(displays)
         contentResolver.unregisterContentObserver(settings)
         Prefs.of(this).unregisterOnSharedPreferenceChangeListener(prefs)
         super.onDestroy()
+    }
+
+    // An invisible 1px window that asks for the orientation. Windows above apps win over
+    // what the app itself asks for, so apps that lock portrait follow it too.
+    private var overlay: View? = null
+    private var overlayOrientation = Int.MIN_VALUE
+
+    /** ActivityInfo orientation that lands on [rotation] for the default display. */
+    private fun orientationFor(rotation: Int): Int {
+        val d = getSystemService(DisplayManager::class.java)?.getDisplay(Display.DEFAULT_DISPLAY)
+            ?: return ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+        val m = DisplayMetrics()
+        @Suppress("DEPRECATION") d.getRealMetrics(m)
+        val cur = d.rotation
+        val wide = m.widthPixels > m.heightPixels
+        val sideways = cur == Surface.ROTATION_90 || cur == Surface.ROTATION_270
+        val naturalLandscape = wide != sideways
+        return if (!naturalLandscape) when (rotation) {
+            Surface.ROTATION_90 -> ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+            Surface.ROTATION_270 -> ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE
+            Surface.ROTATION_180 -> ActivityInfo.SCREEN_ORIENTATION_REVERSE_PORTRAIT
+            else -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+        } else when (rotation) {
+            Surface.ROTATION_0 -> ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+            Surface.ROTATION_180 -> ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE
+            Surface.ROTATION_90 -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+            else -> ActivityInfo.SCREEN_ORIENTATION_REVERSE_PORTRAIT
+        }
+    }
+
+    private fun showOverlay(rotation: Int) {
+        val wm = getSystemService(WindowManager::class.java) ?: return
+        val o = orientationFor(rotation)
+        if (overlay != null && overlayOrientation == o) return
+        val lp = WindowManager.LayoutParams(
+            1, 1,
+            WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
+                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+            PixelFormat.TRANSLUCENT,
+        ).apply { screenOrientation = o; title = "rotate-lock" }
+        runCatching {
+            val v = overlay
+            if (v == null) { val nv = View(this); wm.addView(nv, lp); overlay = nv }
+            else wm.updateViewLayout(v, lp)
+            overlayOrientation = o
+        }
+    }
+
+    private fun hideOverlay() {
+        val v = overlay ?: return
+        runCatching { getSystemService(WindowManager::class.java)?.removeView(v) }
+        overlay = null
+        overlayOrientation = Int.MIN_VALUE
     }
 
     private fun get(name: String, def: Int) = Settings.System.getInt(contentResolver, name, def)
@@ -120,8 +189,10 @@ class RotateService : AccessibilityService() {
             }
             put(Settings.System.ACCELEROMETER_ROTATION, 0)
             put(Settings.System.USER_ROTATION, Prefs.rotation(this))
+            if (Prefs.force(this)) showOverlay(Prefs.rotation(this)) else hideOverlay()
         } else if (enforcing) {
             enforcing = false
+            hideOverlay()
             // Turned off by the user while unfolded: give back what was there before.
             // Folded: leave it alone, One UI restores the cover screen's own setting.
             if (unfolded && disabledByUser) {
