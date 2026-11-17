@@ -224,7 +224,7 @@ private fun Screen(tick: Int) {
                     val user = Settings.System.getInt(c.contentResolver, Settings.System.USER_ROTATION, -1)
                     status = "상태 · 서비스 " + (if (RotateService.running) "실행 중" else "꺼짐") +
                         " · Shizuku " + (if (Sh.ready()) "연결" else "없음") +
-                        " · " + (if (isUnfolded(c)) "펼침" else "접힘") +
+                        " · " + (if (isUnfolded(c)) "펼침" else "접힘") + " (${panelSize(c)})" +
                         "\n화면 ${r * 90}° · 자동 회전 $accel · 잠금 값 ${user * 90}°" +
                         (if (Sh.last.isNotEmpty()) "\n마지막 명령: ${Sh.last}" else "")
                     delay(1000)

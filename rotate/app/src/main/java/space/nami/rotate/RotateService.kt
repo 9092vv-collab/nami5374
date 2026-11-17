@@ -16,8 +16,6 @@ import android.view.Display
 import android.view.Surface
 import android.view.accessibility.AccessibilityEvent
 import rikka.shizuku.Shizuku
-import kotlin.math.max
-import kotlin.math.min
 
 /** Saved choices. */
 object Prefs {
@@ -87,22 +85,35 @@ object Sh {
     }
 }
 
-/** True when the default display is the big inner screen. */
+/** Native pixel size of the panel the default display is on now ("2184×1968"), for the status line. */
+fun panelSize(c: Context): String {
+    val d = c.getSystemService(DisplayManager::class.java)?.getDisplay(Display.DEFAULT_DISPLAY) ?: return "?"
+    val m = d.mode
+    return "${m.physicalWidth}×${m.physicalHeight}"
+}
+
+/**
+ * True when the default display is on the big inner panel.
+ * The cover and inner panels share display 0; the inner panel simply has far more pixels.
+ * Uses the panel's native resolution (not affected by display zoom or rotation) and compares it
+ * with the biggest panel seen so far, so it doesn't depend on the exact model.
+ */
 fun isUnfolded(c: Context): Boolean {
-    val dm = c.getSystemService(DisplayManager::class.java) ?: return false
-    val d = dm.getDisplay(Display.DEFAULT_DISPLAY) ?: return false
-    val m = DisplayMetrics()
-    @Suppress("DEPRECATION") d.getRealMetrics(m)
-    val small = min(m.widthPixels, m.heightPixels)
-    if (small <= 0) return false
-    // Inner screen is almost square, the cover screen is long and thin.
-    // (Ratio instead of dp so display zoom doesn't matter.)
-    return max(m.widthPixels, m.heightPixels).toFloat() / small < 1.6f
+    val d = c.getSystemService(DisplayManager::class.java)?.getDisplay(Display.DEFAULT_DISPLAY) ?: return false
+    val m = d.mode
+    val area = m.physicalWidth.toLong() * m.physicalHeight
+    if (area <= 0) return false
+    val p = Prefs.of(c)
+    var biggest = p.getLong("biggestPanel", 0L)
+    if (area > biggest) { biggest = area; p.edit().putLong("biggestPanel", area).apply() }
+    // Until the inner panel has been seen once, only call it unfolded when it's clearly large.
+    if (area < 3_300_000L && biggest == area) return false
+    return area * 100 >= biggest * 85
 }
 
 /**
  * Holds the screen rotation while the phone is unfolded.
- * With Shizuku: `cmd window set-user-rotation lock <r>` (exact rotation, no guessing) and
+ * With Shizuku: `cmd window user-rotation lock <r>` (exact rotation, no guessing) and
  * `cmd window set-ignore-orientation-request true` so apps can't turn it.
  * Without Shizuku: auto-rotate off + user_rotation in system settings.
  * When folded it gives the cover screen back.
@@ -197,7 +208,7 @@ class RotateService : AccessibilityService() {
         val locked = get(Settings.System.ACCELEROMETER_ROTATION, 1) == 0 &&
             get(Settings.System.USER_ROTATION, -1) == r
         if (locked && currentRotation() == r) return
-        if (Sh.run("cmd", "window", "set-user-rotation", "lock", r.toString()) == null) {
+        if (Sh.run("cmd", "window", "user-rotation", "lock", r.toString()) == null) {
             put(Settings.System.ACCELEROMETER_ROTATION, 0)
             put(Settings.System.USER_ROTATION, r)
         }
@@ -217,8 +228,8 @@ class RotateService : AccessibilityService() {
     }
 
     private fun restore(accel: Int, user: Int) {
-        val cmd = if (accel == 1) arrayOf("cmd", "window", "set-user-rotation", "free")
-        else arrayOf("cmd", "window", "set-user-rotation", "lock", user.toString())
+        val cmd = if (accel == 1) arrayOf("cmd", "window", "user-rotation", "free")
+        else arrayOf("cmd", "window", "user-rotation", "lock", user.toString())
         if (Sh.run(*cmd) == null) {
             put(Settings.System.USER_ROTATION, user)
             put(Settings.System.ACCELEROMETER_ROTATION, accel)
