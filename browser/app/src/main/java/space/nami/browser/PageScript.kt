@@ -181,19 +181,21 @@ object PageScript {
       // raw bytes over NamiPipe (no base64, doesn't block the page); old bridge as a fallback
       if (P) P.onmessage = function(e){ var w = waits.shift(); if (w) w(e.data === 'ok'); };
       var CH = P ? 4 * 1024 * 1024 : 1024 * 1024;
-      var join = function(){ var a = new Uint8Array(size), o = 0; buf.forEach(function(c){ a.set(c, o); o += c.byteLength; }); return a; };
+      var viaBridge = function(parts, n){
+        var b = new Blob(parts);
+        return new Promise(function(ok, bad){ var fr = new FileReader(); fr.onload = function(){ var s = fr.result; if (!nb('fsWrite', [id, s.substring(s.indexOf(',') + 1), -1])) bad(new Error('write')); else { got += n; ok(); } }; fr.onerror = function(){ bad(fr.error); }; fr.readAsDataURL(b); });
+      };
       var flush = function(){
         if (!size) return Promise.resolve();
-        var n = size;
+        var n = size, parts = buf; buf = []; size = 0;
         if (P) {
-          var a = join(); buf = []; size = 0;
+          var a = new Uint8Array(n), o = 0; parts.forEach(function(c){ a.set(c, o); o += c.byteLength; });
           return new Promise(function(ok, bad){
-            waits.push(function(good){ if (good) { got += n; ok(); } else bad(new Error('write')); });
-            P.postMessage('w:' + id); P.postMessage(a.buffer, [a.buffer]);
-          });
+            waits.push(function(good){ if (good) { got += n; ok(); } else bad(new Error('pipe')); });
+            try { P.postMessage('w:' + id); P.postMessage(a.buffer); } catch(e) { waits.pop(); bad(e); }
+          }).catch(function(){ P = null; return viaBridge([a], n); });   // pipe didn't work → old way
         }
-        var b = new Blob(buf); buf = []; size = 0;
-        return new Promise(function(ok, bad){ var fr = new FileReader(); fr.onload = function(){ var s = fr.result; if (!nb('fsWrite', [id, s.substring(s.indexOf(',') + 1), -1])) bad(new Error('write')); else { got += n; ok(); } }; fr.onerror = function(){ bad(fr.error); }; fr.readAsDataURL(b); });
+        return viaBridge(parts, n);
       };
       // the site stopped sending for a long time → give up instead of hanging forever
       var last = Date.now(), dead = false;
