@@ -205,10 +205,22 @@ object PageScript {
     return pump().then(function(){ clearInterval(watch); }, function(e){ clearInterval(watch); throw dead ? new Error('stalled') : e; });
   };
   var cdName = function(r, fallback){
-    var cd = r.headers.get('Content-Disposition') || '', name = fallback || '';
-    var m = /filename\*=UTF-8''([^;]+)/i.exec(cd) || /filename="?([^";]+)"?/i.exec(cd);
-    if (m) { try { name = decodeURIComponent(m[1]); } catch(e) { name = m[1]; } }
+    var cd = r.headers.get('Content-Disposition') || '', name = '';
+    var m = /filename\*\s*=\s*[^']*'[^']*'([^;]+)/i.exec(cd) || /filename\s*=\s*"([^"]+)"/i.exec(cd) || /filename\s*=\s*([^;]+)/i.exec(cd);
+    if (m) { try { name = decodeURIComponent(m[1].trim()); } catch(e) { name = m[1].trim(); } }
+    // no name from the response: what the page called it (a[download]), else the last file name the page
+    // just told its service worker about (kio.ac single files)
+    if (!name) name = fallback || '';
+    if (!name && LASTNAME && Date.now() - LASTNAME.at < 60000) name = LASTNAME.n;
     return name;
+  };
+  var LASTNAME = null;
+  var noteName = function(o, d){
+    if (!o || typeof o !== 'object' || d > 4 || o instanceof Blob || ArrayBuffer.isView(o) || o instanceof ArrayBuffer) return;
+    for (var k in o) { try { var v = o[k];
+      if (typeof v === 'string' && /^(name|filename|fileName|title)$/.test(k) && /\.[A-Za-z0-9]{1,8}$/.test(v) && v.length < 300) LASTNAME = { n: v.split('/').pop(), at: Date.now() };
+      else if (v && typeof v === 'object') noteName(v, d + 1);
+    } catch(e) {} }
   };
 
   // ---- folder zips: the site asks its service worker to zip files (kio.ac). Big zips stall in every browser,
@@ -245,6 +257,7 @@ object PageScript {
   };
   var seeZip = function(where, m){
     peek(where, m);
+    try { noteName(typeof m === 'string' ? JSON.parse(m) : m, 0); } catch(e) {}
     try { var z = zipOf(typeof m === 'string' ? JSON.parse(m) : m); if (z) { lastZip = { z: z, at: Date.now() }; if (m && m.id) ZIPREQ[m.id] = z; } } catch(e) {}
   };
   try {
@@ -345,7 +358,7 @@ object PageScript {
     fetch(url).then(function(r){
       if (!r.ok || !r.body) throw new Error('HTTP ' + r.status);
       var id = newId();
-      if (!nb('relayOpen', [id, cdName(r, hint), (r.headers.get('Content-Type') || '').split(';')[0]])) throw new Error('save');
+      if (!nb('relayOpen', [id, cdName(r, hint), (r.headers.get('Content-Type') || '').split(';')[0], r.headers.get('Content-Disposition') || '', url])) throw new Error('save');
       opened = true; ping = setInterval(poke, 10000);
       return streamTo(r, id, function(n){ got += n; }, gen).then(function(){
         clearInterval(ping); nb('fsClose', [id]); nb('relayDone', [url]);

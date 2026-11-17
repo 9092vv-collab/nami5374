@@ -549,9 +549,9 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
         @JavascriptInterface fun blobChunk(k: String, id: String, b64: String): Boolean = k == key && blobs.chunk(id, b64)
         @JavascriptInterface fun blobEnd(k: String, id: String) { if (k == key) blobs.end(id) }
         @JavascriptInterface fun blobFail(k: String, id: String) { if (k != key) return; blobs.fail(id); scope.launch { Toast.makeText(act, "파일을 읽지 못했어요", Toast.LENGTH_SHORT).show() } }
-        @JavascriptInterface fun relayOpen(k: String, id: String, name: String, mime: String): Boolean {
+        @JavascriptInterface fun relayOpen(k: String, id: String, name: String, mime: String, cd: String, url: String): Boolean {
             if (k != key) return false
-            val (n, _) = FileName.build("", null, mime.ifEmpty { null }, name.ifEmpty { null })
+            val (n, _) = FileName.build(if (isSwUrl(url)) "" else url, cd.ifEmpty { null }, mime.ifEmpty { null }, name.ifEmpty { null })
             val ok = fs.open(id, "", n, mime)
             if (ok) { t.relays++; scope.launch { relayKeep(t) } }
             scope.launch { if (ok) Toast.makeText(act, "받는 중: $n", Toast.LENGTH_SHORT).show() else Toast.makeText(act, "받기 실패", Toast.LENGTH_SHORT).show() }
