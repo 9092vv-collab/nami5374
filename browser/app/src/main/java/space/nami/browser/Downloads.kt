@@ -27,6 +27,8 @@ object Downloads {
 
     /** Set by Browser: a native download got an HTTP error (404 → maybe a page-made "service worker" download). */
     @Volatile var onFail: ((String, Int) -> Unit)? = null
+    /** A native folder batch finished (message for the pill). */
+    @Volatile var onBatchDone: ((String) -> Unit)? = null
     fun notifyFail(url: String, code: Int) { Handler(Looper.getMainLooper()).post { onFail?.invoke(url, code) } }
 
     fun notifyDone(uri: Uri, name: String, mime: String?) {

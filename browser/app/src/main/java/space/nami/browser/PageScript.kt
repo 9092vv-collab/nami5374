@@ -10,7 +10,7 @@ package space.nami.browser
 object PageScript {
     /** The script with this launch's bridge key filled in. */
     fun js(key: String) = TEMPLATE.replace("__NAMI_KEY__", key)
-        .replace("__NAMI_FNS__", "['translate','idle','doubleTap','scriptVersion','blobBegin','blobChunk','blobEnd','blobFail','claimBlob','downloadHint','forceZoom','fsWrite','fsClose','fsAbort','relayOpen','relayOpenIn','relayAdopt','relayBatch','batchSave','batchAt','zipMiss','relayFail','relayDone']")
+        .replace("__NAMI_FNS__", "['translate','idle','doubleTap','scriptVersion','blobBegin','blobChunk','blobEnd','blobFail','claimBlob','downloadHint','forceZoom','fsWrite','fsClose','fsAbort','relayOpen','relayOpenIn','relayAdopt','relayBatch','batchSave','batchAt','nativeBatch','zipMiss','relayFail','relayDone']")
 
     private val TEMPLATE = """
 (function(){
@@ -280,17 +280,24 @@ object PageScript {
       var p = {}, src = e.request && e.request.url ? e.request : { url: urlIn(e, 0) };
       Object.keys(src).forEach(function(k){ if (k !== 'url' && k !== 'reuse' && k !== 'signal' && k !== 'body') p[k] = src[k]; });
       if (p.mode === 'navigate') p.mode = 'same-origin';
-      if (p.headers && !Array.isArray(p.headers) && typeof p.headers === 'object' && !(p.headers instanceof Headers)) p.headers = Object.assign({}, p.headers);
+      try { var hh = {}; new Headers(p.headers || {}).forEach(function(v, k){ hh[k] = v; }); p.headers = hh; } catch(x) { delete p.headers; }
       var path = parts(e); if (base && path.length > 1 && path[0] === base) path.shift();
       var name = path.pop() || ('file' + (n + 1));
-      return { u: new URL(src.url, location.href).href, p: p, dir: (base ? [base] : []).concat(path).join('/'), name: name };
+      return { u: new URL(src.url, location.href).href, p: p, dir: (base ? [base] : []).concat(path).join('/'), name: name, size: typeof e.size === 'number' ? e.size : -1 };
     });
     N.runBatch(folder || top || location.hostname, items, 0, null, 0);
   };
 
   // Fetch a list of files one by one. Nami remembers the list, so after a reload it can carry on
   // from the same file (and the same half-written file, with Range).
-  N.runBatch = function(label, items, start, firstId, firstGot){
+  N.runBatch = function(label, items, start, firstId, firstGot, mode){
+    // first choice: Nami's own downloader (doesn't stop in the background). It hands the list back if it can't.
+    if (mode !== 'page' && !start && !firstId) {
+      try {
+        var nat = items.map(function(it){ return { u: it.u, h: it.p.headers || {}, dir: it.dir, name: it.name, size: it.size }; });
+        if (nb('nativeBatch', [JSON.stringify({ label: label, items: nat })])) { N.nativeItems = { label: label, items: items }; return; }
+      } catch(e) {}
+    }
     var i = start, ok = start, bad = 0, total = items.length;
     var ping = setInterval(poke, 10000);
     nb('relayBatch', [label, total, 0, 0, 0]);
@@ -386,7 +393,7 @@ object PageScript {
     fail: function(id){ N.fail(id); },
     saveBlob: function(k, href, name){ if (k === NK) N.saveBlob(href, name); },
     relay: function(k, url, name){ if (k === NK) N.relay(url, name); },
-    resumeBatch: function(k, json, idx, id, got){ if (k === NK) { var b = JSON.parse(json); N.runBatch(b.label, b.items, idx, id || null, got || 0); } }
+    resumeBatch: function(k, json, idx, id, got, mode){ if (k === NK) { var b = JSON.parse(json); if (mode === 'page' && N.nativeItems && N.nativeItems.label === b.label) b.items = N.nativeItems.items; else if (mode === 'page' && b.items && b.items[0] && b.items[0].h) b.items = b.items.map(function(x){ return { u: x.u, p: { headers: x.h, credentials: 'include' }, dir: x.dir, name: x.name, size: x.size }; }); N.runBatch(b.label, b.items, idx, id || null, got || 0, mode || 'page'); } }
   });
   try { Object.defineProperty(window, '__nami', { value: API, writable: false, configurable: false }); } catch(e) {}
 

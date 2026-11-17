@@ -151,6 +151,13 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
 
     init {
         scripts.onChange = { tabs.forEach { applyScripts(it) } }
+        DownloadService.onBatchFallback = { token ->
+            batchPending.remove(token)?.let { (t, json) ->
+                showPill("직접 받기가 안 돼서 사이트를 거쳐 받을게요", 3000)
+                t.web.evaluateJavascript("window.__nami&&__nami.resumeBatch('$key'," + org.json.JSONObject.quote(json) + ",0,null,0,'page')", null)
+            }
+        }
+        Downloads.onBatchDone = { msg -> batchPending.clear(); showPill(msg, 5000) }
         Downloads.onDone = { uri, name, mime ->
             showPill("다 받았어요 · " + name.take(24), 4500, "열기" to { Downloads.open(act, uri, mime, name) })
         }
@@ -289,6 +296,10 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
             }
         }
     }
+
+    /** Native folder batches waiting to see if their first file works (token → tab, list). */
+    private val batchPending = java.util.concurrent.ConcurrentHashMap<String, Pair<BrowserTab, String>>()
+    private val ua: String by lazy { android.webkit.WebSettings.getDefaultUserAgent(act).replace("; wv", "").replace(Regex("Version/\\d+(\\.\\d+)* "), "") }
 
     /** After a reload cut a folder download off: offer to carry on; give up (and clean up) after a while. */
     fun offerResume(t: BrowserTab) {
@@ -555,6 +566,24 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
                     Toast.makeText(act, "복사했어요 · 대화창에 붙여 넣어 주세요", Toast.LENGTH_SHORT).show()
                 })
             }
+        }
+        /** Folder list → Nami's own downloader (keeps going in the background). false = let the page do it. */
+        @JavascriptInterface fun nativeBatch(k: String, json: String): Boolean {
+            if (k != key) return false
+            val o = runCatching { org.json.JSONObject(json) }.getOrNull() ?: return false
+            val items = o.optJSONArray("items") ?: return false
+            if (items.length() == 0) return false
+            val first = items.getJSONObject(0).optString("u")
+            if (!first.startsWith("http")) return false
+            val token = java.util.UUID.randomUUID().toString()
+            batchPending[token] = t to json
+            val cookie = runCatching { CookieManager.getInstance().getCookie(first) }.getOrNull()
+            act.startForegroundService(Intent(act, DownloadService::class.java).setAction(DownloadService.ACTION_BATCH)
+                .putExtra("json", json).putExtra("token", token).putExtra("cookie", cookie).putExtra("ua", ua)
+                .putExtra("referer", runCatching { t.url }.getOrNull()).putExtra("parts", prefs.splitParts).putExtra("dual", prefs.dualNetwork))
+            val label = o.optString("label", "")
+            scope.launch { Toast.makeText(act, "Nami가 직접 받아요 · 파일 ${items.length()}개 · Download/$label", Toast.LENGTH_LONG).show() }
+            return true
         }
         @JavascriptInterface fun batchSave(k: String, json: String) { if (k == key) { t.batchJson = json; t.batchBroken = false } }
         @JavascriptInterface fun batchAt(k: String, idx: Double, id: String) { if (k == key) { t.batchIdx = idx.toInt(); t.batchId = id } }

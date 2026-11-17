@@ -75,6 +75,12 @@ class DownloadService : Service() {
                 nm.cancel(id)
                 stopIfIdle()
             }
+            ACTION_BATCH -> {
+                val id = nextId.incrementAndGet()
+                val job = scope.launch { runBatch(intent) }
+                jobs[id] = job
+                job.invokeOnCompletion { jobs.remove(id); stopIfIdle() }
+            }
             ACTION_START -> {
                 val id = nextId.incrementAndGet()
                 val req = Req(
@@ -104,7 +110,11 @@ class DownloadService : Service() {
     override fun onDestroy() { scope.cancel(); super.onDestroy() }
 
     private class Req(val url: String, var name: String, var mime: String?, val cookie: String?, val ua: String?,
-                      val referer: String?, val parts: Int, var guessed: Boolean, val dual: Boolean = false)
+                      val referer: String?, val parts: Int, var guessed: Boolean, val dual: Boolean = false,
+                      // folder batches (kio.ac): sub folder, the site's own request headers, no per-file notes,
+                      // expected size, and "must look like the real file" (not a web page, right size)
+                      val dir: String = "", val headers: Map<String, String> = emptyMap(), val quiet: Boolean = false,
+                      val expect: Long = -1, val strict: Boolean = false)
 
     /** net = a specific network (mobile data in "와이파이 + 데이터" mode); null = normal path. */
     private fun open(req: Req, range: String?, net: Network? = null): HttpURLConnection {
@@ -113,12 +123,13 @@ class DownloadService : Service() {
         req.cookie?.let { c.setRequestProperty("Cookie", it) }
         req.ua?.let { c.setRequestProperty("User-Agent", it) }
         req.referer?.let { c.setRequestProperty("Referer", it) }
+        req.headers.forEach { (k, v) -> if (!k.equals("range", true) && !k.equals("cookie", true)) runCatching { c.setRequestProperty(k, v) } }
         c.setRequestProperty("Accept-Encoding", "identity")
         if (range != null) c.setRequestProperty("Range", range)
         return c
     }
 
-    private suspend fun runJob(id: Int, req: Req) {
+    private suspend fun runJob(id: Int, req: Req): Boolean {
         var uri: Uri? = null
         val cancel = PendingIntent.getService(this, id, Intent(this, DownloadService::class.java).setAction(ACTION_CANCEL).putExtra("id", id),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
@@ -164,7 +175,11 @@ class DownloadService : Service() {
                     ranged = total > 0
                 } else if (code in 200..299) {
                     total = c.contentLengthLong
-                } else { Downloads.notifyFail(req.url, code); throw IOException("서버 응답 $code · " + (android.net.Uri.parse(req.url).path ?: "").takeLast(60)) }
+                } else { if (!req.quiet) Downloads.notifyFail(req.url, code); throw IOException("서버 응답 $code · " + (android.net.Uri.parse(req.url).path ?: "").takeLast(60)) }
+                if (req.strict) {
+                    if (ct != null && (ct.startsWith("text/html") || ct.startsWith("application/json"))) throw IOException("파일이 아니라 웹페이지가 왔어요")
+                    if (req.expect > 0 && total > 0 && total != req.expect) throw IOException("크기가 달라요")
+                }
             } finally { c.disconnect() }
             totalRef.set(total)
             // 2) space
@@ -176,7 +191,7 @@ class DownloadService : Service() {
             val values = ContentValues().apply {
                 put(MediaStore.Downloads.DISPLAY_NAME, req.name)
                 (req.mime?.takeIf { it != "application/octet-stream" } ?: FileName.mimeFor(req.name))?.let { put(MediaStore.Downloads.MIME_TYPE, it) }
-                put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/")
+                put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/" + (if (req.dir.isBlank()) "" else req.dir.trim('/') + "/"))
                 put(MediaStore.Downloads.IS_PENDING, 1)
             }
             uri = contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values) ?: throw IOException("파일을 만들 수 없어요")
@@ -201,17 +216,50 @@ class DownloadService : Service() {
             nm.cancel(id)
             Downloads.active.remove(id)
             cellCb?.let { c -> runCatching { getSystemService(ConnectivityManager::class.java).unregisterNetworkCallback(c) } }
-            BlobSaver.finish(this, uri, req.name, req.guessed, head)
+            BlobSaver.finish(this, uri, req.name, req.guessed, head, quiet = req.quiet)
+            return true
         } catch (e: Throwable) {
             Downloads.active.remove(id)
             cellCb?.let { c -> runCatching { getSystemService(ConnectivityManager::class.java).unregisterNetworkCallback(c) } }
             ticker.cancel()
             nm.cancel(id)
             uri?.let { u -> runCatching { contentResolver.delete(u, null, null) } }
-            if (e is kotlinx.coroutines.CancellationException) return
-            nm.notify(id + 100000, NotificationCompat.Builder(this, CH_DONE).setSmallIcon(android.R.drawable.stat_notify_error)
+            if (e is kotlinx.coroutines.CancellationException) throw e
+            if (!req.quiet) nm.notify(id + 100000, NotificationCompat.Builder(this, CH_DONE).setSmallIcon(android.R.drawable.stat_notify_error)
                 .setContentTitle("받기 실패: ${req.name}").setContentText(e.message ?: e.javaClass.simpleName).setAutoCancel(true).build())
+            return false
         }
+    }
+
+    /**
+     * A folder (kio.ac) fetched by Nami itself, file by file — keeps going in the background no matter what the page
+     * does. If the very first file doesn't come back as the real file, hand the list back to the page (onBatchFallback).
+     */
+    private suspend fun runBatch(req0: Intent) {
+        val json = req0.getStringExtra("json") ?: return
+        val token = req0.getStringExtra("token") ?: ""
+        val o = runCatching { org.json.JSONObject(json) }.getOrNull() ?: return
+        val label = o.optString("label", "download")
+        val items = o.optJSONArray("items") ?: return
+        val n = items.length()
+        var ok = 0; var bad = 0
+        for (i in 0 until n) {
+            val it = items.getJSONObject(i)
+            val hs = HashMap<String, String>()
+            it.optJSONObject("h")?.let { h -> h.keys().forEach { k -> hs[k] = h.optString(k) } }
+            val req = Req(url = it.getString("u"), name = it.optString("name", "file${i + 1}"), mime = null,
+                cookie = req0.getStringExtra("cookie"), ua = req0.getStringExtra("ua"), referer = req0.getStringExtra("referer"),
+                parts = req0.getIntExtra("parts", 4), guessed = false, dual = req0.getBooleanExtra("dual", false),
+                dir = it.optString("dir", ""), headers = hs, quiet = true, expect = it.optLong("size", -1L), strict = true)
+            val id = nextId.incrementAndGet()
+            val good = runJob(id, req)
+            if (!good && i == 0) { android.os.Handler(android.os.Looper.getMainLooper()).post { onBatchFallback?.invoke(token) }; return }
+            if (good) ok++ else bad++
+        }
+        val msg = if (bad == 0) "다 받았어요: $label (${ok}개)" else "받았어요: $label (${ok}개, 실패 ${bad}개)"
+        nm.notify((System.currentTimeMillis() % 100000).toInt() + 300000, NotificationCompat.Builder(this, CH_DONE)
+            .setSmallIcon(android.R.drawable.stat_sys_download_done).setContentTitle(msg).setContentText("Download/$label").setAutoCancel(true).build())
+        android.os.Handler(android.os.Looper.getMainLooper()).post { Downloads.onBatchDone?.invoke(msg) }
     }
 
     /** N ranges at once, each resuming on its own after errors. */
@@ -318,6 +366,9 @@ class DownloadService : Service() {
     companion object {
         const val ACTION_START = "space.nami.browser.DOWNLOAD"
         const val ACTION_CANCEL = "space.nami.browser.CANCEL"
+        const val ACTION_BATCH = "space.nami.browser.BATCH"
+        /** The first file of a native folder batch wasn't the real file → let the page fetch the list (token). */
+        @Volatile var onBatchFallback: ((String) -> Unit)? = null
         private const val CH_PROGRESS = "dl_progress"
         private const val CH_DONE = "dl_done"
         private const val FG_ID = 7001
