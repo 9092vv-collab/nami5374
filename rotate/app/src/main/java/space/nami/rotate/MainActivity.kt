@@ -202,10 +202,10 @@ private fun Screen(tick: Int) {
                 Text("방향", color = Ink, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.height(10.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Pill(holeBottomRight = true, rotation == Surface.ROTATION_90, Modifier.weight(1f)) {
+                    Pill(holeBottomRight = false, rotation == Surface.ROTATION_90, Modifier.weight(1f)) {
                         rotation = Surface.ROTATION_90; Prefs.setRotation(c, rotation)
                     }
-                    Pill(holeBottomRight = false, rotation == Surface.ROTATION_270, Modifier.weight(1f)) {
+                    Pill(holeBottomRight = true, rotation == Surface.ROTATION_270, Modifier.weight(1f)) {
                         rotation = Surface.ROTATION_270; Prefs.setRotation(c, rotation)
                     }
                 }
