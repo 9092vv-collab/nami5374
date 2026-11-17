@@ -428,6 +428,15 @@ object PageScript {
     var oClick = HTMLAnchorElement.prototype.click;
     HTMLAnchorElement.prototype.click = function(){ if (this.href && isSw(this.href)) { N.relay(this.href, this.getAttribute('download') || ''); return; } if (!this.isConnected) onDownloadLink(this); return oClick.apply(this, arguments); };
   } catch(e) {}
+  // FileSaver.js (Proton Drive's small files, many others) clicks a detached <a download> with
+  // a.dispatchEvent(new MouseEvent('click')), which never reaches the document listener
+  try {
+    var oDispatch = EventTarget.prototype.dispatchEvent;
+    EventTarget.prototype.dispatchEvent = function(ev){
+      try { if (ev && ev.type === 'click' && this instanceof HTMLAnchorElement && !this.isConnected) onDownloadLink(this); } catch(e) {}
+      return oDispatch.apply(this, arguments);
+    };
+  } catch(e) {}
 
   // ---- "확대/축소 항상 허용": undo viewport rules that block pinch zoom ----
   function fixViewport(){
