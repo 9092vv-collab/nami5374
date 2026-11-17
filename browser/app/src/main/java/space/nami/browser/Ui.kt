@@ -224,7 +224,7 @@ fun NamiApp(b: Browser, prefs: Prefs, act: Activity) = NamiTheme {
                 b.showPill("받는 중이라 새로고침하면 끊겨요", 4000, "그래도" to { t.web.reload() })
                 else { t?.web?.reload(); b.showPill("새로고침", 900) }
             Action.TRANSLATE -> t?.let { b.toggleTranslate(it) }
-            Action.NEW_TAB -> { b.newTab(prefs.homeUrl); b.toolbarVisible = true; b.editing = true }
+            Action.NEW_TAB -> { b.newTab(prefs.homeUrl, append = true); b.toolbarVisible = true; b.editing = true }
             Action.HOME -> t?.let { b.load(it, prefs.homeUrl) }
             Action.SHARE -> t?.let { shareText(ctx, it.url) }
             Action.TOP -> t?.web?.evaluateJavascript("window.scrollTo({top:0,behavior:'smooth'})", null)
@@ -504,7 +504,7 @@ private fun TabsScreen(b: Browser) {
         Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding()) {
             Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 8.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text("탭 ${b.tabs.size}개", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = C.Ink, modifier = Modifier.weight(1f))
-                TextButton({ b.newTab(b.prefs.homeUrl); b.showTabs = false; b.toolbarVisible = true; b.editing = true }) {
+                TextButton({ b.newTab(b.prefs.homeUrl, append = true); b.showTabs = false; b.toolbarVisible = true; b.editing = true }) {
                     Icon(Icons.Filled.Add, null, tint = C.Accent); Spacer(Modifier.width(4.dp)); Text("새 탭", color = C.Accent, fontWeight = FontWeight.SemiBold)
                 }
                 IconButton({ b.showTabs = false }) { Icon(Icons.Filled.Close, "닫기", tint = C.Ink) }
