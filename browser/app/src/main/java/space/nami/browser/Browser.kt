@@ -498,7 +498,10 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
         /** A folder fetched file by file instead of as one zip. done = 0 at the start, 1 at the end. */
         @JavascriptInterface fun relayBatch(k: String, folder: String, n: Double, ok: Double, bad: Double, done: Double) {
             if (k != key) return
+            // hold the service and keep this tab running for the whole folder, not just while a file is open
+            if (done < 1) { RelayService.hold(act, fs, 1); t.relays++ } else { RelayService.hold(act, fs, -1); t.relays = (t.relays - 1).coerceAtLeast(0) }
             scope.launch {
+                relayKeep(t)
                 if (done < 1) Toast.makeText(act, "zip 대신 파일 ${n.toInt()}개를 하나씩 받을게요 · Download/$folder", Toast.LENGTH_LONG).show()
                 else {
                     val msg = if (bad < 1) "다 받았어요: $folder (${ok.toInt()}개)" else "받았어요: $folder (${ok.toInt()}개, 실패 ${bad.toInt()}개)"

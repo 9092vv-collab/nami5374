@@ -97,22 +97,29 @@ class FsSaver(private val ctx: Context) {
 }
 
 /**
- * Keeps Nami in the foreground while a page streams a big file to us (screen off / other app),
- * and shows how much has arrived.
+ * Keeps Nami in the foreground while a page streams files to us (screen off / other app), shows how much has
+ * arrived, and holds the CPU and Wi-Fi awake. A folder batch holds it for the whole run, so the gap between
+ * two files doesn't stop the service (it can't be started again from the background).
  */
 class RelayService : android.app.Service() {
     private val h = android.os.Handler(android.os.Looper.getMainLooper())
     private val nm by lazy { getSystemService(android.app.NotificationManager::class.java) }
+    private var wake: android.os.PowerManager.WakeLock? = null
+    private var wifi: android.net.wifi.WifiManager.WifiLock? = null
     private val tick = object : Runnable {
         override fun run() {
             val list = saver?.active().orEmpty()
-            if (list.isEmpty()) { stopSelf(); return }
+            if (list.isEmpty() && holds.get() <= 0) { running = false; stopSelf(); return }
             nm.notify(FG_ID, note(list)); h.postDelayed(this, 1000)
         }
     }
 
     private fun note(list: List<Pair<String, Long>>): android.app.Notification {
-        val title = if (list.size == 1) "받는 중: ${list[0].first}" else "${list.size}개 받는 중"
+        val title = when {
+            list.size == 1 -> "받는 중: ${list[0].first}"
+            list.isEmpty() -> "다음 파일 준비 중"
+            else -> "${list.size}개 받는 중"
+        }
         val open = android.app.PendingIntent.getActivity(this, 0, android.content.Intent(this, MainActivity::class.java)
             .addFlags(android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP), android.app.PendingIntent.FLAG_IMMUTABLE)
         return androidx.core.app.NotificationCompat.Builder(this, CH).setSmallIcon(android.R.drawable.stat_sys_download)
@@ -123,25 +130,47 @@ class RelayService : android.app.Service() {
     override fun onBind(intent: android.content.Intent?): android.os.IBinder? = null
     override fun onStartCommand(intent: android.content.Intent?, flags: Int, startId: Int): Int {
         nm.createNotificationChannel(android.app.NotificationChannel(CH, "다운로드 진행", android.app.NotificationManager.IMPORTANCE_LOW))
-        androidx.core.app.ServiceCompat.startForeground(this, FG_ID, note(saver?.active().orEmpty().ifEmpty { listOf("파일" to 0L) }),
+        androidx.core.app.ServiceCompat.startForeground(this, FG_ID, note(saver?.active().orEmpty()),
             android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+        if (wake == null) runCatching {
+            wake = getSystemService(android.os.PowerManager::class.java)
+                .newWakeLock(android.os.PowerManager.PARTIAL_WAKE_LOCK, "nami:relay").apply { setReferenceCounted(false); acquire(6 * 60 * 60 * 1000L) }
+        }
+        if (wifi == null) runCatching {
+            @Suppress("DEPRECATION")
+            wifi = getSystemService(android.net.wifi.WifiManager::class.java)
+                .createWifiLock(android.net.wifi.WifiManager.WIFI_MODE_FULL_HIGH_PERF, "nami:relay").apply { setReferenceCounted(false); acquire() }
+        }
         h.removeCallbacks(tick); h.post(tick)
         return START_NOT_STICKY
     }
-    override fun onDestroy() { h.removeCallbacks(tick); super.onDestroy() }
+    override fun onDestroy() {
+        h.removeCallbacks(tick)
+        runCatching { wake?.release() }; runCatching { wifi?.release() }
+        wake = null; wifi = null; running = false
+        super.onDestroy()
+    }
 
     companion object {
         private const val CH = "dl_progress"
         private const val FG_ID = 7002
         @Volatile private var saver: FsSaver? = null
         @Volatile private var running = false
+        private val holds = java.util.concurrent.atomic.AtomicInteger(0)
+        private fun start(ctx: Context) {
+            if (running) return
+            running = true
+            runCatching { ctx.startForegroundService(android.content.Intent(ctx, RelayService::class.java)) }.onFailure { running = false }
+        }
         fun update(ctx: Context, s: FsSaver) {
             saver = s
-            val any = s.active().isNotEmpty()
-            if (any && !running) {
-                running = true
-                runCatching { ctx.startForegroundService(android.content.Intent(ctx, RelayService::class.java)) }
-            } else if (!any) running = false
+            if (s.active().isNotEmpty()) start(ctx)
+        }
+        /** +1 when a folder batch starts, -1 when it ends. */
+        fun hold(ctx: Context, s: FsSaver, d: Int) {
+            saver = s
+            if (holds.addAndGet(d) < 0) holds.set(0)
+            if (d > 0) start(ctx)
         }
     }
 }
