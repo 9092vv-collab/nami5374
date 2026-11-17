@@ -18,12 +18,16 @@ import java.util.concurrent.ConcurrentHashMap
  */
 class FsSaver(private val ctx: Context) {
     private class Sink(val uri: Uri, val pfd: ParcelFileDescriptor, val ch: FileChannel, val name: String,
-                       val head: java.io.ByteArrayOutputStream, var pos: Long, var written: Long = 0)
+                       val head: java.io.ByteArrayOutputStream, var pos: Long, var written: Long = 0,
+                       var label: String = name, var quiet: Boolean = false)
     private val sinks = ConcurrentHashMap<String, Sink>()
 
     /** Bytes written so far, or -1 if there is no such file being written. */
     fun written(id: String): Long = sinks[id]?.written ?: -1L
-    fun active(): List<Pair<String, Long>> = sinks.values.map { it.name to it.written }
+    fun active(): List<Pair<String, Long>> = sinks.values.map { it.label to it.written }
+
+    /** Part of a batch (folder): own label in the progress note, no "done" note per file. */
+    fun mark(id: String, label: String) { sinks[id]?.let { it.label = label; it.quiet = true } }
 
     /** "a/b/../c" → "a/b/c" with each part cleaned; empty = Download/ itself. */
     private fun folder(dir: String): String = dir.split('/', '\\')
@@ -79,7 +83,7 @@ class FsSaver(private val ctx: Context) {
         val s = sinks.remove(id) ?: return false
         runCatching { s.ch.force(true) }
         runCatching { s.ch.close() }; runCatching { s.pfd.close() }
-        BlobSaver.finish(ctx, s.uri, s.name, false, s.head.toByteArray())
+        BlobSaver.finish(ctx, s.uri, s.name, false, s.head.toByteArray(), quiet = s.quiet)
         RelayService.update(ctx, this)
         return true
     }

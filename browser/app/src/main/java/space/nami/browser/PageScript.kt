@@ -10,7 +10,7 @@ package space.nami.browser
 object PageScript {
     /** The script with this launch's bridge key filled in. */
     fun js(key: String) = TEMPLATE.replace("__NAMI_KEY__", key)
-        .replace("__NAMI_FNS__", "['translate','idle','doubleTap','scriptVersion','blobBegin','blobChunk','blobEnd','blobFail','claimBlob','downloadHint','forceZoom','fsWrite','fsClose','fsAbort','relayOpen','relayFail','relayDone']")
+        .replace("__NAMI_FNS__", "['translate','idle','doubleTap','scriptVersion','blobBegin','blobChunk','blobEnd','blobFail','claimBlob','downloadHint','forceZoom','fsWrite','fsClose','fsAbort','relayOpen','relayOpenIn','relayBatch','relayFail','relayDone']")
 
     private val TEMPLATE = """
 (function(){
@@ -164,52 +164,117 @@ object PageScript {
   // ---- downloads a site's service worker makes up (kio.ac: /_service-worker-responsify?id=…) ----
   // Android's downloader can't reach the service worker, so fetch it here and stream it to a file.
   var isSw = function(u){ try { var x = new URL(u, location.href); return x.origin === location.origin && /_service-worker-responsify$/.test(x.pathname); } catch(e) { return false; } };
+  // keep the site's service worker awake while it streams (Chrome stops idle workers)
+  var poke = function(){ try { var c = navigator.serviceWorker && navigator.serviceWorker.controller; if (c) c.postMessage({ type: 'nami-keepalive' }); } catch(e) {} };
+  var newId = function(){ return 'r' + Date.now() + Math.random().toString(36).slice(2); };
+  var PW = [], PIPE = window.NamiPipe || null;
+  if (PIPE) PIPE.onmessage = function(e){ var w = PW.shift(); if (w) w(e.data === 'ok'); };
+  // Writes a response body into the already opened file `id`. progress(bytes) after each piece.
+  var streamTo = function(r, id, progress){
+    var rd = r.body.getReader(), buf = [], size = 0;
+    var viaBridge = function(parts, n){
+      var b = new Blob(parts);
+      return new Promise(function(ok, bad){ var fr = new FileReader(); fr.onload = function(){ var s = fr.result; if (!nb('fsWrite', [id, s.substring(s.indexOf(',') + 1), -1])) bad(new Error('write')); else { progress(n); ok(); } }; fr.onerror = function(){ bad(fr.error); }; fr.readAsDataURL(b); });
+    };
+    var flush = function(){
+      if (!size) return Promise.resolve();
+      var n = size, parts = buf; buf = []; size = 0;
+      if (PIPE) {
+        var a = new Uint8Array(n), o = 0; parts.forEach(function(c){ a.set(c, o); o += c.byteLength; });
+        return new Promise(function(ok, bad){
+          PW.push(function(good){ if (good) { progress(n); ok(); } else bad(new Error('pipe')); });
+          try { PIPE.postMessage('w:' + id); PIPE.postMessage(a.buffer); } catch(e) { PW.pop(); bad(e); }
+        }).catch(function(){ PIPE = null; return viaBridge([a], n); });   // pipe didn't work → old way
+      }
+      return viaBridge(parts, n);
+    };
+    // the site stopped sending for a long time → give up instead of hanging forever
+    var last = Date.now(), dead = false;
+    var watch = setInterval(function(){ if (Date.now() - last > 90000) { dead = true; clearInterval(watch); try { rd.cancel('stalled'); } catch(e) {} } }, 5000);
+    var pump = function(){
+      return rd.read().then(function(x){
+        last = Date.now();
+        if (dead) throw new Error('stalled');
+        if (x.done) return flush();
+        buf.push(x.value); size += x.value.byteLength;
+        return (size >= (PIPE ? 4194304 : 1048576) ? flush() : Promise.resolve()).then(pump);
+      });
+    };
+    return pump().then(function(){ clearInterval(watch); }, function(e){ clearInterval(watch); throw dead ? new Error('stalled') : e; });
+  };
+  var cdName = function(r, fallback){
+    var cd = r.headers.get('Content-Disposition') || '', name = fallback || '';
+    var m = /filename\*=UTF-8''([^;]+)/i.exec(cd) || /filename="?([^";]+)"?/i.exec(cd);
+    if (m) { try { name = decodeURIComponent(m[1]); } catch(e) { name = m[1]; } }
+    return name;
+  };
+
+  // ---- folder zips: the site asks its service worker to zip files (kio.ac). Big zips stall in every browser,
+  // so we remember what was going to be zipped and fetch the files one by one into a folder instead. ----
+  var ZIPS = {}, ZIPREQ = {}, lastZip = null;
+  var zipOf = function(o){
+    for (var d = 0, x = o; d < 3 && x && typeof x === 'object'; d++, x = x.payload || x.data) {
+      var es = x.entries;
+      if (Array.isArray(es) && es.length && es[0] && typeof es[0].name === 'string' && (es[0].request && es[0].request.url || es[0].url))
+        return { name: String(x.name || 'download'), entries: es };
+    }
+    return null;
+  };
+  var seeZip = function(m){ try { var z = zipOf(m); if (z) { lastZip = { z: z, at: Date.now() }; if (m && m.id) ZIPREQ[m.id] = z; } } catch(e) {} };
+  try {
+    [window.ServiceWorker, window.MessagePort, window.BroadcastChannel, window.Worker].forEach(function(C){
+      if (!C || !C.prototype || !C.prototype.postMessage) return;
+      var o = C.prototype.postMessage;
+      C.prototype.postMessage = function(m){ seeZip(m); return o.apply(this, arguments); };
+    });
+    if (navigator.serviceWorker) navigator.serviceWorker.addEventListener('message', function(e){
+      try { var d = e.data, z = d && d.id && ZIPREQ[d.id], u = z && d.payload && (d.payload.url || d.payload);
+        if (z && typeof u === 'string') { ZIPS[new URL(u, location.href).href] = z; delete ZIPREQ[d.id]; } } catch(x) {}
+    });
+  } catch(e) {}
+  var zipFor = function(url){
+    var u; try { u = new URL(url, location.href).href; } catch(e) { return null; }
+    if (ZIPS[u]) { var z = ZIPS[u]; delete ZIPS[u]; return z; }
+    if (lastZip && Date.now() - lastZip.at < 120000 && /zip/i.test(u)) { var l = lastZip.z; lastZip = null; return l; }
+    return null;
+  };
+  N.relayZip = function(url, z){
+    var folder = z.name.replace(/\.zip$/i, '') || 'download', i = 0, ok = 0, bad = 0, total = 0;
+    var ping = setInterval(poke, 10000);
+    nb('relayBatch', [folder, z.entries.length, 0, 0, 0]);
+    var next = function(){
+      if (i >= z.entries.length) { clearInterval(ping); nb('relayBatch', [folder, z.entries.length, ok, bad, 1]); return; }
+      var e = z.entries[i++], p = {}, src = e.request || { url: e.url };
+      Object.keys(src).forEach(function(k){ if (k !== 'url' && k !== 'reuse') p[k] = src[k]; });
+      if (p.mode === 'navigate') p.mode = 'same-origin';
+      var path = String(e.name).replace(/\\/g, '/').split('/').filter(function(s){ return s && s !== '.' && s !== '..'; });
+      if (path.length > 1 && path[0] === folder) path.shift();
+      var name = path.pop() || ('file' + i), dir = [folder].concat(path).join('/'), id = newId(), opened = false;
+      if (e.request && e.request.body == null) delete p.body;
+      fetch(src.url, p).then(function(r){
+        if (!r.ok || !r.body) throw new Error('HTTP ' + r.status);
+        if (!nb('relayOpenIn', [id, dir, name, (r.headers.get('Content-Type') || '').split(';')[0], i, z.entries.length])) throw new Error('save');
+        opened = true;
+        return streamTo(r, id, function(n){ total += n; });
+      }).then(function(){ nb('fsClose', [id]); nb('relayDone', ['']); ok++; },
+               function(err){ if (opened) { nb('fsAbort', [id]); nb('relayDone', ['']); } bad++; })
+        .then(next);
+    };
+    next();
+  };
+
   N.relay = function(url, hint){
+    var z = zipFor(url);
+    if (z) return N.relayZip(url, z);
     var got = 0, opened = false, ping = null;
-    // keep the site's service worker awake while it streams (Chrome stops idle workers)
-    var poke = function(){ try { var c = navigator.serviceWorker && navigator.serviceWorker.controller; if (c) c.postMessage({ type: 'nami-keepalive' }); } catch(e) {} };
     fetch(url).then(function(r){
       if (!r.ok || !r.body) throw new Error('HTTP ' + r.status);
-      var cd = r.headers.get('Content-Disposition') || '', name = hint || '';
-      var m = /filename\*=UTF-8''([^;]+)/i.exec(cd) || /filename="?([^";]+)"?/i.exec(cd);
-      if (m) { try { name = decodeURIComponent(m[1]); } catch(e) { name = m[1]; } }
-      var id = 'r' + Date.now() + Math.random().toString(36).slice(2);
-      if (!nb('relayOpen', [id, name, (r.headers.get('Content-Type') || '').split(';')[0]])) throw new Error('save');
+      var id = newId();
+      if (!nb('relayOpen', [id, cdName(r, hint), (r.headers.get('Content-Type') || '').split(';')[0]])) throw new Error('save');
       opened = true; ping = setInterval(poke, 10000);
-      var rd = r.body.getReader(), buf = [], size = 0;
-      var P = window.NamiPipe, waits = [];
-      // raw bytes over NamiPipe (no base64, doesn't block the page); old bridge as a fallback
-      if (P) P.onmessage = function(e){ var w = waits.shift(); if (w) w(e.data === 'ok'); };
-      var CH = P ? 4 * 1024 * 1024 : 1024 * 1024;
-      var viaBridge = function(parts, n){
-        var b = new Blob(parts);
-        return new Promise(function(ok, bad){ var fr = new FileReader(); fr.onload = function(){ var s = fr.result; if (!nb('fsWrite', [id, s.substring(s.indexOf(',') + 1), -1])) bad(new Error('write')); else { got += n; ok(); } }; fr.onerror = function(){ bad(fr.error); }; fr.readAsDataURL(b); });
-      };
-      var flush = function(){
-        if (!size) return Promise.resolve();
-        var n = size, parts = buf; buf = []; size = 0;
-        if (P) {
-          var a = new Uint8Array(n), o = 0; parts.forEach(function(c){ a.set(c, o); o += c.byteLength; });
-          return new Promise(function(ok, bad){
-            waits.push(function(good){ if (good) { got += n; ok(); } else bad(new Error('pipe')); });
-            try { P.postMessage('w:' + id); P.postMessage(a.buffer); } catch(e) { waits.pop(); bad(e); }
-          }).catch(function(){ P = null; return viaBridge([a], n); });   // pipe didn't work → old way
-        }
-        return viaBridge(parts, n);
-      };
-      // the site stopped sending for a long time → give up instead of hanging forever
-      var last = Date.now(), dead = false;
-      var watch = setInterval(function(){ if (Date.now() - last > 90000) { dead = true; clearInterval(watch); try { rd.cancel('stalled'); } catch(e) {} } }, 5000);
-      var pump = function(){
-        return rd.read().then(function(x){
-          last = Date.now();
-          if (dead) throw new Error('stalled');
-          if (x.done) return flush().then(function(){ clearInterval(ping); clearInterval(watch); nb('fsClose', [id]); nb('relayDone', [url]); });
-          buf.push(x.value); size += x.value.byteLength;
-          return (size >= CH ? flush() : Promise.resolve()).then(pump);
-        });
-      };
-      return pump().catch(function(e){ clearInterval(watch); nb('fsAbort', [id]); throw dead ? new Error('stalled') : e; });
+      return streamTo(r, id, function(n){ got += n; }).then(function(){
+        clearInterval(ping); nb('fsClose', [id]); nb('relayDone', [url]);
+      }, function(e){ nb('fsAbort', [id]); throw e; });
     }).catch(function(e){ if (ping) clearInterval(ping); nb('relayFail', [String(e && e.message || e), url, got, opened]); });
   };
   try {

@@ -163,7 +163,7 @@ class BlobSaver(private val ctx: Context) {
 
     companion object {
         /** Rename by file bytes if needed, clear IS_PENDING, post a "done" notification. */
-        fun finish(ctx: Context, uri: Uri, name: String, guessed: Boolean, head: ByteArray): String {
+        fun finish(ctx: Context, uri: Uri, name: String, guessed: Boolean, head: ByteArray, quiet: Boolean = false): String {
             var final = name
             if (guessed || !FileName.hasRealExt(name)) {
                 FileName.sniff(head)?.let { e ->
@@ -176,6 +176,7 @@ class BlobSaver(private val ctx: Context) {
                 put(MediaStore.Downloads.IS_PENDING, 0)
             }
             runCatching { ctx.contentResolver.update(uri, v, null, null) }
+            if (quiet) return final
             Downloads.notifyDone(uri, final, FileName.mimeFor(final))
             val nm = ctx.getSystemService(NotificationManager::class.java)
             nm.createNotificationChannel(NotificationChannel("dl_done", "다운로드 완료", NotificationManager.IMPORTANCE_DEFAULT))

@@ -488,6 +488,29 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
             scope.launch { if (ok) Toast.makeText(act, "받는 중: $n", Toast.LENGTH_SHORT).show() else Toast.makeText(act, "받기 실패", Toast.LENGTH_SHORT).show() }
             return ok
         }
+        @JavascriptInterface fun relayOpenIn(k: String, id: String, dir: String, name: String, mime: String, i: Double, n: Double): Boolean {
+            if (k != key) return false
+            val (nm, _) = FileName.build("", null, mime.ifEmpty { null }, name.ifEmpty { null })
+            val ok = fs.open(id, dir, nm, mime)
+            if (ok) { fs.mark(id, "$nm (${i.toInt()}/${n.toInt()})"); t.relays++; scope.launch { relayKeep(t) } }
+            return ok
+        }
+        /** A folder fetched file by file instead of as one zip. done = 0 at the start, 1 at the end. */
+        @JavascriptInterface fun relayBatch(k: String, folder: String, n: Double, ok: Double, bad: Double, done: Double) {
+            if (k != key) return
+            scope.launch {
+                if (done < 1) Toast.makeText(act, "zip 대신 파일 ${n.toInt()}개를 하나씩 받을게요 · Download/$folder", Toast.LENGTH_LONG).show()
+                else {
+                    val msg = if (bad < 1) "다 받았어요: $folder (${ok.toInt()}개)" else "받았어요: $folder (${ok.toInt()}개, 실패 ${bad.toInt()}개)"
+                    showPill(msg, 5000)
+                    val nm = act.getSystemService(android.app.NotificationManager::class.java)
+                    nm.createNotificationChannel(android.app.NotificationChannel("dl_done", "다운로드 완료", android.app.NotificationManager.IMPORTANCE_DEFAULT))
+                    runCatching { nm.notify((System.currentTimeMillis() % 100000).toInt() + 300000,
+                        androidx.core.app.NotificationCompat.Builder(act, "dl_done").setSmallIcon(android.R.drawable.stat_sys_download_done)
+                            .setContentTitle(msg).setContentText("Download/$folder").setAutoCancel(true).build()) }
+                }
+            }
+        }
         @JavascriptInterface fun relayFail(k: String, msg: String, url: String, got: Double, opened: Boolean) {
             if (k != key) return
             if (opened) { t.relays = (t.relays - 1).coerceAtLeast(0); scope.launch { relayKeep(t) } }
