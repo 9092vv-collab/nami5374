@@ -204,6 +204,43 @@ object PageScript {
     };
     return pump().then(function(){ clearInterval(watch); }, function(e){ clearInterval(watch); throw dead ? new Error('stalled') : e; });
   };
+  // Bytes → file `id`, in order, through NamiPipe (or the bridge). Resolves when written.
+  var putBytes = function(id, a){
+    if (PIPE) return new Promise(function(ok, bad){
+      PW.push(function(good){ if (good) ok(); else bad(new Error('pipe')); });
+      try { PIPE.postMessage('w:' + id); PIPE.postMessage(a.buffer.byteLength === a.byteLength ? a.buffer : a.slice().buffer); } catch(e) { PW.pop(); bad(e); }
+    }).catch(function(){ PIPE = null; return putBytes(id, a); });
+    return new Promise(function(ok, bad){ var fr = new FileReader(); fr.onload = function(){ var s = fr.result; if (!nb('fsWrite', [id, s.substring(s.indexOf(',') + 1), -1])) bad(new Error('write')); else ok(); }; fr.onerror = function(){ bad(fr.error); }; fr.readAsDataURL(new Blob([a])); });
+  };
+  N.portDownload = function(meta, port){
+    var id = newId(), name = meta.filename || meta.name || '', mime = meta.mimeType || meta.mime || '';
+    if (!nb('relayOpen', [id, name, mime, '', ''])) { try { port.postMessage({ action: 'download_canceled' }); } catch(e) {} return; }
+    var chain = Promise.resolve(), buf = [], size = 0, failed = false, gen = N.gen;
+    var flush = function(){
+      if (!size) return;
+      var a = new Uint8Array(size), o = 0; buf.forEach(function(c){ a.set(c, o); o += c.byteLength; }); buf = []; size = 0;
+      chain = chain.then(function(){ if (!failed) return putBytes(id, a); }).catch(function(){ failed = true; });
+    };
+    var finish = function(ok){
+      flush();
+      chain.then(function(){
+        if (ok && !failed && N.gen === gen) { nb('fsClose', [id]); nb('relayDone', ['']); }
+        else { nb('fsAbort', [id]); nb('relayDone', ['']); }
+      });
+    };
+    port.onmessage = function(e){
+      var d = e.data || {};
+      if (N.gen !== gen && !failed) { failed = true; try { port.postMessage({ action: 'download_canceled' }); } catch(x) {} }
+      if (d.action === 'download_chunk' && d.payload) {
+        var c = d.payload instanceof Uint8Array ? d.payload : new Uint8Array(d.payload.buffer || d.payload);
+        buf.push(c); size += c.byteLength; if (size >= 4194304) flush();
+      } else if (d.action === 'end') finish(true);
+      else if (d.action === 'abort') finish(false);
+    };
+    // the page waits for this before it opens the (now pointless) iframe
+    try { port.postMessage({ action: 'download_started', payload: 'about:blank' }); } catch(e) {}
+  };
+
   var cdName = function(r, fallback){
     var cd = r.headers.get('Content-Disposition') || '', name = '';
     var m = /filename\*\s*=\s*[^']*'[^']*'([^;]+)/i.exec(cd) || /filename\s*=\s*"([^"]+)"/i.exec(cd) || /filename\s*=\s*([^;]+)/i.exec(cd);
@@ -265,7 +302,12 @@ object PageScript {
       var C = p[1];
       if (!C || !C.prototype || !C.prototype.postMessage) return;
       var o = C.prototype.postMessage;
-      C.prototype.postMessage = function(m){ seeZip(p[0], m); return o.apply(this, arguments); };
+      C.prototype.postMessage = function(m, tr){
+        // Proton Drive style: the page decrypts and streams the file to its service worker through a MessagePort,
+        // then opens the worker's URL in a hidden iframe. WebView can't save that, so take the port ourselves.
+        try { if (p[0] === 'sw' && m && m.action === 'start_download' && tr && tr[0] instanceof MessagePort && N.portDownload) { N.portDownload(m.payload || {}, tr[0]); return; } } catch(e) {}
+        seeZip(p[0], m); return o.apply(this, arguments);
+      };
     });
     var oFetch = window.fetch;
     window.fetch = function(u, init){
