@@ -64,6 +64,26 @@ class MainActivity : ComponentActivity(), Host {
 
     override fun onStop() { super.onStop(); browser.save() }
 
+    /**
+     * While a page is streaming a download (kio.ac), leaving Nami turns it into a small picture-in-picture window,
+     * like the user's own "pop-up window in a corner" trick: a page that stays on screen isn't frozen.
+     */
+    private var pipWanted = false
+    override fun relaying(on: Boolean) {
+        if (on == pipWanted) return
+        pipWanted = on
+        runCatching {
+            setPictureInPictureParams(android.app.PictureInPictureParams.Builder()
+                .setAutoEnterEnabled(on && prefs.pipWhileRelay).setAspectRatio(android.util.Rational(3, 4)).build())
+        }
+        if (!on && isInPictureInPictureMode) browser.showPill("다 받았어요", 3000)
+    }
+
+    override fun onPictureInPictureModeChanged(inPip: Boolean, newConfig: android.content.res.Configuration) {
+        super.onPictureInPictureModeChanged(inPip, newConfig)
+        browser.inPip = inPip
+    }
+
     override fun chooseFile(cb: ValueCallback<Array<Uri>>, params: WebChromeClient.FileChooserParams): Boolean {
         fileCb?.onReceiveValue(null)
         fileCb = cb

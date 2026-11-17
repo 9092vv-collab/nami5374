@@ -112,6 +112,8 @@ class PullFrame(ctx: Context, val web: WebView, private val threshold: () -> Flo
 /** Activity-side services the browser needs. */
 interface Host {
     fun chooseFile(cb: ValueCallback<Array<Uri>>, params: WebChromeClient.FileChooserParams): Boolean
+    /** A page is streaming a download to us: leaving the app should shrink Nami into a small window (it keeps running). */
+    fun relaying(on: Boolean) {}
 }
 
 class Browser(private val act: Activity, val prefs: Prefs, private val scope: CoroutineScope, private val host: Host) {
@@ -128,6 +130,8 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
     /** Optional tappable word on the status pill (e.g. "열기"). */
     var pillAction by mutableStateOf<Pair<String, () -> Unit>?>(null)
     var pull by mutableFloatStateOf(0f)
+    /** Nami is a small picture-in-picture window right now (hide the extra UI). */
+    var inPip by mutableStateOf(false)
     var pill by mutableStateOf<String?>(null)
     var longPress by mutableStateOf<LongPress?>(null)
     var customView by mutableStateOf<View?>(null)
@@ -338,6 +342,7 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
     /** A tab whose page is streaming a file to us keeps running at full priority even when hidden. */
     fun relayKeep(t: BrowserTab) {
         (t.web as? KeepWebView)?.awake = t.relays > 0
+        host.relaying(tabs.any { it.relays > 0 })
         if (t.relays > 0) {
             t.web.setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_IMPORTANT, false)
             t.web.onResume()

@@ -108,7 +108,7 @@ fun SettingsScreen(b: Browser, prefs: Prefs) {
                         5 -> DisplaySection(prefs)
                         else -> {
                             GeneralSection(prefs)
-                            Text("Nami 0.5.7", color = C.Sub, fontSize = 13.sp, modifier = Modifier.padding(start = 6.dp))
+                            Text("Nami 0.5.8", color = C.Sub, fontSize = 13.sp, modifier = Modifier.padding(start = 6.dp))
                         }
                     }
                 }
@@ -434,6 +434,9 @@ private fun GeneralSection(prefs: Prefs) {
             fontSize = 12.sp, color = C.Sub, lineHeight = 17.sp)
         if (prefs.splitParts > 0) {
             SwitchRow("와이파이 + 데이터 같이 쓰기", prefs.dualNetwork) { prefs.putDualNetwork(it) }
+            SwitchRow("받는 중 나가면 작은 창으로", prefs.pipWhileRelay) { prefs.putPipWhileRelay(it) }
+            Text("kio.ac처럼 페이지가 받아 주는 다운로드는 앱을 내리면 멈춰요. 켜 두면 홈으로 나갈 때 Nami가 구석의 작은 창이 돼서 계속 받아요.",
+                fontSize = 12.sp, color = C.Sub, lineHeight = 17.sp)
             Text("와이파이에 연결돼 있고 20MB 이상인 파일만, 조각 절반을 모바일 데이터로 받아요. 데이터 요금이 나가요. 데이터가 끊기면 그 조각은 와이파이로 마저 받아요.",
                 fontSize = 12.sp, color = C.Sub, lineHeight = 17.sp)
         }

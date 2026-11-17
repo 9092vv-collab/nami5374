@@ -103,6 +103,9 @@ class Prefs(ctx: Context) {
         private set
     var dualNetwork by mutableStateOf(sp.getBoolean("dualNetwork", false))
         private set
+    /** Shrink to a small window when leaving the app while a page streams a download (keeps it running). */
+    var pipWhileRelay by mutableStateOf(sp.getBoolean("pipWhileRelay", true))
+        private set
     var splitParts by mutableStateOf(sp.getInt("splitParts", 4))
         private set
     // ---- network (LocalProxy) ----
@@ -174,6 +177,7 @@ class Prefs(ctx: Context) {
         if (sp.contains("swOffSites")) sp.edit().remove("swOffSites").apply()
     }
     fun putOpenApps(v: Boolean) { openApps = v; sp.edit().putBoolean("openApps", v).apply() }
+    fun putPipWhileRelay(v: Boolean) { pipWhileRelay = v; sp.edit().putBoolean("pipWhileRelay", v).apply() }
     fun putDualNetwork(v: Boolean) { dualNetwork = v; sp.edit().putBoolean("dualNetwork", v).apply() }
     fun putSplitParts(v: Int) { splitParts = v; sp.edit().putInt("splitParts", v).apply() }
     fun putDnsMode(v: DnsMode) { dnsMode = v; sp.edit().putString("dnsMode", v.name).apply() }

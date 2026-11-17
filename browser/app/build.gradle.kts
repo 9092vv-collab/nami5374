@@ -12,8 +12,8 @@ android {
         applicationId = "space.nami.browser"
         minSdk = 31
         targetSdk = 36
-        versionCode = 36
-        versionName = "0.5.7"
+        versionCode = 37
+        versionName = "0.5.8"
         ndk { abiFilters.add("arm64-v8a") }
     }
 
