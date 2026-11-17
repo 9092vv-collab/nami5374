@@ -42,6 +42,8 @@ import java.net.URLEncoder
 
 /** One open tab. */
 class BrowserTab(val id: Long, val web: WebView, val frame: PullFrame) {
+    /** Files this tab's page is streaming to us right now (keep it running even when hidden). */
+    @Volatile var relays = 0
     var title by mutableStateOf("")
     var url by mutableStateOf("")
     var progress by mutableIntStateOf(100)
@@ -250,7 +252,18 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
         container.removeAllViews()
         (t.frame.parent as? ViewGroup)?.removeView(t.frame)
         container.addView(t.frame, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
-        tabs.forEach { if (it === t) it.web.onResume() else it.web.onPause() }
+        tabs.forEach { if (it === t || it.relays > 0) it.web.onResume() else it.web.onPause() }
+    }
+
+    /** A tab whose page is streaming a file to us keeps running at full priority even when hidden. */
+    fun relayKeep(t: BrowserTab) {
+        if (t.relays > 0) {
+            t.web.setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_IMPORTANT, false)
+            t.web.onResume()
+        } else {
+            t.web.setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_IMPORTANT, true)
+            if (t !== tab) t.web.onPause()
+        }
     }
 
     fun select(i: Int) {
@@ -441,15 +454,27 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
             if (k != key) return false
             val (n, _) = FileName.build("", null, mime.ifEmpty { null }, name.ifEmpty { null })
             val ok = fs.open(id, "", n, mime)
+            if (ok) { t.relays++; scope.launch { relayKeep(t) } }
             scope.launch { if (ok) Toast.makeText(act, "받는 중: $n", Toast.LENGTH_SHORT).show() else Toast.makeText(act, "받기 실패", Toast.LENGTH_SHORT).show() }
             return ok
         }
-        @JavascriptInterface fun relayFail(k: String, msg: String, url: String) {
+        @JavascriptInterface fun relayFail(k: String, msg: String, url: String, got: Double, opened: Boolean) {
             if (k != key) return
+            if (opened) { t.relays = (t.relays - 1).coerceAtLeast(0); scope.launch { relayKeep(t) } }
             val fb = relayFallback.remove(url)
-            scope.launch { if (fb != null) fb() else Toast.makeText(act, "받기 실패: $msg", Toast.LENGTH_SHORT).show() }
+            scope.launch {
+                when {
+                    got > 0 -> Toast.makeText(act, "받다가 끊겼어요 (${DownloadService.size(got.toLong())}에서) · 다시 받아 주세요", Toast.LENGTH_LONG).show()
+                    fb != null -> fb()
+                    else -> Toast.makeText(act, "받기 실패: $msg", Toast.LENGTH_SHORT).show()
+                }
+            }
         }
-        @JavascriptInterface fun relayDone(k: String, url: String) { if (k == key) relayFallback.remove(url) }
+        @JavascriptInterface fun relayDone(k: String, url: String) {
+            if (k != key) return
+            relayFallback.remove(url)
+            t.relays = (t.relays - 1).coerceAtLeast(0); scope.launch { relayKeep(t) }
+        }
         @JavascriptInterface fun fsWrite(k: String, id: String, b64: String, pos: Double): Boolean = k == key && fs.write(id, b64, pos)
         @JavascriptInterface fun fsClose(k: String, id: String): Boolean = k == key && fs.close(id)
         @JavascriptInterface fun fsAbort(k: String, id: String) { if (k == key) fs.abort(id) }

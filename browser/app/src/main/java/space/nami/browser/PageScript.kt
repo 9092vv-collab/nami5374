@@ -165,6 +165,9 @@ object PageScript {
   // Android's downloader can't reach the service worker, so fetch it here and stream it to a file.
   var isSw = function(u){ try { var x = new URL(u, location.href); return x.origin === location.origin && /_service-worker-responsify$/.test(x.pathname); } catch(e) { return false; } };
   N.relay = function(url, hint){
+    var got = 0, opened = false, ping = null;
+    // keep the site's service worker awake while it streams (Chrome stops idle workers)
+    var poke = function(){ try { var c = navigator.serviceWorker && navigator.serviceWorker.controller; if (c) c.postMessage({ type: 'nami-keepalive' }); } catch(e) {} };
     fetch(url).then(function(r){
       if (!r.ok || !r.body) throw new Error('HTTP ' + r.status);
       var cd = r.headers.get('Content-Disposition') || '', name = hint || '';
@@ -172,21 +175,22 @@ object PageScript {
       if (m) { try { name = decodeURIComponent(m[1]); } catch(e) { name = m[1]; } }
       var id = 'r' + Date.now() + Math.random().toString(36).slice(2);
       if (!nb('relayOpen', [id, name, (r.headers.get('Content-Type') || '').split(';')[0]])) throw new Error('save');
+      opened = true; ping = setInterval(poke, 10000);
       var rd = r.body.getReader(), buf = [], size = 0, CH = 1024 * 1024;
       var flush = function(){
         if (!size) return Promise.resolve();
-        var b = new Blob(buf); buf = []; size = 0;
-        return new Promise(function(ok, bad){ var fr = new FileReader(); fr.onload = function(){ var s = fr.result; if (!nb('fsWrite', [id, s.substring(s.indexOf(',') + 1), -1])) bad(new Error('write')); else ok(); }; fr.onerror = function(){ bad(fr.error); }; fr.readAsDataURL(b); });
+        var b = new Blob(buf), n = size; buf = []; size = 0;
+        return new Promise(function(ok, bad){ var fr = new FileReader(); fr.onload = function(){ var s = fr.result; if (!nb('fsWrite', [id, s.substring(s.indexOf(',') + 1), -1])) bad(new Error('write')); else { got += n; ok(); } }; fr.onerror = function(){ bad(fr.error); }; fr.readAsDataURL(b); });
       };
       var pump = function(){
         return rd.read().then(function(x){
-          if (x.done) return flush().then(function(){ nb('fsClose', [id]); nb('relayDone', [url]); });
+          if (x.done) return flush().then(function(){ clearInterval(ping); nb('fsClose', [id]); nb('relayDone', [url]); });
           buf.push(x.value); size += x.value.byteLength;
           return (size >= CH ? flush() : Promise.resolve()).then(pump);
         });
       };
       return pump().catch(function(e){ nb('fsAbort', [id]); throw e; });
-    }).catch(function(e){ nb('relayFail', [String(e && e.message || e), url]); });
+    }).catch(function(e){ if (ping) clearInterval(ping); nb('relayFail', [String(e && e.message || e), url, got, opened]); });
   };
   try {
     var oOpen = window.open;
