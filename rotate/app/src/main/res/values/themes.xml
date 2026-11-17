@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.Rotate" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/bg</item>
+    </style>
+    <color name="bg">#FAF9F7</color>
+    <color name="icon_bg">#D97757</color>
+    <string name="service_desc">휴대폰을 펼쳤을 때 메인 화면을 정해 둔 방향으로 고정합니다. 화면 내용은 읽지 않습니다.</string>
+</resources>

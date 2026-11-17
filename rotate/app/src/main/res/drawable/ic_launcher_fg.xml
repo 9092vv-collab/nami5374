@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
+    <!-- a landscape phone with a small lock dot -->
+    <path android:strokeColor="#FFFFFF" android:strokeWidth="5" android:fillColor="#00000000"
+        android:pathData="M34,40 L74,40 Q80,40 80,46 L80,62 Q80,68 74,68 L34,68 Q28,68 28,62 L28,46 Q28,40 34,40 Z" />
+    <path android:fillColor="#FFFFFF"
+        android:pathData="M72,54 m-3.5,0 a3.5,3.5 0 1,0 7,0 a3.5,3.5 0 1,0 -7,0" />
+</vector>
