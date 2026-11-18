@@ -24,11 +24,15 @@ object Booru {
     fun tags(c: Context) = Look.prefs(c).getString("booruTags", "") ?: ""
     fun sensitive(c: Context) = Look.prefs(c).getBoolean("booruSensitive", false)
     fun minutes(c: Context) = Look.prefs(c).getInt("booruMinutes", 30).coerceAtLeast(1)
-    fun curId(c: Context) = Look.prefs(c).getLong("booruCurId", 0L)
+    /** Web page of the picture on screen (Danbooru post or pixiv artwork). */
+    fun curUrl(c: Context) = Look.prefs(c).getString("netCurUrl", "") ?: ""
     fun hasNext(c: Context) = next(c).exists()
 
     /** Settings changed → the prepared picture no longer fits. */
     fun dropNext(c: Context) { next(c).delete() }
+
+    /** Switching between Danbooru and pixiv: forget both pictures so the new site's one shows. */
+    fun dropAll(c: Context) { next(c).delete(); cur(c).delete() }
 
     /** Show the prepared picture if it's time (or [force]). True when the shown picture changed. */
     @Synchronized
@@ -40,15 +44,25 @@ object Booru {
         val due = now - p.getLong("booruLast", 0L) >= minutes(c) * 60_000L
         if (!force && cur(c).exists() && !due) return false
         if (!n.renameTo(cur(c))) return false
-        p.edit().putLong("booruLast", now).putLong("booruCurId", p.getLong("booruNextId", 0L)).apply()
+        p.edit().putLong("booruLast", now).putString("netCurUrl", p.getString("netNextUrl", "")).apply()
         return true
     }
 
     /** Download the next picture. null = fine (or already busy), otherwise a short reason. Blocking. */
-    fun fetchNext(c: Context): String? {
+    fun fetchNext(c: Context, pixivCookie: String = ""): String? {
         if (fetching || next(c).exists()) return null
         fetching = true
         try {
+            if (Look.source(c) == "pixiv") {
+                val (bytes, page) = Pixiv.pick(c, pixivCookie)
+                val raw = File(c.cacheDir, "net_dl")
+                raw.writeBytes(bytes)
+                val good = Look.writeScaled(ImageDecoder.createSource(raw), next(c))
+                raw.delete()
+                if (!good) return "그림을 못 풀었어요"
+                Look.prefs(c).edit().putString("netNextUrl", page).apply()
+                return null
+            }
             val allowed = if (sensitive(c)) setOf("g", "s") else setOf("g")
             val q = URLEncoder.encode(tags(c).trim(), "UTF-8")
             val arr = JSONArray(String(get("https://danbooru.donmai.us/posts.json?limit=100&random=true&tags=$q")))
@@ -67,10 +81,12 @@ object Booru {
             val good = Look.writeScaled(ImageDecoder.createSource(raw), next(c))
             raw.delete()
             if (!good) return "그림을 못 풀었어요"
-            Look.prefs(c).edit().putLong("booruNextId", post.optLong("id")).apply()
+            Look.prefs(c).edit().putString("netNextUrl", "https://danbooru.donmai.us/posts/" + post.optLong("id")).apply()
             return null
+        } catch (e: Pixiv.Msg) {
+            return e.message
         } catch (e: Exception) {
-            return "못 받았어요 (${e.javaClass.simpleName})"
+            return "못 받았어요 (${e.javaClass.simpleName}${e.message?.let { ": " + it.take(40) } ?: ""})"
         } finally {
             fetching = false
         }

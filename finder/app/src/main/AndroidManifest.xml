@@ -22,6 +22,11 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <activity
+            android:name=".PixivLogin"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:theme="@android:style/Theme.Material.Light.NoActionBar" />
         <receiver android:name=".FinderWidget" android:exported="true" android:label="Nami 검색">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />

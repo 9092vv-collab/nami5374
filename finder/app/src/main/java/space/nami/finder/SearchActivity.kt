@@ -112,7 +112,7 @@ object Look {
     fun saveBg(c: Context, uri: Uri): Boolean = writeScaled(ImageDecoder.createSource(c.contentResolver, uri), bgFile(c))
 
     fun loadBg(c: Context): ImageBitmap? {
-        val f = when (source(c)) { "photo" -> bgFile(c); "booru" -> Booru.cur(c); else -> return null }
+        val f = when (source(c)) { "photo" -> bgFile(c); "booru", "pixiv" -> Booru.cur(c); else -> return null }
         if (!f.exists()) return null
         return runCatching { BitmapFactory.decodeFile(f.path)?.asImageBitmap() }.getOrNull()
     }
@@ -124,19 +124,21 @@ class SearchActivity : ComponentActivity() {
     private var bgVersion by mutableIntStateOf(0)
     private var booruStatus by mutableStateOf("")
     private var picking = false
+    private var pixivIn by mutableStateOf(false)
 
     /** Danbooru: swap if it's time, then make sure the next picture is downloading. */
     private fun booruTick(force: Boolean) {
-        if (Look.source(this) != "booru") return
+        if (Look.source(this) !in setOf("booru", "pixiv")) return
+        val cookie = Pixiv.cookie()   // CookieManager on the main thread
         thread {
             val swapped = Booru.rotate(this, force)
             if (swapped) runOnUiThread { bgVersion++ }
             if (Booru.hasNext(this)) { runOnUiThread { booruStatus = "다음 그림 준비됨" }; return@thread }
             runOnUiThread { booruStatus = "다음 그림 받는 중…" }
-            var err = Booru.fetchNext(this)
+            var err = Booru.fetchNext(this, cookie)
             // first picture, or "다른 그림" with nothing ready yet: show it right away and prepare another
             val showNow = err == null && !swapped && (force || !Booru.cur(this).exists()) && Booru.rotate(this, true)
-            if (showNow) err = Booru.fetchNext(this)
+            if (showNow) err = Booru.fetchNext(this, cookie)
             runOnUiThread {
                 if (showNow) bgVersion++
                 booruStatus = err ?: if (Booru.hasNext(this)) "다음 그림 준비됨" else ""
@@ -169,13 +171,24 @@ class SearchActivity : ComponentActivity() {
                     picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
                 },
                 onRemoveBg = { Look.bgFile(this).delete(); Look.putSource(this, "none"); bgVersion++ },
-                onSource = { v -> Look.putSource(this, v); bgVersion++; booruTick(false) },
+                onSource = { v ->
+                    val wasNet = Look.source(this) in setOf("booru", "pixiv")
+                    Look.putSource(this, v)
+                    if (wasNet && v in setOf("booru", "pixiv")) Booru.dropAll(this)
+                    booruStatus = ""
+                    bgVersion++
+                    booruTick(false)
+                },
+                pixivIn = pixivIn,
+                onPixivLogin = { picking = true; startActivity(Intent(this, PixivLogin::class.java)) },
+                onPixivLogout = { Pixiv.logout(); pixivIn = false },
                 booruStatus = booruStatus,
                 onBooruChanged = { Booru.dropNext(this); booruTick(true) },
                 onBooruNext = { booruTick(true) },
-                onOpenPost = { Booru.curId(this).takeIf { it > 0 }?.let { go("https://danbooru.donmai.us/posts/$it") } },
+                onOpenPost = { Booru.curUrl(this).takeIf { it.isNotEmpty() }?.let { go(it) } },
             )
         }
+        pixivIn = Pixiv.loggedIn()
         booruTick(false)
         // Back closes the window in one press, even while the keyboard is up.
         // PRIORITY_OVERLAY runs before the keyboard's own "hide" back handler.
@@ -189,6 +202,13 @@ class SearchActivity : ComponentActivity() {
     // Leaving the window (home button, another app) closes it, so the next tap starts empty.
     // Not while the photo picker is open — that's us.
     override fun onStop() { super.onStop(); if (!picking) finish() }
+
+    override fun onResume() {
+        super.onResume()
+        picking = false   // back from the photo picker or the pixiv login page
+        val now = Pixiv.loggedIn()
+        if (now != pixivIn) { pixivIn = now; Booru.dropNext(this); booruTick(false) }
+    }
 
     private fun go(input: String) {
         val url = toUrl(input) ?: return
@@ -232,6 +252,9 @@ private fun SearchScreen(
     onBooruChanged: () -> Unit,
     onBooruNext: () -> Unit,
     onOpenPost: () -> Unit,
+    pixivIn: Boolean,
+    onPixivLogin: () -> Unit,
+    onPixivLogout: () -> Unit,
 ) {
     val ctx = androidx.compose.ui.platform.LocalContext.current
     var text by remember { mutableStateOf("") }
@@ -240,6 +263,11 @@ private fun SearchScreen(
     var tags by remember { mutableStateOf(Booru.tags(ctx)) }
     var sensitive by remember { mutableStateOf(Booru.sensitive(ctx)) }
     var minutes by remember { mutableStateOf(Booru.minutes(ctx).toString()) }
+    var pMode by remember { mutableStateOf(Pixiv.mode(ctx)) }
+    var pPeriod by remember { mutableStateOf(Pixiv.period(ctx)) }
+    var pR18 by remember { mutableStateOf(Pixiv.r18(ctx)) }
+    var pTop by remember { mutableStateOf(Pixiv.top(ctx).toString()) }
+    var pTags by remember { mutableStateOf(Pixiv.tags(ctx)) }
     val bg by produceState<ImageBitmap?>(null, bgVersion) { value = withContext(Dispatchers.IO) { Look.loadBg(ctx) } }
     val focus = remember { FocusRequester() }
     val focusManager = LocalFocusManager.current
@@ -349,54 +377,105 @@ private fun SearchScreen(
                     Spacer(Modifier.height(6.dp))
                     Text("배경 그림", color = Ink, fontSize = 16.sp)
                     Spacer(Modifier.height(8.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        listOf("none" to "없음", "photo" to "내 사진", "booru" to "단부루").forEach { (v, name) ->
-                            Seg(name, source == v) { source = v; onSource(v) }
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        listOf("none" to "없음", "photo" to "내 사진", "booru" to "단부루", "pixiv" to "픽시브").forEach { (v, name) ->
+                            Seg(name, source == v) { if (source != v) { source = v; onSource(v) } }
                         }
                     }
                     Spacer(Modifier.height(12.dp))
-                    when (source) {
-                        "photo" -> Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Pill(if (bg == null) "사진 고르기" else "사진 바꾸기", AccentSoft, Accent, onPick)
-                            if (bg != null) Pill("사진 빼기", Color(0xFFF3F2EE), Ink, onRemoveBg)
+                    val put = { k: String, v: Any ->
+                        Look.prefs(ctx).edit().apply {
+                            when (v) { is Boolean -> putBoolean(k, v); is Int -> putInt(k, v); else -> putString(k, v.toString()) }
+                        }.apply()
+                    }
+                    if (source == "photo") Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Pill(if (bg == null) "사진 고르기" else "사진 바꾸기", AccentSoft, Accent, onPick)
+                        if (bg != null) Pill("사진 빼기", Color(0xFFF3F2EE), Ink, onRemoveBg)
+                    }
+                    if (source == "booru") Column {
+                        Field(tags, "태그 (예: hatsune_miku scenery)", KeyboardType.Text, {
+                            tags = it; put("booruTags", it)
+                        }) { onBooruChanged() }
+                        Spacer(Modifier.height(8.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Seg("일반만", !sensitive) { if (sensitive) { sensitive = false; put("booruSensitive", false); onBooruChanged() } }
+                            Seg("센시티브까지", sensitive) { if (!sensitive) { sensitive = true; put("booruSensitive", true); onBooruChanged() } }
                         }
-                        "booru" -> Column {
-                            Field(tags, "태그 (예: hatsune_miku scenery)", KeyboardType.Text, {
-                                tags = it; Look.prefs(ctx).edit().putString("booruTags", it).apply()
-                            }) { onBooruChanged() }
-                            Spacer(Modifier.height(8.dp))
-                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Seg("일반만", !sensitive) {
-                                    if (sensitive) { sensitive = false; Look.prefs(ctx).edit().putBoolean("booruSensitive", false).apply(); onBooruChanged() }
-                                }
-                                Seg("센시티브까지", sensitive) {
-                                    if (!sensitive) { sensitive = true; Look.prefs(ctx).edit().putBoolean("booruSensitive", true).apply(); onBooruChanged() }
+                        Spacer(Modifier.height(8.dp))
+                    }
+                    if (source == "pixiv") Column {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Seg("랭킹", pMode == "ranking") { if (pMode != "ranking") { pMode = "ranking"; put("pixivMode", "ranking"); onBooruChanged() } }
+                            Seg("태그", pMode == "tag") { if (pMode != "tag") { pMode = "tag"; put("pixivMode", "tag"); onBooruChanged() } }
+                        }
+                        Spacer(Modifier.height(8.dp))
+                        if (pMode == "ranking") {
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                val periods = if (pR18) listOf("daily" to "일간", "weekly" to "주간")
+                                    else listOf("daily" to "일간", "weekly" to "주간", "monthly" to "월간")
+                                periods.forEach { (v, name) ->
+                                    val sel = pPeriod == v || (pR18 && v == "weekly" && pPeriod == "monthly")
+                                    Seg(name, sel) { if (!sel) { pPeriod = v; put("pixivPeriod", v); onBooruChanged() } }
                                 }
                             }
                             Spacer(Modifier.height(8.dp))
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Box(Modifier.widthIn(max = 110.dp)) {
-                                    Field(minutes, "30", KeyboardType.Number, { v ->
-                                        minutes = v.filter { it.isDigit() }.take(5)
-                                        minutes.toIntOrNull()?.takeIf { it >= 1 }?.let { Look.prefs(ctx).edit().putInt("booruMinutes", it).apply() }
-                                    }) {}
+                                Text("상위  ", color = Ink, fontSize = 15.sp)
+                                Box(Modifier.widthIn(max = 90.dp)) {
+                                    Field(pTop, "100", KeyboardType.Number, { v ->
+                                        pTop = v.filter { it.isDigit() }.take(3)
+                                        pTop.toIntOrNull()?.takeIf { it in 1..500 }?.let { put("pixivTop", it) }
+                                    }) { onBooruChanged() }
                                 }
-                                Text("  분마다 바꾸기", color = Ink, fontSize = 15.sp)
+                                Text("  위 중에서 아무거나", color = Ink, fontSize = 15.sp)
                             }
-                            Spacer(Modifier.height(10.dp))
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Pill("다른 그림", AccentSoft, Accent, onBooruNext)
-                                if (bg != null) Pill("이 그림 열기", Color(0xFFF3F2EE), Ink, onOpenPost)
-                            }
-                            if (booruStatus.isNotEmpty()) {
-                                Spacer(Modifier.height(8.dp))
-                                Text(booruStatus, color = Gray, fontSize = 13.sp)
-                            }
-                            Spacer(Modifier.height(4.dp))
-                            Text("태그는 띄어쓰기로 구분(단부루 검색과 같아요). 시간이 지나면 다음에 열 때 바뀌어요.",
-                                color = Gray, fontSize = 12.sp, lineHeight = 17.sp)
+                        } else {
+                            Field(pTags, "태그 (예: 初音ミク 風景)", KeyboardType.Text, {
+                                pTags = it; put("pixivTags", it)
+                            }) { onBooruChanged() }
                         }
-                        else -> {}
+                        Spacer(Modifier.height(8.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Seg("전체 연령", !pR18) { if (pR18) { pR18 = false; put("pixivR18", false); onBooruChanged() } }
+                            Seg("R-18", pR18) { if (!pR18) { pR18 = true; put("pixivR18", true); onBooruChanged() } }
+                        }
+                        Spacer(Modifier.height(8.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            if (pixivIn) {
+                                Text("픽시브 로그인됨", color = Ink, fontSize = 14.sp)
+                                Pill("로그아웃", Color(0xFFF3F2EE), Ink, onPixivLogout)
+                            } else {
+                                Pill("픽시브 로그인", AccentSoft, Accent, onPixivLogin)
+                            }
+                        }
+                        if (pR18 && !pixivIn) {
+                            Spacer(Modifier.height(4.dp))
+                            Text("R-18은 로그인하고, 픽시브 설정에서 R-18 보기를 켜 둬야 나와요.", color = Gray, fontSize = 12.sp, lineHeight = 17.sp)
+                        }
+                        Spacer(Modifier.height(8.dp))
+                    }
+                    if (source == "booru" || source == "pixiv") Column {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(Modifier.widthIn(max = 110.dp)) {
+                                Field(minutes, "30", KeyboardType.Number, { v ->
+                                    minutes = v.filter { it.isDigit() }.take(5)
+                                    minutes.toIntOrNull()?.takeIf { it >= 1 }?.let { put("booruMinutes", it) }
+                                }) {}
+                            }
+                            Text("  분마다 바꾸기", color = Ink, fontSize = 15.sp)
+                        }
+                        Spacer(Modifier.height(10.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Pill("다른 그림", AccentSoft, Accent, onBooruNext)
+                            if (bg != null) Pill("이 그림 열기", Color(0xFFF3F2EE), Ink, onOpenPost)
+                        }
+                        if (booruStatus.isNotEmpty()) {
+                            Spacer(Modifier.height(8.dp))
+                            Text(booruStatus, color = Gray, fontSize = 13.sp)
+                        }
+                        Spacer(Modifier.height(4.dp))
+                        Text("태그·숫자는 키보드의 완료를 눌러야 적용돼요. 시간이 지나면 다음에 열 때 바뀌어요.",
+                            color = Gray, fontSize = 12.sp, lineHeight = 17.sp)
                     }
                 }
             }
