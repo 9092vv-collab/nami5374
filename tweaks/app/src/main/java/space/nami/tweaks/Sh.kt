@@ -107,17 +107,31 @@ object ScreenMode {
 object Uad {
     @Volatile private var map: Map<String, Pair<Int, String>>? = null
 
-    fun get(c: Context): Map<String, Pair<Int, String>> = map ?: synchronized(this) {
-        map ?: runCatching {
-            val o = org.json.JSONObject(c.assets.open("uad.json").bufferedReader().readText())
-            val m = HashMap<String, Pair<Int, String>>(o.length() * 2)
+    /** Packages whose rating and (Korean) description Claude wrote, because UAD doesn't list them (assets/extra.json). */
+    @Volatile var byClaude: Set<String> = emptySet()
+        private set
+
+    private fun read(c: Context, file: String, into: HashMap<String, Pair<Int, String>>, onlyNew: Boolean): Set<String> {
+        val added = HashSet<String>()
+        runCatching {
+            val o = org.json.JSONObject(c.assets.open(file).bufferedReader().readText())
             o.keys().forEach { k ->
+                if (onlyNew && into.containsKey(k)) return@forEach
                 val a = o.getJSONArray(k)
                 val lv = when (a.getString(0)) { "R" -> 0; "A" -> 1; "E" -> 2; else -> 3 }
-                m[k] = lv to a.getString(1)
+                into[k] = lv to a.getString(1)
+                added += k
             }
+        }
+        return added
+    }
+
+    fun get(c: Context): Map<String, Pair<Int, String>> = map ?: synchronized(this) {
+        map ?: HashMap<String, Pair<Int, String>>(5000).let { m ->
+            read(c, "uad.json", m, false)
+            byClaude = read(c, "extra.json", m, true)
             m as Map<String, Pair<Int, String>>
-        }.getOrDefault(emptyMap()).also { map = it }
+        }.also { map = it }
     }
 
     val NAMES = listOf("추천", "고급", "전문가", "위험")
@@ -134,6 +148,8 @@ data class AppRow(
     val pkg: String, val label: String, val system: Boolean, val enabled: Boolean,
     /** 0 추천, 1 고급, 2 전문가, 3 위험, null = not in the list. */
     val level: Int? = null, val desc: String? = null,
+    /** Rating/description written by Claude (not in UAD). */
+    val byClaude: Boolean = false,
 ) {
     /** Knox / payment / secure folder: Samsung Pay, Wallet, Pass and Secure Folder need these. */
     val payment get() = listOf("knox", "spay", "samsungpass", "wallet", "securefolder", "authfw", "skms", "biometric")
@@ -181,6 +197,7 @@ object Apps {
             AppRow(
                 level = u?.first,
                 desc = u?.second,
+                byClaude = ai.packageName in Uad.byClaude,
                 pkg = ai.packageName,
                 label = runCatching { ai.loadLabel(pm).toString() }.getOrDefault(ai.packageName),
                 system = ai.flags and ApplicationInfo.FLAG_SYSTEM != 0,

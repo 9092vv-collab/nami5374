@@ -12,8 +12,8 @@ android {
         applicationId = "space.nami.tweaks"
         minSdk = 33
         targetSdk = 36
-        versionCode = 6
-        versionName = "0.3.2"
+        versionCode = 7
+        versionName = "0.3.3"
     }
 
     // Signed in CI (.github/workflows/build-tweaks.yml) with the Nami key.
