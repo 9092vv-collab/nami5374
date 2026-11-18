@@ -275,6 +275,8 @@ private fun SearchScreen(
     val focusManager = LocalFocusManager.current
     val keyboard = LocalSoftwareKeyboardController.current
     val opacity = (100 - transparency) / 100f
+    var barTransparency by remember { mutableIntStateOf(Look.prefs(ctx).getInt("barTransparency", 0)) }
+    val barAlpha = (100 - barTransparency) / 100f
     val swallow = remember { MutableInteractionSource() }
     val imeUp = WindowInsets.isImeVisible
 
@@ -306,9 +308,9 @@ private fun SearchScreen(
                     .widthIn(max = 640.dp)
                     .fillMaxWidth()
                     .height(56.dp)
-                    .shadow(10.dp, CircleShape)
+                    .shadow(10.dp * barAlpha, CircleShape)
                     .clip(CircleShape)
-                    .background(Color.White)
+                    .background(Color.White.copy(alpha = barAlpha))
                     // swallow taps so tapping the bar itself doesn't close the window
                     .clickable(interactionSource = swallow, indication = null) {
                         onSettings(false); focus.requestFocus(); keyboard?.show()
@@ -366,13 +368,26 @@ private fun SearchScreen(
                     Text("배경", color = Gray, fontSize = 13.sp)
                     Spacer(Modifier.height(10.dp))
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("투명도", color = Ink, fontSize = 16.sp, modifier = Modifier.weight(1f))
+                        Text("배경 투명도", color = Ink, fontSize = 16.sp, modifier = Modifier.weight(1f))
                         Text("$transparency%", color = Gray, fontSize = 15.sp)
                     }
                     Slider(
                         value = transparency.toFloat(),
                         onValueChange = { transparency = it.toInt() },
                         onValueChangeFinished = { Look.putTransparency(ctx, transparency) },
+                        valueRange = 0f..100f,
+                        colors = SliderDefaults.colors(
+                            thumbColor = Accent, activeTrackColor = Accent, inactiveTrackColor = Line,
+                        ),
+                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("검색창 투명도", color = Ink, fontSize = 16.sp, modifier = Modifier.weight(1f))
+                        Text("$barTransparency%", color = Gray, fontSize = 15.sp)
+                    }
+                    Slider(
+                        value = barTransparency.toFloat(),
+                        onValueChange = { barTransparency = it.toInt() },
+                        onValueChangeFinished = { Look.prefs(ctx).edit().putInt("barTransparency", barTransparency).apply() },
                         valueRange = 0f..100f,
                         colors = SliderDefaults.colors(
                             thumbColor = Accent, activeTrackColor = Accent, inactiveTrackColor = Line,
