@@ -18,6 +18,9 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
@@ -132,9 +135,10 @@ private fun Screen(tick: Int) {
     var original by remember { mutableStateOf(Anim.original(c)) }
     var screenMode by remember { mutableStateOf<Int?>(null) }
     var apps by remember { mutableStateOf<List<AppRow>?>(null) }
-    var filter by rememberSaveable { mutableIntStateOf(0) } // 0 삼성, 1 전체, 2 꺼 둔 앱
+    var filter by rememberSaveable { mutableIntStateOf(0) } // 0 추천, 1 삼성, 2 전체, 3 꺼 둔 앱
     var query by rememberSaveable { mutableStateOf("") }
     var confirm by remember { mutableStateOf<AppRow?>(null) }
+    var info by remember { mutableStateOf<AppRow?>(null) }
 
     LaunchedEffect(tick) {
         anim = Anim.read(c)
@@ -172,8 +176,9 @@ private fun Screen(tick: Int) {
     val shown = remember(apps, filter, query) {
         apps.orEmpty().filter {
             when (filter) {
-                0 -> it.samsung
-                2 -> !it.enabled
+                0 -> it.level == 0 && !it.essential
+                1 -> it.samsung
+                3 -> !it.enabled
                 else -> true
             } && (query.isBlank() || it.label.contains(query, true) || it.pkg.contains(query, true))
         }
@@ -254,14 +259,14 @@ private fun Screen(tick: Int) {
                 Column(Modifier.padding(top = 8.dp)) {
                     Text("앱 끄기", color = Ink, fontSize = 18.sp, fontWeight = FontWeight.Bold,
                         modifier = Modifier.padding(start = 4.dp))
-                    Text("끈 앱은 안 열리고 알림도 안 와요. 지우는 게 아니라서 언제든 다시 켤 수 있어요. 휴대폰에 꼭 필요한 앱은 끌 수 없게 막아 뒀어요.",
+                    Text("끈 앱은 안 열리고 알림도 안 와요. 지우는 게 아니라서 언제든 다시 켤 수 있어요. 등급은 UAD(Universal Android Debloater) 목록 기준이고, 앱을 누르면 설명이 나와요. 꼭 필요한 앱과 '위험' 등급은 끌 수 없게 막아 뒀어요.",
                         color = Gray, fontSize = 13.sp, lineHeight = 19.sp, modifier = Modifier.padding(start = 4.dp, top = 4.dp))
                     Spacer(Modifier.height(12.dp))
                     SearchBox(query) { query = it }
                     Spacer(Modifier.height(10.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         val off = apps.orEmpty().count { !it.enabled }
-                        listOf("삼성", "전체", "꺼 둔 앱 $off").forEachIndexed { i, t ->
+                        listOf("추천", "삼성", "전체", "꺼 둔 앱 $off").forEachIndexed { i, t ->
                             Choice(t, filter == i, Modifier.weight(1f)) { filter = i }
                         }
                     }
@@ -275,7 +280,7 @@ private fun Screen(tick: Int) {
             }
 
             items(shown, key = { it.pkg }) { row ->
-                AppItem(row, ready) { on -> if (on) setApp(row, true) else confirm = row }
+                AppItem(row, ready, onInfo = { info = row }) { on -> if (on) setApp(row, true) else confirm = row }
             }
         }
     }
@@ -284,16 +289,61 @@ private fun Screen(tick: Int) {
         AlertDialog(
             onDismissRequest = { confirm = null },
             title = { Text("${row.label} 끌까요?") },
-            text = { Text("이 앱이 안 열리고 알림도 안 와요. 여기서 언제든 다시 켤 수 있어요.\n\n${row.pkg}") },
+            text = { Text(warning(row) + "이 앱이 안 열리고 알림도 안 와요. 여기서 언제든 다시 켤 수 있어요.\n\n${row.pkg}") },
             confirmButton = { TextButton(onClick = { confirm = null; setApp(row, false) }) { Text("끄기", color = Accent) } },
             dismissButton = { TextButton(onClick = { confirm = null }) { Text("취소", color = Gray) } },
             containerColor = Color.White,
         )
     }
+
+    info?.let { row ->
+        AlertDialog(
+            onDismissRequest = { info = null },
+            title = { Text(row.label) },
+            text = {
+                Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())) {
+                    Text(row.pkg, color = Gray, fontSize = 13.sp)
+                    Spacer(Modifier.height(10.dp))
+                    val lv = if (row.essential) null else row.level
+                    Text(
+                        when {
+                            row.essential -> "필수 · 휴대폰에 꼭 필요한 앱이라 끌 수 없어요."
+                            lv != null -> Uad.NAMES[lv] + " · " + Uad.MEANING[lv]
+                            else -> "정보 없음 · 목록에 없는 앱이에요. 무슨 앱인지 알 때만 끄세요."
+                        },
+                        color = Ink, fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
+                    )
+                    if (row.payment) {
+                        Spacer(Modifier.height(8.dp))
+                        Text("삼성 페이·월렛·패스, 보안 폴더, 생체 인증 쪽과 관련된 앱이에요. 이런 걸 쓰고 있다면 끄지 마세요.",
+                            color = Color(0xFFC0392B), fontSize = 14.sp, lineHeight = 20.sp)
+                    }
+                    row.desc?.takeIf { it.isNotBlank() }?.let {
+                        Spacer(Modifier.height(10.dp))
+                        Text("목록 설명(영어)", color = Gray, fontSize = 12.sp)
+                        Text(it, color = Ink, fontSize = 13.sp, lineHeight = 19.sp)
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { info = null }) { Text("닫기", color = Accent) } },
+            containerColor = Color.White,
+        )
+    }
+}
+
+private fun warning(row: AppRow): String {
+    val parts = mutableListOf<String>()
+    when (row.level) {
+        1 -> parts += "'고급' 등급이에요. 관련된 기능이 같이 안 될 수 있어요."
+        2 -> parts += "'전문가' 등급이에요. 무슨 앱인지 모르면 끄지 마세요. 다른 기능이 망가질 수 있어요."
+        null -> parts += "목록에 없는 앱이라 꺼도 되는지 몰라요."
+    }
+    if (row.payment) parts += "삼성 페이·월렛·패스, 보안 폴더, 생체 인증을 쓰고 있다면 끄지 마세요."
+    return if (parts.isEmpty()) "" else parts.joinToString("\n") + "\n\n"
 }
 
 @Composable
-private fun AppItem(row: AppRow, ready: Boolean, onToggle: (Boolean) -> Unit) {
+private fun AppItem(row: AppRow, ready: Boolean, onInfo: () -> Unit, onToggle: (Boolean) -> Unit) {
     val c = LocalContext.current
     val icon by produceState<ImageBitmap?>(null, row.pkg) {
         value = withContext(Dispatchers.IO) {
@@ -302,7 +352,8 @@ private fun AppItem(row: AppRow, ready: Boolean, onToggle: (Boolean) -> Unit) {
     }
     Row(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(Color.White)
-            .border(1.dp, Line, RoundedCornerShape(20.dp)).padding(horizontal = 14.dp, vertical = 10.dp),
+            .border(1.dp, Line, RoundedCornerShape(20.dp)).clickable(onClick = onInfo)
+            .padding(horizontal = 14.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(Modifier.size(40.dp)) {
@@ -312,13 +363,24 @@ private fun AppItem(row: AppRow, ready: Boolean, onToggle: (Boolean) -> Unit) {
         Column(Modifier.weight(1f)) {
             Text(row.label, color = if (row.enabled) Ink else Gray, fontSize = 15.sp, fontWeight = FontWeight.Medium,
                 maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(row.pkg + if (row.essential) " · 필수" else "", color = Gray, fontSize = 12.sp,
-                maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                val (tag, color) = when {
+                    row.essential -> "필수" to Gray
+                    row.level != null -> Uad.NAMES[row.level] to Color(Uad.COLORS[row.level])
+                    else -> null to Gray
+                }
+                if (tag != null) {
+                    Text(tag, color = color, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                    if (row.payment) Text(" · 결제·보안", color = Color(0xFFC0392B), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                    Text(" · ", color = Gray, fontSize = 12.sp)
+                } else if (row.payment) Text("결제·보안 · ", color = Color(0xFFC0392B), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                Text(row.pkg, color = Gray, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
         }
         Switch(
             checked = row.enabled,
             onCheckedChange = onToggle,
-            enabled = ready && !(row.essential && row.enabled),
+            enabled = ready && !(row.locked && row.enabled),
             colors = SwitchDefaults.colors(checkedTrackColor = Accent),
         )
     }

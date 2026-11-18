@@ -99,7 +99,47 @@ object ScreenMode {
     fun set(v: Int): String? = Sh.run("settings", "put", "system", "screen_mode_setting", v.toString())
 }
 
-data class AppRow(val pkg: String, val label: String, val system: Boolean, val enabled: Boolean) {
+/**
+ * Safe-to-disable ratings from Universal Android Debloater Next Generation (GPL-3.0,
+ * github.com/Universal-Debloater-Alliance/universal-android-debloater-next-generation),
+ * Samsung/Google/AOSP part only, bundled as assets/uad.json: pkg -> [R|A|E|U, description].
+ */
+object Uad {
+    @Volatile private var map: Map<String, Pair<Int, String>>? = null
+
+    fun get(c: Context): Map<String, Pair<Int, String>> = map ?: synchronized(this) {
+        map ?: runCatching {
+            val o = org.json.JSONObject(c.assets.open("uad.json").bufferedReader().readText())
+            val m = HashMap<String, Pair<Int, String>>(o.length() * 2)
+            o.keys().forEach { k ->
+                val a = o.getJSONArray(k)
+                val lv = when (a.getString(0)) { "R" -> 0; "A" -> 1; "E" -> 2; else -> 3 }
+                m[k] = lv to a.getString(1)
+            }
+            m as Map<String, Pair<Int, String>>
+        }.getOrDefault(emptyMap()).also { map = it }
+    }
+
+    val NAMES = listOf("추천", "고급", "전문가", "위험")
+    val COLORS = listOf(0xFF2F8F5BL, 0xFFB7791FL, 0xFFD97757L, 0xFFC0392BL)
+    val MEANING = listOf(
+        "안 쓰는 기능이라면 꺼도 대부분 문제없어요.",
+        "꺼도 되지만, 관련된 기능이 같이 안 될 수 있어요.",
+        "무슨 앱인지 알 때만 끄세요. 다른 기능이 망가질 수 있어요.",
+        "끄면 폰이 제대로 안 돌아갈 수 있어서 막아 뒀어요.",
+    )
+}
+
+data class AppRow(
+    val pkg: String, val label: String, val system: Boolean, val enabled: Boolean,
+    /** 0 추천, 1 고급, 2 전문가, 3 위험, null = not in the list. */
+    val level: Int? = null, val desc: String? = null,
+) {
+    /** Knox / payment / secure folder: Samsung Pay, Wallet, Pass and Secure Folder need these. */
+    val payment get() = listOf("knox", "spay", "samsungpass", "wallet", "securefolder", "authfw", "skms", "biometric")
+        .any { pkg.contains(it, true) }
+    /** Can't be switched off here. */
+    val locked get() = essential || level == 3
     val samsung get() = pkg.startsWith("com.samsung.") || pkg.startsWith("com.sec.") || pkg.startsWith("com.samsung")
     /** Turning these off can leave the phone unusable (no home screen, no keyboard, can't install, ...). */
     val essential get() = pkg in ESSENTIAL || ESSENTIAL_PREFIX.any { pkg.startsWith(it) }
@@ -135,8 +175,12 @@ object Apps {
         val pm = c.packageManager
         val flags = PackageManager.MATCH_DISABLED_COMPONENTS.toLong() or
             PackageManager.MATCH_DISABLED_UNTIL_USED_COMPONENTS.toLong()
+        val uad = Uad.get(c)
         return pm.getInstalledApplications(PackageManager.ApplicationInfoFlags.of(flags)).map { ai ->
+            val u = uad[ai.packageName]
             AppRow(
+                level = u?.first,
+                desc = u?.second,
                 pkg = ai.packageName,
                 label = runCatching { ai.loadLabel(pm).toString() }.getOrDefault(ai.packageName),
                 system = ai.flags and ApplicationInfo.FLAG_SYSTEM != 0,
