@@ -152,7 +152,7 @@ data class AppRow(
     val byClaude: Boolean = false,
 ) {
     /** Knox / payment / secure folder: Samsung Pay, Wallet, Pass and Secure Folder need these. */
-    val payment get() = listOf("knox", "spay", "samsungpass", "wallet", "securefolder", "authfw", "skms", "biometric")
+    val payment get() = listOf("knox", "spay", "samsungpass", "wallet", "securefolder", "authfw", "skms", "biometric", "android.ese", "ssiframework", "skpm")
         .any { pkg.contains(it, true) }
     /** Can't be switched off here. */
     val locked get() = essential || level == 3
