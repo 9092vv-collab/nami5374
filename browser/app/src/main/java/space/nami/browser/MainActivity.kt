@@ -33,14 +33,14 @@ class MainActivity : ComponentActivity(), Host {
         browser = Browser(this, prefs, lifecycleScope, this)
         handleOpenFile(intent)
         val incoming = urlFrom(intent)
-        if (!browser.restore(incoming)) browser.newTab(incoming ?: prefs.homeUrl)
+        if (!browser.restore(incoming)) browser.newTab(incoming ?: prefs.homeUrl).fromLink = incoming != null
         setContent { NamiApp(browser, prefs, this) }
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         if (handleOpenFile(intent)) return
-        urlFrom(intent)?.let { browser.newTab(it); browser.toolbarVisible = false }
+        urlFrom(intent)?.let { browser.newTab(it).fromLink = true; browser.toolbarVisible = false }
     }
 
     private fun urlFrom(i: Intent?): String? = when (i?.action) {

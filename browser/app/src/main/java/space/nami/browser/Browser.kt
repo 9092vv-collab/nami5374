@@ -53,6 +53,8 @@ class BrowserTab(val id: Long, val web: WebView, val frame: PullFrame) {
     var url by mutableStateOf("")
     /** Restored tab not loaded yet: loads when first shown (startup stays light). */
     var pending: String? = null
+    /** Opened by a link from another app (Nami 파인더 etc.): back with no history closes it and leaves Nami. */
+    var fromLink = false
     var progress by mutableIntStateOf(100)
     var canBack by mutableStateOf(false)
     var canForward by mutableStateOf(false)
@@ -420,6 +422,12 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
         return t
     }
 
+    /** Back with nothing left on a tab another app opened: close it and go back where the user came from. */
+    fun closeLinkTab(act: Activity) {
+        closeTab(current)
+        act.moveTaskToBack(true)
+    }
+
     fun closeTab(i: Int) {
         val t = tabs.getOrNull(i) ?: return
         tabs.removeAt(i)
@@ -460,7 +468,7 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
         val (urls, idx) = prefs.loadTabs()
         if (urls.isEmpty()) return false
         urls.forEach { u -> newTab(null, select = false, append = true).also { it.pending = u; it.url = u } }
-        if (open != null) { current = idx.coerceIn(0, tabs.size - 1); newTab(open) }
+        if (open != null) { current = idx.coerceIn(0, tabs.size - 1); newTab(open).fromLink = true }
         else select(idx.coerceIn(0, tabs.size - 1))
         val restored = tabs.toList()
         val dir = thumbDir
