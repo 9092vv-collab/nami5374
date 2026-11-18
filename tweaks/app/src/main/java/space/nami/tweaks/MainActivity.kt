@@ -198,8 +198,8 @@ private fun Screen(tick: Int) {
                         color = Gray, fontSize = 13.sp)
                     Spacer(Modifier.height(12.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        listOf(0f, 0.5f, 0.75f, 1f).forEach { v ->
-                            Choice(scaleText(v) + if (v == 1f) "(기본)" else "", same && anim[0] == v,
+                        listOf(0f, 0.25f, 0.5f, 0.75f, 1f).forEach { v ->
+                            Choice(scaleText(v), same && anim[0] == v,
                                 Modifier.weight(1f), enabled = ready) { setAnim(v) }
                         }
                     }
