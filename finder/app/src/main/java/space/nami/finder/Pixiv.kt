@@ -27,6 +27,8 @@ object Pixiv {
     fun r18(c: Context) = Look.prefs(c).getBoolean("pixivR18", false)
     fun top(c: Context) = Look.prefs(c).getInt("pixivTop", 100).coerceIn(1, 500)
     fun tags(c: Context) = Look.prefs(c).getString("pixivTags", "") ?: ""
+    /** true = the light version (regular, long side 1200px) instead of the original file. */
+    fun light(c: Context) = Look.prefs(c).getBoolean("pixivLight", false)
 
     /** The WebView's own pixiv cookies (login page). Main thread only. */
     fun webCookie(): String = runCatching { CookieManager.getInstance().getCookie("https://www.pixiv.net") }.getOrNull() ?: ""
@@ -47,11 +49,14 @@ object Pixiv {
             // bookmarks hold both ages; respect the 전체 연령 / R-18 choice
             if (mode(c) == "bookmark" && !r18(c) && body.optInt("xRestrict") > 0) { lastErr = Msg("전체 연령 북마크를 못 찾았어요"); return@repeat }
             val urls = body.getJSONObject("urls")
-            val first = urls.optString("original").ifEmpty { urls.getString("regular") }
+            val lite = light(c)
+            fun pickUrl(u: JSONObject) = if (lite) u.optString("regular").ifEmpty { u.getString("original") }
+                else u.optString("original").ifEmpty { u.getString("regular") }
+            val first = pickUrl(urls)
             var pages = listOf(first)
             if (body.optInt("pageCount", 1) > 1) runCatching {
                 val arr = json("https://www.pixiv.net/ajax/illust/$id/pages", cookie).getJSONArray("body")
-                pages = (0 until arr.length()).map { arr.getJSONObject(it).getJSONObject("urls").let { u -> u.optString("original").ifEmpty { u.getString("regular") } } }
+                pages = (0 until arr.length()).map { arr.getJSONObject(it).getJSONObject("urls").let { u -> pickUrl(u) } }
             }
             val bytes = runCatching { image(first) }.getOrElse { image(urls.getString("regular")) }
             return Picked(bytes, "https://www.pixiv.net/artworks/$id", pages)

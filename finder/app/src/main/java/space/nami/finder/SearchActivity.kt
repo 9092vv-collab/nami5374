@@ -338,6 +338,7 @@ private fun SearchScreen(
     var pMode by remember { mutableStateOf(Pixiv.mode(ctx)) }
     var pPeriod by remember { mutableStateOf(Pixiv.period(ctx)) }
     var pR18 by remember { mutableStateOf(Pixiv.r18(ctx)) }
+    var pLight by remember { mutableStateOf(Pixiv.light(ctx)) }
     var pTop by remember { mutableStateOf(Pixiv.top(ctx).toString()) }
     var pTags by remember { mutableStateOf(Pixiv.tags(ctx)) }
     val bg by produceState(Look.cachedBg(ctx), bgVersion) { value = withContext(Dispatchers.IO) { Look.loadBg(ctx) } }
@@ -560,6 +561,14 @@ private fun SearchScreen(
                             Seg("전체 연령", !pR18) { if (pR18) { pR18 = false; put("pixivR18", false); onBooruChanged() } }
                             Seg("R-18", pR18) { if (!pR18) { pR18 = true; put("pixivR18", true); onBooruChanged() } }
                         }
+                        Spacer(Modifier.height(8.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Seg("원본", !pLight) { if (pLight) { pLight = false; put("pixivLight", false); onBooruChanged() } }
+                            Seg("가볍게", pLight) { if (!pLight) { pLight = true; put("pixivLight", true); onBooruChanged() } }
+                        }
+                        Text(if (pLight) "긴 변 1200px로 받아요. 빠르지만 펼친 화면에선 조금 흐려요."
+                            else "원본 그대로 받아요. 선명하지만 큰 그림은 오래 걸려요.",
+                            color = Gray, fontSize = 13.sp, lineHeight = 18.sp)
                         Spacer(Modifier.height(8.dp))
                         if (accounts.isEmpty()) {
                             Pill("픽시브 로그인", AccentSoft, Accent, onPixivLogin)
