@@ -58,7 +58,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
@@ -284,12 +286,18 @@ private fun SearchScreen(
     Box(
         Modifier
             .fillMaxSize()
-            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {
-                // keyboard up → just put it away; otherwise close settings, then the window
-                when {
-                    imeUp -> { keyboard?.hide(); focusManager.clearFocus() }
-                    settingsOpen -> onSettings(false)
-                    else -> onClose()
+            .pointerInput(source, settingsOpen, imeUp) {
+                val net = source == "booru" || source == "pixiv"
+                detectTapGestures(
+                    // double tap on empty space = next picture (only for Danbooru/pixiv, so other taps aren't delayed)
+                    onDoubleTap = if (net) { _ -> onBooruNext() } else null,
+                ) {
+                    // keyboard up → just put it away; otherwise close settings, then the window
+                    when {
+                        imeUp -> { keyboard?.hide(); focusManager.clearFocus() }
+                        settingsOpen -> onSettings(false)
+                        else -> onClose()
+                    }
                 }
             },
     ) {
@@ -496,7 +504,7 @@ private fun SearchScreen(
                             Text(booruStatus, color = Gray, fontSize = 13.sp)
                         }
                         Spacer(Modifier.height(4.dp))
-                        Text("태그·숫자는 키보드의 완료를 눌러야 적용돼요. 시간이 지나면 다음에 열 때 바뀌어요.",
+                        Text("태그·숫자는 키보드의 완료를 눌러야 적용돼요. 시간이 지나면 다음에 열 때 바뀌고, 빈 곳을 두 번 누르면 바로 바뀌어요.",
                             color = Gray, fontSize = 12.sp, lineHeight = 17.sp)
                     }
                 }

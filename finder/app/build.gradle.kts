@@ -12,8 +12,8 @@ android {
         applicationId = "space.nami.finder"
         minSdk = 31
         targetSdk = 36
-        versionCode = 11
-        versionName = "0.4.4"
+        versionCode = 12
+        versionName = "0.4.5"
     }
 
     // Signed in CI (.github/workflows/build-finder.yml) with the Nami key.
