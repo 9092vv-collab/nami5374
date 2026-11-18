@@ -397,6 +397,8 @@ private fun SearchScreen(
                 detectTapGestures(
                     // double tap on empty space = next picture (only for Danbooru/pixiv, so other taps aren't delayed)
                     onDoubleTap = if (net) { _ -> onBooruNext() } else null,
+                    // long press on empty space = open this picture's page (pixiv work / Danbooru post) in Nami
+                    onLongPress = if (net) { _ -> onOpenPost() } else null,
                 ) {
                     // keyboard up → just put it away; otherwise close settings, then the window
                     when {
