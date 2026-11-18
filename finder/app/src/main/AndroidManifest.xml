@@ -11,6 +11,7 @@
             android:name=".SearchActivity"
             android:exported="true"
             android:excludeFromRecents="true"
+            android:enableOnBackInvokedCallback="true"
             android:taskAffinity=""
             android:launchMode="singleTask"
             android:windowSoftInputMode="stateAlwaysVisible|adjustResize"

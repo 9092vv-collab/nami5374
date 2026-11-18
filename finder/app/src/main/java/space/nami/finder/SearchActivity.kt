@@ -3,7 +3,9 @@ package space.nami.finder
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.window.OnBackInvokedDispatcher
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -58,6 +60,11 @@ class SearchActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent { SearchBar(onGo = ::go, onClose = ::finish) }
+        // Back closes the window in one press, even while the keyboard is up.
+        // PRIORITY_OVERLAY runs before the keyboard's own "hide" back handler.
+        if (Build.VERSION.SDK_INT >= 33) {
+            onBackInvokedDispatcher.registerOnBackInvokedCallback(OnBackInvokedDispatcher.PRIORITY_OVERLAY) { finish() }
+        }
     }
 
     // Leaving the window (home button, another app) closes it, so the next tap starts empty.
