@@ -19,6 +19,17 @@ object Sh {
         ).apply { isAccessible = true }
     }
 
+    /** Output of a command, or null. Blocking: call off the main thread. */
+    fun out(vararg cmd: String): String? {
+        if (!ready()) return null
+        return runCatching {
+            val p = newProcess.invoke(null, arrayOf(*cmd), null, null) as Process
+            val o = p.inputStream.bufferedReader().readText()
+            p.waitFor()
+            if (p.exitValue() == 0) o.trim() else null
+        }.getOrNull()
+    }
+
     /** null = worked, otherwise a short reason. Blocking: call off the main thread. */
     fun run(vararg cmd: String): String? {
         if (!ready()) return "Shizuku가 연결되어 있지 않아요"
@@ -76,6 +87,16 @@ object Anim {
         }
         return null
     }
+}
+
+/** Samsung screen mode (system screen_mode_setting): 0 AMOLED cinema, 1 AMOLED photo, 2 basic, 3 natural, 4 vivid. */
+object ScreenMode {
+    val MODES = listOf(4 to "선명하게", 3 to "자연스럽게", 0 to "AMOLED 시네마", 1 to "AMOLED 사진", 2 to "기본")
+
+    /** Read through the shell: apps can't read Samsung's own settings keys directly. */
+    fun read(): Int? = Sh.out("settings", "get", "system", "screen_mode_setting")?.toIntOrNull()
+
+    fun set(v: Int): String? = Sh.run("settings", "put", "system", "screen_mode_setting", v.toString())
 }
 
 data class AppRow(val pkg: String, val label: String, val system: Boolean, val enabled: Boolean) {

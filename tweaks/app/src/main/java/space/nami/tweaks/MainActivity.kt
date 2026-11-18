@@ -130,6 +130,7 @@ private fun Screen(tick: Int) {
     val ready = remember(tick) { Sh.ready() }
     var anim by remember { mutableStateOf(Anim.read(c)) }
     var original by remember { mutableStateOf(Anim.original(c)) }
+    var screenMode by remember { mutableStateOf<Int?>(null) }
     var apps by remember { mutableStateOf<List<AppRow>?>(null) }
     var filter by rememberSaveable { mutableIntStateOf(0) } // 0 삼성, 1 전체, 2 꺼 둔 앱
     var query by rememberSaveable { mutableStateOf("") }
@@ -138,6 +139,7 @@ private fun Screen(tick: Int) {
     LaunchedEffect(tick) {
         anim = Anim.read(c)
         original = Anim.original(c)
+        screenMode = withContext(Dispatchers.IO) { ScreenMode.read() }
         apps = withContext(Dispatchers.IO) { Apps.load(c) }
     }
 
@@ -155,6 +157,14 @@ private fun Screen(tick: Int) {
             val err = withContext(Dispatchers.IO) { if (v == null) Anim.restore(c) else Anim.set(c, v) }
             anim = Anim.read(c)
             original = Anim.original(c)
+            if (err != null) toast(c, err, "")
+        }
+    }
+
+    fun setScreen(v: Int) {
+        scope.launch {
+            val err = withContext(Dispatchers.IO) { ScreenMode.set(v) }
+            screenMode = withContext(Dispatchers.IO) { ScreenMode.read() }
             if (err != null) toast(c, err, "")
         }
     }
@@ -212,6 +222,31 @@ private fun Screen(tick: Int) {
                     }
                     Spacer(Modifier.height(6.dp))
                     Text("작을수록 화면 전환이 빨라져요. '끔'은 애니메이션이 아예 없어져요.", color = Gray, fontSize = 13.sp)
+                }
+            }
+
+            item {
+                Card {
+                    Text("화면 모드", color = Ink, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                    Text("지금 " + (ScreenMode.MODES.firstOrNull { it.first == screenMode }?.second ?: "알 수 없음"),
+                        color = Gray, fontSize = 13.sp)
+                    Spacer(Modifier.height(12.dp))
+                    ScreenMode.MODES.chunked(2).forEach { pair ->
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            pair.forEach { (v, name) ->
+                                Choice(name, screenMode == v, Modifier.weight(1f), enabled = ready) { setScreen(v) }
+                            }
+                            if (pair.size == 1) Spacer(Modifier.weight(1f))
+                        }
+                        Spacer(Modifier.height(8.dp))
+                    }
+                    Text("바로 안 바뀌면 설정 › 디스플레이 › 화면 모드에 들어갔다 나오면 적용돼요. 아래 버튼으로 바로 갈 수 있어요.",
+                        color = Gray, fontSize = 13.sp, lineHeight = 19.sp)
+                    Spacer(Modifier.height(8.dp))
+                    Text("디스플레이 설정 열기", color = Accent, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.clip(RoundedCornerShape(50)).clickable {
+                            runCatching { c.startActivity(android.content.Intent(android.provider.Settings.ACTION_DISPLAY_SETTINGS)) }
+                        }.padding(horizontal = 4.dp, vertical = 6.dp))
                 }
             }
 
