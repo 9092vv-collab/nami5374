@@ -51,12 +51,38 @@ object Pixiv {
         val mode = if (r18) "${p}_r18" else p
         val rank = (1..top(c)).random()
         val page = (rank - 1) / 50 + 1
-        val o = json("https://www.pixiv.net/ranking.php?mode=$mode&content=illust&format=json&p=$page", cookie)
-        val list = o.optJSONArray("contents") ?: throw Msg(if (r18) "R-18 랭킹을 못 봤어요 (픽시브 설정에서 R-18 보기를 켰는지 확인)" else "랭킹을 못 받았어요")
-        val items = (0 until list.length()).map { list.getJSONObject(it) }.filter { it.optString("illust_type") != "2" }
-        if (items.isEmpty()) throw Msg("랭킹이 비어 있어요")
-        val want = items.firstOrNull { it.optInt("rank") == rank } ?: items.random()
-        return want.get("illust_id").toString()
+        val ids = rankingIds(mode, page, cookie)
+        if (ids.isEmpty()) throw Msg(if (r18) "R-18 랭킹을 못 읽었어요 (픽시브 설정에서 R-18 보기를 켰는지 확인)" else "랭킹을 못 읽었어요")
+        return ids.getOrNull((rank - 1) % 50) ?: ids.random()
+    }
+
+    /** Ids of one ranking page, in rank order. Tries the JSON form, the page's own HTML, then the mobile site's API. */
+    private fun rankingIds(mode: String, page: Int, cookie: String): List<String> {
+        val raw = runCatching {
+            String(get("https://www.pixiv.net/ranking.php?mode=$mode&content=illust&format=json&p=$page", cookie))
+        }.getOrDefault("")
+        if (raw.trimStart().startsWith("{")) {
+            runCatching {
+                val list = JSONObject(raw).getJSONArray("contents")
+                val ids = (0 until list.length()).map { list.getJSONObject(it) }
+                    .filter { it.optString("illust_type") != "2" }
+                    .map { it.get("illust_id").toString() }
+                if (ids.isNotEmpty()) return ids
+            }
+        }
+        // HTML ranking page: items carry data-id / artworks links
+        val html = raw.ifEmpty {
+            runCatching { String(get("https://www.pixiv.net/ranking.php?mode=$mode&content=illust&p=$page", cookie)) }.getOrDefault("")
+        }
+        val fromHtml = Regex("""data-id="(\d+)"|/artworks/(\d+)|"illustId":"?(\d+)""").findAll(html)
+            .map { m -> m.groupValues.drop(1).first { it.isNotEmpty() } }.distinct().toList()
+        if (fromHtml.size >= 10) return fromHtml
+        // mobile site API
+        return runCatching {
+            val o = json("https://www.pixiv.net/touch/ajax/ranking/illust?mode=$mode&type=illust&page=$page", cookie)
+            val arr = o.getJSONObject("body").getJSONArray("ranking")
+            (0 until arr.length()).map { arr.getJSONObject(it).get("illustId").toString() }
+        }.getOrDefault(emptyList())
     }
 
     private fun fromTag(c: Context, cookie: String): String {
@@ -75,7 +101,14 @@ object Pixiv {
         return items.random().get("id").toString()
     }
 
-    private fun json(url: String, cookie: String) = JSONObject(String(get(url, cookie)))
+    private fun json(url: String, cookie: String): JSONObject {
+        val t = String(get(url, cookie))
+        if (!t.trimStart().startsWith("{")) {
+            val title = Regex("<title>(.*?)</title>", RegexOption.DOT_MATCHES_ALL).find(t)?.groupValues?.get(1)?.trim()?.take(40)
+            throw Msg("픽시브가 데이터 대신 웹페이지를 줬어요" + (title?.let { " ($it)" } ?: ""))
+        }
+        return JSONObject(t)
+    }
 
     private fun get(url: String, cookie: String): ByteArray {
         val conn = URL(url).openConnection() as HttpURLConnection
