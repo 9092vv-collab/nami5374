@@ -17,6 +17,8 @@ import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -350,13 +352,15 @@ private fun SearchScreen(
             if (settingsOpen) {
                 Column(
                     Modifier
-                        .padding(start = 16.dp, end = 16.dp, top = 12.dp)
+                        .padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 16.dp)
                         .widthIn(max = 640.dp)
                         .fillMaxWidth()
+                        .weight(1f, fill = false)   // never taller than the space left; scrolls inside
                         .shadow(10.dp, RoundedCornerShape(24.dp))
                         .clip(RoundedCornerShape(24.dp))
                         .background(Color.White)
                         .clickable(interactionSource = swallow, indication = null) {}
+                        .verticalScroll(rememberScrollState())
                         .padding(horizontal = 20.dp, vertical = 16.dp),
                 ) {
                     Text("배경", color = Gray, fontSize = 13.sp)
