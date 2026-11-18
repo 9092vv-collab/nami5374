@@ -55,6 +55,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.FocusRequester
@@ -294,7 +295,9 @@ private fun SearchScreen(
     ) {
         val img = bg
         if (img != null) {
-            Image(img, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop, alpha = opacity)
+            // whole picture, never cropped; the empty sides are the same picture, blurred and filled
+            Image(img, null, Modifier.fillMaxSize().blur(36.dp), contentScale = ContentScale.Crop, alpha = opacity)
+            Image(img, null, Modifier.fillMaxSize(), contentScale = ContentScale.Fit, alpha = opacity)
         } else {
             Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = opacity)))
         }
