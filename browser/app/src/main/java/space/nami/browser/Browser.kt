@@ -51,6 +51,8 @@ class BrowserTab(val id: Long, val web: WebView, val frame: PullFrame) {
     @Volatile var batchBroken = false
     var title by mutableStateOf("")
     var url by mutableStateOf("")
+    /** Restored tab not loaded yet: loads when first shown (startup stays light). */
+    var pending: String? = null
     var progress by mutableIntStateOf(100)
     var canBack by mutableStateOf(false)
     var canForward by mutableStateOf(false)
@@ -287,6 +289,7 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
         container.removeAllViews()
         (t.frame.parent as? ViewGroup)?.removeView(t.frame)
         container.addView(t.frame, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
+        t.pending?.let { u -> t.pending = null; load(t, u) }
         tabs.forEach { if (it === t || it.relays > 0) it.web.onResume() else it.web.onPause() }
     }
 
@@ -449,11 +452,16 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
         }
     }
 
-    fun restore(): Boolean {
+    /**
+     * Brings saved tabs back without loading them (each loads when first shown).
+     * [open] = a link Nami was started with: it opens right after the saved current tab and is the only page loading.
+     */
+    fun restore(open: String? = null): Boolean {
         val (urls, idx) = prefs.loadTabs()
         if (urls.isEmpty()) return false
-        urls.forEach { newTab(it, select = false, append = true) }
-        select(idx.coerceIn(0, tabs.size - 1))
+        urls.forEach { u -> newTab(null, select = false, append = true).also { it.pending = u; it.url = u } }
+        if (open != null) { current = idx.coerceIn(0, tabs.size - 1); newTab(open) }
+        else select(idx.coerceIn(0, tabs.size - 1))
         val restored = tabs.toList()
         val dir = thumbDir
         scope.launch {
@@ -683,7 +691,7 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
 
     @SuppressLint("SetJavaScriptEnabled")
     private fun createTab(): BrowserTab {
-        val web = KeepWebView(act)
+        val web = Prewarm.take(act) ?: KeepWebView(act)
         val frame = PullFrame(act, web,
             threshold = { prefs.pullStrength.dp * density },
             onPull = { if (prefs.pullAction != Action.NONE && tab?.web === web) pull = it },
@@ -1004,5 +1012,41 @@ class KeepWebView(ctx: android.content.Context) : WebView(ctx) {
     override fun onWindowVisibilityChanged(visibility: Int) {
         real = visibility
         super.onWindowVisibilityChanged(if (awake) View.VISIBLE else visibility)
+    }
+}
+
+/**
+ * Nami 파인더 opened its search window → get Nami ready in the background: the process starts, Chromium loads,
+ * and one WebView waits. The next new tab takes it (moved onto the activity). Search window closed without
+ * searching → the waiting WebView is thrown away.
+ */
+object Prewarm {
+    private var web: KeepWebView? = null
+    private var wrap: android.content.MutableContextWrapper? = null
+
+    fun warm(c: android.content.Context) {
+        if (web != null) return
+        runCatching {
+            val w = android.content.MutableContextWrapper(c.applicationContext)
+            web = KeepWebView(w); wrap = w
+        }
+    }
+
+    fun drop() { web?.destroy(); web = null; wrap = null }
+
+    fun take(act: Activity): KeepWebView? {
+        val w = web ?: return null
+        wrap?.baseContext = act
+        web = null; wrap = null
+        return w
+    }
+}
+
+class PrewarmReceiver : android.content.BroadcastReceiver() {
+    override fun onReceive(c: android.content.Context, i: android.content.Intent) {
+        when (i.action) {
+            "space.nami.browser.PREWARM" -> Prewarm.warm(c)
+            "space.nami.browser.PREWARM_DROP" -> Prewarm.drop()
+        }
     }
 }

@@ -255,6 +255,7 @@ class SearchActivity : ComponentActivity() {
                 onOpenPost = { Booru.curUrl(this).takeIf { it.isNotEmpty() }?.let { go(it) } },
             )
         }
+        prewarm(true)
         Accounts.migrate(this)
         refreshAccounts()
         booruTick(false)
@@ -279,8 +280,21 @@ class SearchActivity : ComponentActivity() {
         if (activeUid != before) { Booru.dropNext(this); booruTick(true) }
     }
 
+    /** Tell Nami to get ready (process + Chromium + one waiting tab) or to throw the waiting tab away. */
+    private var searched = false
+    private fun prewarm(on: Boolean) = runCatching {
+        sendBroadcast(Intent(if (on) "space.nami.browser.PREWARM" else "space.nami.browser.PREWARM_DROP")
+            .setClassName(NAMI, "$NAMI.PrewarmReceiver"))
+    }
+
+    override fun onDestroy() {
+        if (!searched && isFinishing) prewarm(false)
+        super.onDestroy()
+    }
+
     private fun go(input: String) {
         val url = toUrl(input) ?: return
+        searched = true
         val uri = Uri.parse(url)
         val view = Intent(Intent.ACTION_VIEW, uri)
             .addCategory(Intent.CATEGORY_BROWSABLE)

@@ -33,8 +33,7 @@ class MainActivity : ComponentActivity(), Host {
         browser = Browser(this, prefs, lifecycleScope, this)
         handleOpenFile(intent)
         val incoming = urlFrom(intent)
-        if (!browser.restore()) browser.newTab(incoming ?: prefs.homeUrl)
-        else if (incoming != null) browser.newTab(incoming)
+        if (!browser.restore(incoming)) browser.newTab(incoming ?: prefs.homeUrl)
         setContent { NamiApp(browser, prefs, this) }
     }
 
