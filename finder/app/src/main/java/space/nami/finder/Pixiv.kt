@@ -28,10 +28,10 @@ object Pixiv {
     fun top(c: Context) = Look.prefs(c).getInt("pixivTop", 100).coerceIn(1, 500)
     fun tags(c: Context) = Look.prefs(c).getString("pixivTags", "") ?: ""
 
-    /** Main thread only. */
-    fun cookie(): String = runCatching { CookieManager.getInstance().getCookie("https://www.pixiv.net") }.getOrNull() ?: ""
-    fun loggedIn(cookie: String = cookie()) = Regex("PHPSESSID=\\d+_").containsMatchIn(cookie)
-    fun logout() = runCatching { CookieManager.getInstance().removeAllCookies(null); CookieManager.getInstance().flush() }
+    /** The WebView's own pixiv cookies (login page). Main thread only. */
+    fun webCookie(): String = runCatching { CookieManager.getInstance().getCookie("https://www.pixiv.net") }.getOrNull() ?: ""
+    fun loggedIn(cookie: String) = Regex("PHPSESSID=\\d+_").containsMatchIn(cookie)
+    fun uidOf(cookie: String) = Regex("PHPSESSID=(\\d+)_").find(cookie)?.groupValues?.get(1)
 
     /** Picks a work and downloads its image bytes. Returns (bytes, page url) or throws with a Korean message. */
     class Picked(val bytes: ByteArray, val page: String, val pages: List<String>)
@@ -60,7 +60,7 @@ object Pixiv {
     }
 
     /** Image files on i.pximg.net only need the Referer. */
-    fun image(url: String): ByteArray = get(url, "")
+    fun image(url: String, cookie: String = ""): ByteArray = get(url, cookie)
 
     /** Random work from the logged-in user's bookmarks (public + private). */
     private fun fromBookmarks(c: Context, cookie: String): String {
@@ -162,7 +162,64 @@ object Pixiv {
     class Msg(m: String) : Exception(m)
 }
 
-/** pixiv login page in a WebView; closes itself once logged in. */
+/**
+ * Several pixiv accounts: each login's cookie is kept in this app's private prefs (never leaves the phone),
+ * one is active. Requests use the active account's cookie, so switching is instant.
+ */
+object Accounts {
+    class Acc(val uid: String, val name: String, val cookie: String)
+
+    private fun p(c: Context) = Look.prefs(c)
+
+    fun list(c: Context): List<Acc> = runCatching {
+        val a = JSONArray(p(c).getString("pixivAccounts", "[]"))
+        (0 until a.length()).map { a.getJSONObject(it) }.map { Acc(it.getString("uid"), it.optString("name"), it.getString("cookie")) }
+    }.getOrDefault(emptyList())
+
+    private fun save(c: Context, l: List<Acc>) {
+        val a = JSONArray()
+        l.forEach { a.put(JSONObject().put("uid", it.uid).put("name", it.name).put("cookie", it.cookie)) }
+        p(c).edit().putString("pixivAccounts", a.toString()).apply()
+    }
+
+    fun activeUid(c: Context): String? = p(c).getString("pixivActive", null)?.takeIf { u -> list(c).any { it.uid == u } }
+        ?: list(c).firstOrNull()?.uid
+    fun active(c: Context): Acc? = activeUid(c)?.let { u -> list(c).firstOrNull { it.uid == u } }
+    fun cookie(c: Context): String = active(c)?.cookie ?: ""
+    fun setActive(c: Context, uid: String) = p(c).edit().putString("pixivActive", uid).apply()
+
+    /** New login (or the same account again with a fresh cookie) → becomes active. */
+    fun add(c: Context, cookie: String) {
+        val uid = Pixiv.uidOf(cookie) ?: return
+        val old = list(c).firstOrNull { it.uid == uid }
+        save(c, list(c).filter { it.uid != uid } + Acc(uid, old?.name ?: "", cookie))
+        setActive(c, uid)
+    }
+
+    fun setName(c: Context, uid: String, name: String) =
+        save(c, list(c).map { if (it.uid == uid) Acc(it.uid, name, it.cookie) else it })
+
+    fun remove(c: Context, uid: String) {
+        save(c, list(c).filter { it.uid != uid })
+        if (p(c).getString("pixivActive", null) == uid) p(c).edit().remove("pixivActive").apply()
+    }
+
+    /** Account name for the chip. Blocking. */
+    fun fetchName(c: Context, a: Acc) = runCatching {
+        val o = JSONObject(String(Pixiv.image("https://www.pixiv.net/ajax/user/${a.uid}?full=0", a.cookie)))
+        val n = o.getJSONObject("body").optString("name")
+        if (n.isNotEmpty()) setName(c, a.uid, n)
+    }
+
+    /** Before accounts existed the login lived only in the WebView's cookies. */
+    fun migrate(c: Context) {
+        if (p(c).contains("pixivAccounts")) return
+        val ck = Pixiv.webCookie()
+        if (Pixiv.loggedIn(ck)) add(c, ck) else save(c, emptyList())
+    }
+}
+
+/** pixiv login page in a WebView (starts logged out, so another account can sign in); closes itself once logged in. */
 class PixivLogin : Activity() {
     private lateinit var web: WebView
 
@@ -177,14 +234,18 @@ class PixivLogin : Activity() {
         CookieManager.getInstance().setAcceptThirdPartyCookies(web, true)
         web.webViewClient = object : WebViewClient() {
             override fun onPageFinished(view: WebView, url: String) {
-                if (url.startsWith("https://www.pixiv.net") && Pixiv.loggedIn()) {
-                    CookieManager.getInstance().flush()
+                val ck = Pixiv.webCookie()
+                if (url.startsWith("https://www.pixiv.net") && Pixiv.loggedIn(ck)) {
+                    Accounts.add(this@PixivLogin, ck)
                     finish()
                 }
             }
         }
         setContentView(web)
-        web.loadUrl("https://accounts.pixiv.net/login?return_to=https%3A%2F%2Fwww.pixiv.net%2F&source=touch")
+        // forget the WebView session so the login page shows even when another account is saved
+        CookieManager.getInstance().removeAllCookies {
+            web.loadUrl("https://accounts.pixiv.net/login?return_to=https%3A%2F%2Fwww.pixiv.net%2F&source=touch")
+        }
     }
 
     @Deprecated("back")

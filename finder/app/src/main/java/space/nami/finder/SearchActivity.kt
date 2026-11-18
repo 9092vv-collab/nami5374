@@ -17,6 +17,7 @@ import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.clickable
@@ -131,12 +132,22 @@ class SearchActivity : ComponentActivity() {
     private var bgVersion by mutableIntStateOf(0)
     private var booruStatus by mutableStateOf("")
     private var picking = false
-    private var pixivIn by mutableStateOf(false)
+    private var accounts by mutableStateOf(listOf<Accounts.Acc>())
+    private var activeUid by mutableStateOf<String?>(null)
+
+    private fun refreshAccounts() {
+        accounts = Accounts.list(this)
+        activeUid = Accounts.activeUid(this)
+        // fill in names we don't know yet
+        accounts.filter { it.name.isEmpty() }.forEach { a ->
+            thread { Accounts.fetchName(this, a); runOnUiThread { accounts = Accounts.list(this) } }
+        }
+    }
 
     /** Danbooru: swap if it's time, then make sure the next picture is downloading. */
     private fun booruTick(force: Boolean) {
         if (Look.source(this) !in setOf("booru", "pixiv")) return
-        val cookie = Pixiv.cookie()   // CookieManager on the main thread
+        val cookie = Accounts.cookie(this)
         thread {
             val swapped = Booru.rotate(this, force)
             if (swapped) runOnUiThread { bgVersion++ }
@@ -199,9 +210,19 @@ class SearchActivity : ComponentActivity() {
                     bgVersion++
                     booruTick(false)
                 },
-                pixivIn = pixivIn,
+                accounts = accounts,
+                activeUid = activeUid,
                 onPixivLogin = { picking = true; startActivity(Intent(this, PixivLogin::class.java)) },
-                onPixivLogout = { Pixiv.logout(); pixivIn = false },
+                onPixivSwitch = { uid ->
+                    if (uid != activeUid) {
+                        Accounts.setActive(this, uid); activeUid = uid
+                        Booru.dropNext(this); booruTick(true)
+                    }
+                },
+                onPixivLogout = {
+                    activeUid?.let { Accounts.remove(this, it) }
+                    refreshAccounts(); Booru.dropNext(this); booruTick(true)
+                },
                 booruStatus = booruStatus,
                 onBooruChanged = { Booru.dropNext(this); booruTick(true) },
                 onBooruNext = { booruTick(true) },
@@ -209,7 +230,8 @@ class SearchActivity : ComponentActivity() {
                 onOpenPost = { Booru.curUrl(this).takeIf { it.isNotEmpty() }?.let { go(it) } },
             )
         }
-        pixivIn = Pixiv.loggedIn()
+        Accounts.migrate(this)
+        refreshAccounts()
         booruTick(false)
         // Back closes the window in one press, even while the keyboard is up.
         // PRIORITY_OVERLAY runs before the keyboard's own "hide" back handler.
@@ -227,8 +249,9 @@ class SearchActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         picking = false   // back from the photo picker or the pixiv login page
-        val now = Pixiv.loggedIn()
-        if (now != pixivIn) { pixivIn = now; Booru.dropNext(this); booruTick(false) }
+        val before = activeUid
+        refreshAccounts()
+        if (activeUid != before) { Booru.dropNext(this); booruTick(true) }
     }
 
     private fun go(input: String) {
@@ -274,8 +297,10 @@ private fun SearchScreen(
     onBooruNext: () -> Unit,
     onPage: (Int) -> Unit,
     onOpenPost: () -> Unit,
-    pixivIn: Boolean,
+    accounts: List<Accounts.Acc>,
+    activeUid: String?,
     onPixivLogin: () -> Unit,
+    onPixivSwitch: (String) -> Unit,
     onPixivLogout: () -> Unit,
 ) {
     val ctx = androidx.compose.ui.platform.LocalContext.current
@@ -511,15 +536,23 @@ private fun SearchScreen(
                             Seg("R-18", pR18) { if (!pR18) { pR18 = true; put("pixivR18", true); onBooruChanged() } }
                         }
                         Spacer(Modifier.height(8.dp))
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            if (pixivIn) {
-                                Text("픽시브 로그인됨", color = Ink, fontSize = 14.sp)
-                                Pill("로그아웃", Color(0xFFF3F2EE), Ink, onPixivLogout)
-                            } else {
-                                Pill("픽시브 로그인", AccentSoft, Accent, onPixivLogin)
+                        if (accounts.isEmpty()) {
+                            Pill("픽시브 로그인", AccentSoft, Accent, onPixivLogin)
+                        } else {
+                            Text("계정", color = Gray, fontSize = 13.sp)
+                            Spacer(Modifier.height(6.dp))
+                            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                accounts.forEach { acc ->
+                                    Seg(acc.name.ifEmpty { acc.uid }, acc.uid == activeUid) { onPixivSwitch(acc.uid) }
+                                }
+                            }
+                            Spacer(Modifier.height(8.dp))
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Pill("+ 계정 추가", AccentSoft, Accent, onPixivLogin)
+                                Pill("이 계정 로그아웃", Color(0xFFF3F2EE), Ink, onPixivLogout)
                             }
                         }
-                        if (pR18 && !pixivIn) {
+                        if (pR18 && accounts.isEmpty()) {
                             Spacer(Modifier.height(4.dp))
                             Text("R-18은 로그인하고, 픽시브 설정에서 R-18 보기를 켜 둬야 나와요.", color = Gray, fontSize = 12.sp, lineHeight = 17.sp)
                         }
