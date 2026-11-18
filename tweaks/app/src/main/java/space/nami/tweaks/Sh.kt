@@ -100,6 +100,27 @@ object ScreenMode {
 }
 
 /**
+ * Samsung "부드러운 모션 및 화면 전환": secure `refresh_rate_mode` 0 = 일반(60Hz), 1 = 최적화(적응형, 최대 120Hz),
+ * 2 = 높음(120Hz 고정, old One UI value that's no longer in the menu). For 높음 we also pin the AOSP
+ * minimum refresh rate to 120 in case the device ignores mode 2; any other choice removes that pin.
+ */
+object RefreshRate {
+    val MODES = listOf(0 to "일반", 1 to "최적화", 2 to "120 고정")
+
+    fun read(): Int? = Sh.out("settings", "get", "secure", "refresh_rate_mode")?.trim()?.toIntOrNull()
+
+    fun minPinned(): Boolean =
+        Sh.out("settings", "get", "system", "min_refresh_rate")?.trim()?.toFloatOrNull()?.let { it >= 119f } == true
+
+    fun set(v: Int): String? {
+        val err = Sh.run("settings", "put", "secure", "refresh_rate_mode", v.toString())
+        if (err != null) return err
+        return if (v == 2) Sh.run("settings", "put", "system", "min_refresh_rate", "120.0")
+        else Sh.run("settings", "delete", "system", "min_refresh_rate")
+    }
+}
+
+/**
  * Safe-to-disable ratings from Universal Android Debloater Next Generation (GPL-3.0,
  * github.com/Universal-Debloater-Alliance/universal-android-debloater-next-generation),
  * Samsung/Google/AOSP part only, bundled as assets/uad.json: pkg -> [R|A|E|U, description].

@@ -134,6 +134,7 @@ private fun Screen(tick: Int) {
     var anim by remember { mutableStateOf(Anim.read(c)) }
     var original by remember { mutableStateOf(Anim.original(c)) }
     var screenMode by remember { mutableStateOf<Int?>(null) }
+    var refresh by remember { mutableStateOf<Int?>(null) }
     var apps by remember { mutableStateOf<List<AppRow>?>(null) }
     var filter by rememberSaveable { mutableIntStateOf(0) } // 0 추천, 1 삼성, 2 전체, 3 꺼 둔 앱
     var query by rememberSaveable { mutableStateOf("") }
@@ -144,6 +145,7 @@ private fun Screen(tick: Int) {
         anim = Anim.read(c)
         original = Anim.original(c)
         screenMode = withContext(Dispatchers.IO) { ScreenMode.read() }
+        refresh = withContext(Dispatchers.IO) { RefreshRate.read() }
         apps = withContext(Dispatchers.IO) { Apps.load(c) }
     }
 
@@ -169,6 +171,14 @@ private fun Screen(tick: Int) {
         scope.launch {
             val err = withContext(Dispatchers.IO) { ScreenMode.set(v) }
             screenMode = withContext(Dispatchers.IO) { ScreenMode.read() }
+            if (err != null) toast(c, err, "")
+        }
+    }
+
+    fun setRefresh(v: Int) {
+        scope.launch {
+            val err = withContext(Dispatchers.IO) { RefreshRate.set(v) }
+            refresh = withContext(Dispatchers.IO) { RefreshRate.read() }
             if (err != null) toast(c, err, "")
         }
     }
@@ -252,6 +262,23 @@ private fun Screen(tick: Int) {
                         modifier = Modifier.clip(RoundedCornerShape(50)).clickable {
                             runCatching { c.startActivity(android.content.Intent(android.provider.Settings.ACTION_DISPLAY_SETTINGS)) }
                         }.padding(horizontal = 4.dp, vertical = 6.dp))
+                }
+            }
+
+            item {
+                Card {
+                    Text("화면 재생률", color = Ink, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                    Text("지금 " + (RefreshRate.MODES.firstOrNull { it.first == refresh }?.second ?: "알 수 없음"),
+                        color = Gray, fontSize = 13.sp)
+                    Spacer(Modifier.height(12.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        RefreshRate.MODES.forEach { (v, name) ->
+                            Choice(name, refresh == v, Modifier.weight(1f), enabled = ready) { setRefresh(v) }
+                        }
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    Text("일반 = 60Hz, 최적화 = 상황 따라 최대 120Hz(삼성 메뉴의 두 가지), 120 고정 = 가만히 있어도 120Hz(메뉴에서 사라진 숨은 값, 배터리 더 씀). 개발자 옵션 › '화면 재생률 표시'를 켜면 실제 숫자를 볼 수 있어요. 기기가 무시하면 120에 안 붙을 수도 있어요.",
+                        color = Gray, fontSize = 13.sp, lineHeight = 19.sp)
                 }
             }
 
