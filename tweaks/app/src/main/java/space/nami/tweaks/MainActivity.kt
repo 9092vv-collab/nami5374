@@ -279,6 +279,16 @@ private fun Screen(tick: Int) {
                     Spacer(Modifier.height(8.dp))
                     Text("일반 = 60Hz, 최적화 = 상황 따라 최대 120Hz(삼성 메뉴의 두 가지), 120 고정 = 가만히 있어도 120Hz(메뉴에서 사라진 숨은 값, 배터리 더 씀). 개발자 옵션 › '화면 재생률 표시'를 켜면 실제 숫자를 볼 수 있어요. 기기가 무시하면 120에 안 붙을 수도 있어요.",
                         color = Gray, fontSize = 13.sp, lineHeight = 19.sp)
+                    Spacer(Modifier.height(8.dp))
+                    Text("재생률 값 복사", color = Accent, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.clip(RoundedCornerShape(50)).clickable(enabled = ready) {
+                            scope.launch {
+                                val text = withContext(Dispatchers.IO) { RefreshRate.dump() }
+                                val cm = c.getSystemService(android.content.ClipboardManager::class.java)
+                                cm?.setPrimaryClip(android.content.ClipData.newPlainText("refresh", text))
+                                toast(c, null, "복사했어요")
+                            }
+                        }.padding(horizontal = 4.dp, vertical = 6.dp))
                 }
             }
 

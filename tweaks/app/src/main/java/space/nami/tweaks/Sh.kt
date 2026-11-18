@@ -112,6 +112,23 @@ object RefreshRate {
     fun minPinned(): Boolean =
         Sh.out("settings", "get", "system", "min_refresh_rate")?.trim()?.toFloatOrNull()?.let { it >= 119f } == true
 
+    /** For finding the real keys on this device: every setting whose name mentions refresh/hz/fps, plus display state. */
+    fun dump(): String {
+        val re = Regex("refresh|hz|fps|frame_rate|framerate", RegexOption.IGNORE_CASE)
+        val sb = StringBuilder()
+        for (ns in listOf("secure", "system", "global")) {
+            Sh.out("settings", "list", ns)?.lineSequence()
+                ?.filter { re.containsMatchIn(it.substringBefore('=')) }
+                ?.forEach { sb.append(ns).append(' ').append(it).append('\n') }
+        }
+        Sh.out("dumpsys", "display")?.lineSequence()
+            ?.map { it.trim() }
+            ?.filter { Regex("RefreshRate|mDisplayModeSpecs|mActiveMode|modeId|SupportedModes", RegexOption.IGNORE_CASE).containsMatchIn(it) }
+            ?.distinct()?.take(40)
+            ?.forEach { sb.append("display ").append(it.take(300)).append('\n') }
+        return sb.toString().ifBlank { "(못 읽었어요 — Shizuku 연결 확인)" }
+    }
+
     fun set(v: Int): String? {
         val err = Sh.run("settings", "put", "secure", "refresh_rate_mode", v.toString())
         if (err != null) return err
