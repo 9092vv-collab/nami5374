@@ -44,8 +44,30 @@ object Booru {
         val due = now - p.getLong("booruLast", 0L) >= minutes(c) * 60_000L
         if (!force && cur(c).exists() && !due) return false
         if (!n.renameTo(cur(c))) return false
-        p.edit().putLong("booruLast", now).putString("netCurUrl", p.getString("netNextUrl", "")).apply()
+        p.edit().putLong("booruLast", now).putString("netCurUrl", p.getString("netNextUrl", ""))
+            .putString("netCurPages", p.getString("netNextPages", "")).putInt("netCurPage", 0).apply()
         return true
+    }
+
+    /** Pages of the picture on screen (pixiv multi-page works); empty or one = single picture. */
+    fun pages(c: Context): List<String> =
+        (Look.prefs(c).getString("netCurPages", "") ?: "").split('\n').filter { it.isNotBlank() }
+    fun page(c: Context) = Look.prefs(c).getInt("netCurPage", 0)
+
+    /** Show page [i] of the current work in place of what's on screen. null = done, else a reason. Blocking. */
+    @Synchronized
+    fun showPage(c: Context, i: Int): String? {
+        val list = pages(c)
+        if (i !in list.indices) return null
+        return try {
+            val raw = File(c.cacheDir, "page_dl")
+            raw.writeBytes(Pixiv.image(list[i]))
+            val good = Look.writeScaled(ImageDecoder.createSource(raw), cur(c))
+            raw.delete()
+            if (!good) "그림을 못 풀었어요" else { Look.prefs(c).edit().putInt("netCurPage", i).apply(); null }
+        } catch (e: Exception) {
+            "못 받았어요 (${e.javaClass.simpleName})"
+        }
     }
 
     /** Download the next picture. null = fine (or already busy), otherwise a short reason. Blocking. */
@@ -54,13 +76,14 @@ object Booru {
         fetching = true
         try {
             if (Look.source(c) == "pixiv") {
-                val (bytes, page) = Pixiv.pick(c, pixivCookie)
+                val picked = Pixiv.pick(c, pixivCookie)
                 val raw = File(c.cacheDir, "net_dl")
-                raw.writeBytes(bytes)
+                raw.writeBytes(picked.bytes)
                 val good = Look.writeScaled(ImageDecoder.createSource(raw), next(c))
                 raw.delete()
                 if (!good) return "그림을 못 풀었어요"
-                Look.prefs(c).edit().putString("netNextUrl", page).apply()
+                Look.prefs(c).edit().putString("netNextUrl", picked.page)
+                    .putString("netNextPages", picked.pages.joinToString("\n")).apply()
                 return null
             }
             val allowed = if (sensitive(c)) setOf("g", "s") else setOf("g")
@@ -81,7 +104,8 @@ object Booru {
             val good = Look.writeScaled(ImageDecoder.createSource(raw), next(c))
             raw.delete()
             if (!good) return "그림을 못 풀었어요"
-            Look.prefs(c).edit().putString("netNextUrl", "https://danbooru.donmai.us/posts/" + post.optLong("id")).apply()
+            Look.prefs(c).edit().putString("netNextUrl", "https://danbooru.donmai.us/posts/" + post.optLong("id"))
+                .putString("netNextPages", "").apply()
             return null
         } catch (e: Pixiv.Msg) {
             return e.message

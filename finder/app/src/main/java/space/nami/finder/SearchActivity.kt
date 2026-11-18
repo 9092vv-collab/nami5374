@@ -58,7 +58,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.focus.focusRequester
@@ -151,6 +153,19 @@ class SearchActivity : ComponentActivity() {
         }
     }
 
+    /** Multi-page pixiv work: show the next/previous page in place. */
+    private fun turnPage(d: Int) {
+        val list = Booru.pages(this)
+        if (list.size <= 1 || Look.source(this) != "pixiv") return
+        val i = Booru.page(this) + d
+        if (i !in list.indices) { booruStatus = if (d > 0) "마지막 장이에요" else "첫 장이에요"; return }
+        booruStatus = "${i + 1} / ${list.size} 불러오는 중…"
+        thread {
+            val err = Booru.showPage(this, i)
+            runOnUiThread { bgVersion++; booruStatus = err ?: "" }
+        }
+    }
+
     private val picker = registerForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
         picking = false
         if (uri != null) thread {
@@ -190,6 +205,7 @@ class SearchActivity : ComponentActivity() {
                 booruStatus = booruStatus,
                 onBooruChanged = { Booru.dropNext(this); booruTick(true) },
                 onBooruNext = { booruTick(true) },
+                onPage = ::turnPage,
                 onOpenPost = { Booru.curUrl(this).takeIf { it.isNotEmpty() }?.let { go(it) } },
             )
         }
@@ -256,6 +272,7 @@ private fun SearchScreen(
     booruStatus: String,
     onBooruChanged: () -> Unit,
     onBooruNext: () -> Unit,
+    onPage: (Int) -> Unit,
     onOpenPost: () -> Unit,
     pixivIn: Boolean,
     onPixivLogin: () -> Unit,
@@ -286,6 +303,18 @@ private fun SearchScreen(
     Box(
         Modifier
             .fillMaxSize()
+            .pointerInput(source) {
+                // swipe sideways on empty space = next / previous page of a multi-page pixiv work
+                if (source != "pixiv") return@pointerInput
+                var dx = 0f
+                detectHorizontalDragGestures(
+                    onDragStart = { dx = 0f },
+                    onDragEnd = {
+                        val min = 80.dp.toPx()
+                        if (dx < -min) onPage(1) else if (dx > min) onPage(-1)
+                    },
+                ) { change, d -> dx += d; change.consume() }
+            }
             .pointerInput(source, settingsOpen, imeUp) {
                 val net = source == "booru" || source == "pixiv"
                 detectTapGestures(
@@ -308,6 +337,14 @@ private fun SearchScreen(
             Image(img, null, Modifier.fillMaxSize(), contentScale = ContentScale.Fit, alpha = opacity)
         } else {
             Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = opacity)))
+        }
+        val pageInfo = remember(bgVersion, source) { if (source == "pixiv") Booru.pages(ctx).size to Booru.page(ctx) else 0 to 0 }
+        if (pageInfo.first > 1) {
+            Box(
+                Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = 20.dp)
+                    .clip(CircleShape).background(Color.Black.copy(alpha = 0.45f))
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
+            ) { Text("${pageInfo.second + 1} / ${pageInfo.first}", color = Color.White, fontSize = 13.sp) }
         }
         Column(
             Modifier.fillMaxSize().systemBarsPadding().imePadding(),
@@ -437,6 +474,7 @@ private fun SearchScreen(
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             Seg("랭킹", pMode == "ranking") { if (pMode != "ranking") { pMode = "ranking"; put("pixivMode", "ranking"); onBooruChanged() } }
                             Seg("태그", pMode == "tag") { if (pMode != "tag") { pMode = "tag"; put("pixivMode", "tag"); onBooruChanged() } }
+                            Seg("북마크", pMode == "bookmark") { if (pMode != "bookmark") { pMode = "bookmark"; put("pixivMode", "bookmark"); onBooruChanged() } }
                         }
                         Spacer(Modifier.height(8.dp))
                         if (pMode == "ranking") {
@@ -459,10 +497,13 @@ private fun SearchScreen(
                                 }
                                 Text("  위 중에서 아무거나", color = Ink, fontSize = 15.sp)
                             }
-                        } else {
+                        } else if (pMode == "tag") {
                             Field(pTags, "태그 (예: 初音ミク 風景)", KeyboardType.Text, {
                                 pTags = it; put("pixivTags", it)
                             }) { onBooruChanged() }
+                        } else {
+                            Text("내 북마크(공개 + 비공개)에서 아무거나 골라요. 로그인이 필요해요.",
+                                color = Gray, fontSize = 13.sp, lineHeight = 18.sp)
                         }
                         Spacer(Modifier.height(8.dp))
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -504,7 +545,7 @@ private fun SearchScreen(
                             Text(booruStatus, color = Gray, fontSize = 13.sp)
                         }
                         Spacer(Modifier.height(4.dp))
-                        Text("태그·숫자는 키보드의 완료를 눌러야 적용돼요. 시간이 지나면 다음에 열 때 바뀌고, 빈 곳을 두 번 누르면 바로 바뀌어요.",
+                        Text("태그·숫자는 키보드의 완료를 눌러야 적용돼요. 시간이 지나면 다음에 열 때 바뀌고, 빈 곳을 두 번 누르면 바로 바뀌어요. 여러 장짜리 작품은 빈 곳을 옆으로 밀면 다음 장이 나와요.",
                             color = Gray, fontSize = 12.sp, lineHeight = 17.sp)
                     }
                 }

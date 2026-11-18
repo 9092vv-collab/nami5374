@@ -22,7 +22,7 @@ import java.net.URLEncoder
 object Pixiv {
     const val UA = "Mozilla/5.0 (Linux; Android 16; SM-F9X0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Mobile Safari/537.36"
 
-    fun mode(c: Context) = Look.prefs(c).getString("pixivMode", "ranking") ?: "ranking"      // ranking | tag
+    fun mode(c: Context) = Look.prefs(c).getString("pixivMode", "ranking") ?: "ranking"      // ranking | tag | bookmark
     fun period(c: Context) = Look.prefs(c).getString("pixivPeriod", "daily") ?: "daily"     // daily | weekly | monthly
     fun r18(c: Context) = Look.prefs(c).getBoolean("pixivR18", false)
     fun top(c: Context) = Look.prefs(c).getInt("pixivTop", 100).coerceIn(1, 500)
@@ -34,14 +34,50 @@ object Pixiv {
     fun logout() = runCatching { CookieManager.getInstance().removeAllCookies(null); CookieManager.getInstance().flush() }
 
     /** Picks a work and downloads its image bytes. Returns (bytes, page url) or throws with a Korean message. */
-    fun pick(c: Context, cookie: String): Pair<ByteArray, String> {
-        val id = if (mode(c) == "tag") fromTag(c, cookie) else fromRanking(c, cookie)
-        val info = json("https://www.pixiv.net/ajax/illust/$id", cookie)
-        if (info.optBoolean("error")) throw Msg("작품 정보를 못 받았어요")
-        val urls = info.getJSONObject("body").getJSONObject("urls")
-        val bytes = runCatching { get(urls.getString("original"), cookie) }
-            .getOrElse { get(urls.getString("regular"), cookie) }
-        return bytes to "https://www.pixiv.net/artworks/$id"
+    class Picked(val bytes: ByteArray, val page: String, val pages: List<String>)
+
+    /** Picks a work and downloads its first image. [Picked.pages] = every page's image url (multi-page works). */
+    fun pick(c: Context, cookie: String): Picked {
+        var lastErr: Msg? = null
+        repeat(if (mode(c) == "bookmark") 6 else 1) {
+            val id = when (mode(c)) { "tag" -> fromTag(c, cookie); "bookmark" -> fromBookmarks(c, cookie); else -> fromRanking(c, cookie) }
+            val info = json("https://www.pixiv.net/ajax/illust/$id", cookie)
+            if (info.optBoolean("error")) { lastErr = Msg("작품 정보를 못 받았어요"); return@repeat }
+            val body = info.getJSONObject("body")
+            // bookmarks hold both ages; respect the 전체 연령 / R-18 choice
+            if (mode(c) == "bookmark" && !r18(c) && body.optInt("xRestrict") > 0) { lastErr = Msg("전체 연령 북마크를 못 찾았어요"); return@repeat }
+            val urls = body.getJSONObject("urls")
+            val first = urls.optString("original").ifEmpty { urls.getString("regular") }
+            var pages = listOf(first)
+            if (body.optInt("pageCount", 1) > 1) runCatching {
+                val arr = json("https://www.pixiv.net/ajax/illust/$id/pages", cookie).getJSONArray("body")
+                pages = (0 until arr.length()).map { arr.getJSONObject(it).getJSONObject("urls").let { u -> u.optString("original").ifEmpty { u.getString("regular") } } }
+            }
+            val bytes = runCatching { image(first) }.getOrElse { image(urls.getString("regular")) }
+            return Picked(bytes, "https://www.pixiv.net/artworks/$id", pages)
+        }
+        throw lastErr ?: Msg("그림을 못 골랐어요")
+    }
+
+    /** Image files on i.pximg.net only need the Referer. */
+    fun image(url: String): ByteArray = get(url, "")
+
+    /** Random work from the logged-in user's bookmarks (public + private). */
+    private fun fromBookmarks(c: Context, cookie: String): String {
+        val uid = Regex("PHPSESSID=(\\d+)_").find(cookie)?.groupValues?.get(1) ?: throw Msg("북마크는 픽시브 로그인이 필요해요")
+        fun page(rest: String, offset: Int, limit: Int) =
+            json("https://www.pixiv.net/ajax/user/$uid/illusts/bookmarks?tag=&offset=$offset&limit=$limit&rest=$rest", cookie).getJSONObject("body")
+        val pub = page("show", 0, 1).optInt("total")
+        val priv = runCatching { page("hide", 0, 1).optInt("total") }.getOrDefault(0)
+        if (pub + priv == 0) throw Msg("북마크가 없어요")
+        val r = (0 until pub + priv).random()
+        val works = if (r < pub) page("show", r, 1) else page("hide", r - pub, 1)
+        val arr = works.getJSONArray("works")
+        if (arr.length() == 0) throw Msg("북마크를 못 읽었어요")
+        val w = arr.getJSONObject(0)
+        val id = w.opt("id")?.toString().orEmpty()
+        if (id.isEmpty() || id == "null" || w.optInt("illustType") == 2) throw Msg("지워졌거나 움직이는 작품이에요")
+        return id
     }
 
     private fun fromRanking(c: Context, cookie: String): String {
