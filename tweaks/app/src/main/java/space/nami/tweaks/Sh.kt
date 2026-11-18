@@ -130,7 +130,9 @@ object RefreshRate {
     }
 
     fun set(v: Int): String? {
+        // Fold: main screen = refresh_rate_mode, cover screen = refresh_rate_mode_cover. Same choice for both.
         val err = Sh.run("settings", "put", "secure", "refresh_rate_mode", v.toString())
+            ?: Sh.run("settings", "put", "secure", "refresh_rate_mode_cover", v.toString())
         if (err != null) return err
         return if (v == 2) Sh.run("settings", "put", "system", "min_refresh_rate", "120.0")
         else Sh.run("settings", "delete", "system", "min_refresh_rate")
