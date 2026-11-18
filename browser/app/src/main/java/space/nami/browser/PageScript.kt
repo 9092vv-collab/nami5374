@@ -10,7 +10,7 @@ package space.nami.browser
 object PageScript {
     /** The script with this launch's bridge key filled in. */
     fun js(key: String) = TEMPLATE.replace("__NAMI_KEY__", key)
-        .replace("__NAMI_FNS__", "['translate','idle','doubleTap','scriptVersion','blobBegin','blobChunk','blobEnd','blobFail','claimBlob','downloadHint','forceZoom','fsWrite','fsClose','fsAbort','relayOpen','relayOpenIn','relayAdopt','relayBatch','batchSave','batchAt','nativeBatch','zipMiss','relayFail','relayDone']")
+        .replace("__NAMI_FNS__", "['translate','idle','doubleTap','scriptVersion','blobBegin','blobChunk','blobEnd','blobFail','claimBlob','downloadHint','forceZoom','fsWrite','fsClose','fsAbort','relayOpen','relayOpenIn','relayAdopt','relayBatch','grabBatch','grabAt','batchSave','batchAt','nativeBatch','zipMiss','relayFail','relayDone']")
 
     private val TEMPLATE = """
 (function(){
@@ -395,19 +395,82 @@ object PageScript {
     next();
   };
 
+  N.active = 0; N.started = 0; N.lastOk = false;
   N.relay = function(url, hint){
     var z = zipFor(url);
     if (z) return N.relayZip(url, z);
     var got = 0, opened = false, ping = null, gen = N.gen;
+    N.active++; N.started++;
+    var end = function(ok){ N.active = Math.max(0, N.active - 1); N.lastOk = ok; };
     fetch(url).then(function(r){
       if (!r.ok || !r.body) throw new Error('HTTP ' + r.status);
       var id = newId();
       if (!nb('relayOpen', [id, cdName(r, hint), (r.headers.get('Content-Type') || '').split(';')[0], r.headers.get('Content-Disposition') || '', url])) throw new Error('save');
       opened = true; ping = setInterval(poke, 10000);
       return streamTo(r, id, function(n){ got += n; }, gen).then(function(){
-        clearInterval(ping); nb('fsClose', [id]); nb('relayDone', [url]);
+        clearInterval(ping); nb('fsClose', [id]); nb('relayDone', [url]); end(true);
       }, function(e){ nb('fsAbort', [id]); throw e; });
-    }).catch(function(e){ if (ping) clearInterval(ping); if (N.gen !== gen) return; nb('relayFail', [String(e && e.message || e), url, got, opened]); });
+    }).catch(function(e){ end(false); if (ping) clearInterval(ping); if (N.gen !== gen) return; nb('relayFail', [String(e && e.message || e), url, got, opened]); });
+  };
+
+  // ---- "이 폴더 파일 전부 받기": press every file's own download button in turn, one at a time ----
+  // (kio.ac encrypts the list it hands its service worker, so we do what a person would do)
+  N.grabAll = function(){
+    var SIZE = /\d+(?:[.,]\d+)?\s*(?:B|KB|MB|GB|TB|KiB|MiB|GiB|TiB)\b/;
+    var seen = {}, rows = [], gen = N.gen, i = 0, ok = 0, bad = 0;
+    var isDl = function(el){
+      var t = ((el.getAttribute('aria-label') || '') + ' ' + (el.getAttribute('title') || '') + ' ' + (el.innerHTML || '')).toLowerCase();
+      return /download|다운로드|arrow-bar-to-down|file-download|cloud-download/.test(t) && !/folder|zip|archive|all/.test(t);
+    };
+    var nameOf = function(row){
+      var lines = (row.innerText || '').split('\n').map(function(x){ return x.trim(); }).filter(Boolean);
+      for (var k = 0; k < lines.length; k++) if (/\.[A-Za-z0-9]{1,8}$/.test(lines[k]) && !SIZE.test(lines[k])) return lines[k];
+      for (var k2 = 0; k2 < lines.length; k2++) if (!SIZE.test(lines[k2])) return lines[k2];
+      return '';
+    };
+    var collect = function(){
+      var added = 0;
+      [].slice.call(document.querySelectorAll('button,a,[role=button]')).forEach(function(bn){
+        if (!isDl(bn) || !bn.offsetParent) return;
+        var row = bn, name = '';
+        for (var d = 0; d < 6 && row && row !== document.body; d++) {
+          row = row.parentElement; if (!row) break;
+          var t = row.innerText || '';
+          if (t.length > 400) break;
+          if (/\/s\)|B\/s/.test(t)) { name = ''; break; }   // the site's own download panel, not the list
+          if (SIZE.test(t)) { name = nameOf(row); break; }
+        }
+        if (!name || seen[name]) return;
+        seen[name] = 1; rows.push({ btn: bn, name: name }); added++;
+      });
+      return added;
+    };
+    collect();
+    if (!rows.length) { nb('grabBatch', [0, 0, 0, 3]); return; }
+    nb('grabBatch', [rows.length, 0, 0, 0]);
+    var wait = function(cond, ms){ return new Promise(function(ok){ var t0 = Date.now(); var h = setInterval(function(){ if (cond() || Date.now() - t0 > ms) { clearInterval(h); ok(cond()); } }, 400); }); };
+    var next = function(){
+      if (N.gen !== gen) { nb('grabBatch', [rows.length, ok, bad, 2]); return; }
+      if (i >= rows.length) {
+        // long lists: scroll on and look for more rows
+        try { rows[rows.length - 1].btn.scrollIntoView({ block: 'end' }); window.scrollBy(0, innerHeight / 2); } catch(e) {}
+        return wait(function(){ return false; }, 1200).then(function(){
+          if (collect() > 0) next(); else nb('grabBatch', [rows.length, ok, bad, 1]);
+        });
+      }
+      var r = rows[i++], before = N.started;
+      LASTNAME = { n: r.name, at: Date.now() };
+      try { r.btn.scrollIntoView({ block: 'center' }); r.btn.click(); } catch(e) {}
+      nb('grabAt', [i, rows.length, r.name]);
+      wait(function(){ return N.started > before; }, 20000).then(function(started){
+        if (!started) { bad++; return next(); }
+        return wait(function(){ return N.active === 0; }, 6 * 3600 * 1000).then(function(){
+          if (N.lastOk) ok++; else bad++;
+          setTimeout(next, 800);
+        });
+      });
+    };
+    next();
   };
   try {
     var oOpen = window.open;
@@ -464,6 +527,7 @@ object PageScript {
     saveBlob: function(k, href, name){ if (k === NK) N.saveBlob(href, name); },
     relay: function(k, url, name){ if (k === NK) N.relay(url, name); },
     cancelAll: function(k){ if (k === NK) N.gen++; },
+    grabAll: function(k){ if (k === NK) N.grabAll(); },
     resumeBatch: function(k, json, idx, id, got, mode){ if (k === NK) { var b = JSON.parse(json); if (mode === 'page' && N.nativeItems && N.nativeItems.label === b.label) b.items = N.nativeItems.items; else if (mode === 'page' && b.items && b.items[0] && b.items[0].h) b.items = b.items.map(function(x){ return { u: x.u, p: { headers: x.h, credentials: 'include' }, dir: x.dir, name: x.name, size: x.size }; }); N.runBatch(b.label, b.items, idx, id || null, got || 0, mode || 'page'); } }
   });
   try { Object.defineProperty(window, '__nami', { value: API, writable: false, configurable: false }); } catch(e) {}

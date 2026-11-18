@@ -327,6 +327,9 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
 
     @Volatile var lastNativeFail = ""
     private val misc by lazy { act.getSharedPreferences("nami_misc", android.content.Context.MODE_PRIVATE) }
+    /** Press every file's download button on the page in turn (kio.ac folders). */
+    fun grabAll() { tab?.web?.evaluateJavascript("window.__nami&&__nami.grabAll('$key')", null) }
+
     /** Native folder batches waiting to see if their first file works (token → tab, list). */
     private val batchPending = java.util.concurrent.ConcurrentHashMap<String, Pair<BrowserTab, String>>()
     private val ua: String by lazy { android.webkit.WebSettings.getDefaultUserAgent(act).replace("; wv", "").replace(Regex("Version/\\d+(\\.\\d+)* "), "") }
@@ -645,6 +648,23 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
             t.relays++; scope.launch { relayKeep(t) }
             return true
         }
+        /** "이 폴더 파일 전부 받기": done 0 = start, 1 = finished, 2 = cancelled, 3 = no files found */
+        @JavascriptInterface fun grabBatch(k: String, n: Double, ok: Double, bad: Double, done: Double) {
+            if (k != key) return
+            when (done.toInt()) {
+                0 -> { RelayService.hold(act, fs, 1); t.relays++ }
+                1, 2 -> { RelayService.hold(act, fs, -1); t.relays = (t.relays - 1).coerceAtLeast(0) }
+            }
+            scope.launch {
+                relayKeep(t)
+                when (done.toInt()) {
+                    0 -> Toast.makeText(act, "파일 ${n.toInt()}개를 차례로 받을게요 · 이 탭은 열어 두세요", Toast.LENGTH_LONG).show()
+                    1 -> showPill(if (bad < 1) "다 받았어요 (${ok.toInt()}개)" else "받았어요 (${ok.toInt()}개, 실패 ${bad.toInt()}개)", 6000)
+                    3 -> showPill("받을 파일을 못 찾았어요. 폴더 안 파일 목록이 보이는 화면에서 눌러 주세요", 6000)
+                }
+            }
+        }
+        @JavascriptInterface fun grabAt(k: String, i: Double, n: Double, name: String) { /* progress shows in the download note */ }
         @JavascriptInterface fun relayFail(k: String, msg: String, url: String, got: Double, opened: Boolean) {
             if (k != key) return
             if (opened) { t.relays = (t.relays - 1).coerceAtLeast(0); scope.launch { relayKeep(t) } }

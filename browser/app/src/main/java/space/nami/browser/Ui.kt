@@ -484,6 +484,7 @@ private fun MainMenu(b: Browser, prefs: Prefs, open: Boolean, close: () -> Unit,
         item("맨 위로", Action.TOP.icon) { run(Action.TOP) }
         val nv = tab?.media?.size ?: 0
         item(if (nv > 0) "동영상 · ${nv}개" else "동영상", Action.VIDEO.icon) { run(Action.VIDEO) }
+        if (host == "kio.ac" || host.endsWith(".kio.ac")) item("이 폴더 파일 전부 받기", Icons.Filled.Download) { b.grabAll() }
         item("받은 파일", Icons.Filled.Download) { run(Action.DOWNLOADS) }
     }
 }
