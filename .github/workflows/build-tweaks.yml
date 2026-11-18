@@ -1,0 +1,94 @@
+name: Build Tweaks (숨은 설정)
+# Builds only when started by hand (Actions tab -> Run workflow, or Claude via the API).
+on:
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - name: Get Gradle 8.14.3 (GitHub mirror)
+        run: |
+          F=gradle-8.14.3-bin.zip
+          for i in 1 2 3; do
+            curl -fL --retry 3 -o "$HOME/$F" "https://github.com/gradle/gradle-distributions/releases/download/v8.14.3/$F" && break
+            curl -fL --retry 3 -o "$HOME/$F" "https://services.gradle.org/distributions/$F" && break
+            sleep 15
+          done
+          unzip -q "$HOME/$F" -d "$HOME"
+          echo "$HOME/gradle-8.14.3/bin" >> "$GITHUB_PATH"
+      - name: Use Google's Maven Central mirror
+        run: |
+          mkdir -p ~/.gradle/init.d
+          cat > ~/.gradle/init.d/sgu-mirror.gradle <<'EOF'
+          def MIRROR = 'https://maven-central.storage-download.googleapis.com/maven2/'
+          def patch = { repos ->
+            repos.withType(MavenArtifactRepository).configureEach { r ->
+              def u = r.url.toString()
+              if (u.contains('repo.maven.apache.org') || u.contains('repo1.maven.org')) { r.url = MIRROR }
+            }
+          }
+          beforeSettings { s ->
+            patch(s.pluginManagement.repositories)
+            patch(s.dependencyResolutionManagement.repositories)
+          }
+          EOF
+      - name: Build release APK
+        working-directory: tweaks
+        run: |
+          set -o pipefail
+          for i in 1 2 3; do
+            gradle assembleRelease --no-daemon --stacktrace 2>&1 | tee -a ../gradle-tweaks.log && exit 0
+            grep -q "Could not GET\|Gateway Time-out\|Connection reset\|Read timed out\|Could not download" ../gradle-tweaks.log || exit 1
+            echo "::warning::attempt $i failed on a download, retrying"; sleep 30
+          done
+          exit 1
+      - name: Sign (Nami key)
+        env:
+          NAMI_KEY_PASS: ${{ secrets.NAMI_KEY_PASS }}
+        run: |
+          set -e
+          if [ -z "$NAMI_KEY_PASS" ]; then echo "::error::secret NAMI_KEY_PASS is missing"; exit 1; fi
+          BT="$ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -1)"
+          K="$RUNNER_TEMP/nami.jks"
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -in browser/signing/nami-release.jks.enc -out "$K" -pass env:NAMI_KEY_PASS
+          IN=tweaks/app/build/outputs/apk/release/app-release-unsigned.apk
+          "$BT/zipalign" -f -p 4 "$IN" "$RUNNER_TEMP/aligned.apk"
+          "$BT/apksigner" sign --ks "$K" --ks-key-alias nami --ks-pass env:NAMI_KEY_PASS --key-pass env:NAMI_KEY_PASS \
+            --out tweaks/app/build/outputs/apk/release/app-release.apk "$RUNNER_TEMP/aligned.apk"
+          "$BT/apksigner" verify -v tweaks/app/build/outputs/apk/release/app-release.apk | grep -E "Verified" | head
+          rm -f "$K"
+      - name: Publish (fixed link, tag tweaks-latest)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp tweaks/app/build/outputs/apk/release/app-release.apk Tweaks.apk
+          ls -la Tweaks.apk
+          gh release delete tweaks-latest -R "${{ github.repository }}" --cleanup-tag -y || true
+          gh release create tweaks-latest Tweaks.apk -R "${{ github.repository }}" --prerelease \
+            --title "숨은 설정 (빌드 ${{ github.run_number }})" --notes "commit ${{ github.sha }}"
+      - name: Save error log for Claude (branch build-logs)
+        if: failure()
+        run: |
+          mkdir -p /tmp/logs
+          {
+            echo "tweaks run: ${{ github.run_number }}  commit: ${{ github.sha }}"
+            if [ -f gradle-tweaks.log ]; then
+              echo "===== errors ====="
+              grep -n -B2 -A20 -E "^e: |What went wrong|error:|FAILED|Unresolved reference|Could not resolve" gradle-tweaks.log | head -400
+              echo "===== last 120 lines ====="
+              tail -120 gradle-tweaks.log
+            fi
+          } > /tmp/logs/latest.txt
+          cd /tmp/logs
+          git init -q && git checkout -q -b build-logs
+          git config user.name "build-bot" && git config user.email "build-bot@users.noreply.github.com"
+          git add latest.txt && git commit -qm "tweaks build log #${{ github.run_number }}"
+          git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" build-logs
