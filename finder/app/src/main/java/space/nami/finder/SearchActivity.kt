@@ -252,7 +252,7 @@ class SearchActivity : ComponentActivity() {
                 onBooruChanged = { Booru.dropNext(this); booruTick(true) },
                 onBooruNext = { booruTick(true) },
                 onPage = ::turnPage,
-                onOpenPost = { Booru.curUrl(this).takeIf { it.isNotEmpty() }?.let { go(it) } },
+                onOpenPost = { Booru.curUrl(this).takeIf { it.isNotEmpty() }?.let { openPost(it) } },
             )
         }
         // the search window opens and closes without animation
@@ -301,6 +301,19 @@ class SearchActivity : ComponentActivity() {
     override fun onDestroy() {
         if (!searched && isFinishing) prewarm(false)
         super.onDestroy()
+    }
+
+    /** Picture's page: in its app if one is installed and allowed to open those links (pixiv app), else in Nami. */
+    private fun openPost(url: String) {
+        val app = Intent(Intent.ACTION_VIEW, Uri.parse(url)).addCategory(Intent.CATEGORY_BROWSABLE)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REQUIRE_NON_BROWSER)
+        try {
+            startActivity(app, android.app.ActivityOptions.makeCustomAnimation(this, 0, 0).toBundle())
+            searched = true
+            finish()
+        } catch (_: Exception) {
+            go(url)
+        }
     }
 
     private fun go(input: String) {
