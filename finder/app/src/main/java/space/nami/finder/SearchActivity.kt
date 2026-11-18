@@ -65,6 +65,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
@@ -80,16 +81,19 @@ private val Accent = Color(0xFFD97757)
 private val AccentSoft = Color(0xFFF7E3DA)
 private val Line = Color(0xFFE6E5E0)
 
-/** Background behind the search window: transparency (0 = solid, 100 = see-through) + optional photo. */
+/** Background behind the search window: transparency (0 = solid, 100 = see-through) + none / own photo / Danbooru. */
 object Look {
-    private fun prefs(c: Context) = c.getSharedPreferences("finder", Context.MODE_PRIVATE)
+    fun prefs(c: Context) = c.getSharedPreferences("finder", Context.MODE_PRIVATE)
     fun transparency(c: Context) = prefs(c).getInt("transparency", 65)
     fun putTransparency(c: Context, v: Int) = prefs(c).edit().putInt("transparency", v).apply()
     fun bgFile(c: Context) = File(c.filesDir, "bg.jpg")
 
-    /** Copy the picked photo in, scaled so the long side is at most 2560px (EXIF rotation applied). */
-    fun saveBg(c: Context, uri: Uri): Boolean = runCatching {
-        val src = ImageDecoder.createSource(c.contentResolver, uri)
+    /** "none" | "photo" | "booru". Older versions only had the photo. */
+    fun source(c: Context): String = prefs(c).getString("source", null) ?: if (bgFile(c).exists()) "photo" else "none"
+    fun putSource(c: Context, v: String) = prefs(c).edit().putString("source", v).apply()
+
+    /** Decode scaled so the long side is at most 2560px (EXIF rotation applied), save as JPEG. */
+    fun writeScaled(src: ImageDecoder.Source, dest: File): Boolean = runCatching {
         val bmp = ImageDecoder.decodeBitmap(src) { d, info, _ ->
             val long = maxOf(info.size.width, info.size.height)
             var sample = 1
@@ -97,13 +101,15 @@ object Look {
             d.setTargetSampleSize(sample)
             d.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
         }
-        val tmp = File(c.filesDir, "bg.tmp")
+        val tmp = File(dest.parentFile, dest.name + ".tmp")
         tmp.outputStream().use { bmp.compress(Bitmap.CompressFormat.JPEG, 90, it) }
-        tmp.renameTo(bgFile(c))
+        tmp.renameTo(dest)
     }.getOrDefault(false)
 
+    fun saveBg(c: Context, uri: Uri): Boolean = writeScaled(ImageDecoder.createSource(c.contentResolver, uri), bgFile(c))
+
     fun loadBg(c: Context): ImageBitmap? {
-        val f = bgFile(c)
+        val f = when (source(c)) { "photo" -> bgFile(c); "booru" -> Booru.cur(c); else -> return null }
         if (!f.exists()) return null
         return runCatching { BitmapFactory.decodeFile(f.path)?.asImageBitmap() }.getOrNull()
     }
@@ -113,12 +119,33 @@ object Look {
 class SearchActivity : ComponentActivity() {
     private var settingsOpen by mutableStateOf(false)
     private var bgVersion by mutableIntStateOf(0)
+    private var booruStatus by mutableStateOf("")
     private var picking = false
+
+    /** Danbooru: swap if it's time, then make sure the next picture is downloading. */
+    private fun booruTick(force: Boolean) {
+        if (Look.source(this) != "booru") return
+        thread {
+            val swapped = Booru.rotate(this, force)
+            if (swapped) runOnUiThread { bgVersion++ }
+            if (Booru.hasNext(this)) { runOnUiThread { booruStatus = "다음 그림 준비됨" }; return@thread }
+            runOnUiThread { booruStatus = "다음 그림 받는 중…" }
+            var err = Booru.fetchNext(this)
+            // first picture, or "다른 그림" with nothing ready yet: show it right away and prepare another
+            val showNow = err == null && !swapped && (force || !Booru.cur(this).exists()) && Booru.rotate(this, true)
+            if (showNow) err = Booru.fetchNext(this)
+            runOnUiThread {
+                if (showNow) bgVersion++
+                booruStatus = err ?: if (Booru.hasNext(this)) "다음 그림 준비됨" else ""
+            }
+        }
+    }
 
     private val picker = registerForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
         picking = false
         if (uri != null) thread {
             val ok = Look.saveBg(this, uri)
+            if (ok) Look.putSource(this, "photo")
             runOnUiThread {
                 if (ok) bgVersion++ else Toast.makeText(this, "사진을 못 불러왔어요", Toast.LENGTH_SHORT).show()
             }
@@ -138,9 +165,15 @@ class SearchActivity : ComponentActivity() {
                     picking = true
                     picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
                 },
-                onRemoveBg = { Look.bgFile(this).delete(); bgVersion++ },
+                onRemoveBg = { Look.bgFile(this).delete(); Look.putSource(this, "none"); bgVersion++ },
+                onSource = { v -> Look.putSource(this, v); bgVersion++; booruTick(false) },
+                booruStatus = booruStatus,
+                onBooruChanged = { Booru.dropNext(this); booruTick(true) },
+                onBooruNext = { booruTick(true) },
+                onOpenPost = { Booru.curId(this).takeIf { it > 0 }?.let { go("https://danbooru.donmai.us/posts/$it") } },
             )
         }
+        booruTick(false)
         // Back closes the window in one press, even while the keyboard is up.
         // PRIORITY_OVERLAY runs before the keyboard's own "hide" back handler.
         if (Build.VERSION.SDK_INT >= 33) {
@@ -190,10 +223,19 @@ private fun SearchScreen(
     bgVersion: Int,
     onPick: () -> Unit,
     onRemoveBg: () -> Unit,
+    onSource: (String) -> Unit,
+    booruStatus: String,
+    onBooruChanged: () -> Unit,
+    onBooruNext: () -> Unit,
+    onOpenPost: () -> Unit,
 ) {
     val ctx = androidx.compose.ui.platform.LocalContext.current
     var text by remember { mutableStateOf("") }
     var transparency by remember { mutableIntStateOf(Look.transparency(ctx)) }
+    var source by remember { mutableStateOf(Look.source(ctx)) }
+    var tags by remember { mutableStateOf(Booru.tags(ctx)) }
+    var sensitive by remember { mutableStateOf(Booru.sensitive(ctx)) }
+    var minutes by remember { mutableStateOf(Booru.minutes(ctx).toString()) }
     val bg by produceState<ImageBitmap?>(null, bgVersion) { value = withContext(Dispatchers.IO) { Look.loadBg(ctx) } }
     val focus = remember { FocusRequester() }
     val focusManager = LocalFocusManager.current
@@ -295,9 +337,56 @@ private fun SearchScreen(
                         ),
                     )
                     Spacer(Modifier.height(6.dp))
+                    Text("배경 그림", color = Ink, fontSize = 16.sp)
+                    Spacer(Modifier.height(8.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Pill(if (bg == null) "사진 고르기" else "사진 바꾸기", AccentSoft, Accent, onPick)
-                        if (bg != null) Pill("사진 빼기", Color(0xFFF3F2EE), Ink, onRemoveBg)
+                        listOf("none" to "없음", "photo" to "내 사진", "booru" to "단부루").forEach { (v, name) ->
+                            Seg(name, source == v) { source = v; onSource(v) }
+                        }
+                    }
+                    Spacer(Modifier.height(12.dp))
+                    when (source) {
+                        "photo" -> Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Pill(if (bg == null) "사진 고르기" else "사진 바꾸기", AccentSoft, Accent, onPick)
+                            if (bg != null) Pill("사진 빼기", Color(0xFFF3F2EE), Ink, onRemoveBg)
+                        }
+                        "booru" -> Column {
+                            Field(tags, "태그 (예: hatsune_miku scenery)", KeyboardType.Text, {
+                                tags = it; Look.prefs(ctx).edit().putString("booruTags", it).apply()
+                            }) { onBooruChanged() }
+                            Spacer(Modifier.height(8.dp))
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Seg("일반만", !sensitive) {
+                                    if (sensitive) { sensitive = false; Look.prefs(ctx).edit().putBoolean("booruSensitive", false).apply(); onBooruChanged() }
+                                }
+                                Seg("센시티브까지", sensitive) {
+                                    if (!sensitive) { sensitive = true; Look.prefs(ctx).edit().putBoolean("booruSensitive", true).apply(); onBooruChanged() }
+                                }
+                            }
+                            Spacer(Modifier.height(8.dp))
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Box(Modifier.widthIn(max = 110.dp)) {
+                                    Field(minutes, "30", KeyboardType.Number, { v ->
+                                        minutes = v.filter { it.isDigit() }.take(5)
+                                        minutes.toIntOrNull()?.takeIf { it >= 1 }?.let { Look.prefs(ctx).edit().putInt("booruMinutes", it).apply() }
+                                    }) {}
+                                }
+                                Text("  분마다 바꾸기", color = Ink, fontSize = 15.sp)
+                            }
+                            Spacer(Modifier.height(10.dp))
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Pill("다른 그림", AccentSoft, Accent, onBooruNext)
+                                if (bg != null) Pill("이 그림 열기", Color(0xFFF3F2EE), Ink, onOpenPost)
+                            }
+                            if (booruStatus.isNotEmpty()) {
+                                Spacer(Modifier.height(8.dp))
+                                Text(booruStatus, color = Gray, fontSize = 13.sp)
+                            }
+                            Spacer(Modifier.height(4.dp))
+                            Text("태그는 띄어쓰기로 구분(단부루 검색과 같아요). 시간이 지나면 다음에 열 때 바뀌어요.",
+                                color = Gray, fontSize = 12.sp, lineHeight = 17.sp)
+                        }
+                        else -> {}
                     }
                 }
             }
@@ -311,4 +400,36 @@ private fun Pill(label: String, bg: Color, fg: Color, onClick: () -> Unit) {
     Box(
         Modifier.clip(CircleShape).background(bg).clickable(onClick = onClick).padding(horizontal = 18.dp, vertical = 10.dp),
     ) { Text(label, color = fg, fontSize = 15.sp, fontWeight = FontWeight.SemiBold) }
+}
+
+@Composable
+private fun Seg(label: String, selected: Boolean, onClick: () -> Unit) {
+    Box(
+        Modifier.clip(CircleShape).background(if (selected) Accent else Color(0xFFF3F2EE))
+            .clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 9.dp),
+    ) { Text(label, color = if (selected) Color.White else Ink, fontSize = 14.sp, fontWeight = FontWeight.SemiBold) }
+}
+
+@Composable
+private fun Field(value: String, hint: String, type: KeyboardType, onChange: (String) -> Unit, onDone: () -> Unit) {
+    val focusManager = LocalFocusManager.current
+    BasicTextField(
+        value = value,
+        onValueChange = onChange,
+        singleLine = true,
+        textStyle = TextStyle(fontSize = 15.sp, color = Ink),
+        cursorBrush = SolidColor(Accent),
+        keyboardOptions = KeyboardOptions(keyboardType = type, imeAction = ImeAction.Done),
+        keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus(); onDone() }),
+        modifier = Modifier.fillMaxWidth(),
+        decorationBox = { inner ->
+            Box(
+                Modifier.clip(CircleShape).background(Color(0xFFF3F2EE)).padding(horizontal = 16.dp, vertical = 11.dp),
+                contentAlignment = Alignment.CenterStart,
+            ) {
+                if (value.isEmpty()) Text(hint, color = Gray, fontSize = 15.sp)
+                inner()
+            }
+        },
+    )
 }
