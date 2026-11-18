@@ -106,10 +106,10 @@ object Look {
     /** Decode scaled so the long side is at most 2560px (EXIF rotation applied), save as JPEG. */
     fun writeScaled(src: ImageDecoder.Source, dest: File): Boolean = runCatching {
         val bmp = ImageDecoder.decodeBitmap(src) { d, info, _ ->
-            val long = maxOf(info.size.width, info.size.height)
-            var sample = 1
-            while (long / (sample * 2) >= 2560) sample *= 2
-            d.setTargetSampleSize(sample)
+            // exact size (power-of-two sampling alone left pictures up to ~5000px → slow to open)
+            val w = info.size.width; val h = info.size.height
+            val scale = minOf(1f, 2560f / maxOf(w, h))
+            if (scale < 1f) d.setTargetSize((w * scale).toInt().coerceAtLeast(1), (h * scale).toInt().coerceAtLeast(1))
             d.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
         }
         val tmp = File(dest.parentFile, dest.name + ".tmp")
@@ -119,10 +119,26 @@ object Look {
 
     fun saveBg(c: Context, uri: Uri): Boolean = writeScaled(ImageDecoder.createSource(c.contentResolver, uri), bgFile(c))
 
+    private fun bgFileFor(c: Context): File? = when (source(c)) { "photo" -> bgFile(c); "booru", "pixiv" -> Booru.cur(c); else -> null }
+
+    /** Last decoded background, kept while the app is alive so reopening the window shows it at once. */
+    private var memo: Triple<String, Long, ImageBitmap>? = null
+
+    /** The background from memory if the file hasn't changed. Cheap, main thread OK. */
+    fun cachedBg(c: Context): ImageBitmap? {
+        val f = bgFileFor(c) ?: return null
+        val m = memo ?: return null
+        return if (m.first == f.path && m.second == f.lastModified() && f.exists()) m.third else null
+    }
+
     fun loadBg(c: Context): ImageBitmap? {
-        val f = when (source(c)) { "photo" -> bgFile(c); "booru", "pixiv" -> Booru.cur(c); else -> return null }
+        val f = bgFileFor(c) ?: return null
         if (!f.exists()) return null
-        return runCatching { BitmapFactory.decodeFile(f.path)?.asImageBitmap() }.getOrNull()
+        cachedBg(c)?.let { return it }
+        val stamp = f.lastModified()
+        val img = runCatching { BitmapFactory.decodeFile(f.path)?.asImageBitmap() }.getOrNull() ?: return null
+        memo = Triple(f.path, stamp, img)
+        return img
     }
 }
 
@@ -151,14 +167,17 @@ class SearchActivity : ComponentActivity() {
         thread {
             val swapped = Booru.rotate(this, force)
             if (swapped) runOnUiThread { bgVersion++ }
-            if (Booru.hasNext(this)) { runOnUiThread { booruStatus = "다음 그림 준비됨" }; return@thread }
+            if (swapped) prefetchCurPage()
+            if (Booru.queueFull(this)) { runOnUiThread { booruStatus = "다음 그림 준비됨" }; return@thread }
             runOnUiThread { booruStatus = "다음 그림 받는 중…" }
             var err = Booru.fetchNext(this, cookie)
-            // first picture, or "다른 그림" with nothing ready yet: show it right away and prepare another
+            // first picture, or "다른 그림" with nothing ready yet: show it right away and prepare more
             val showNow = err == null && !swapped && (force || !Booru.cur(this).exists()) && Booru.rotate(this, true)
-            if (showNow) err = Booru.fetchNext(this, cookie)
+            if (showNow) runOnUiThread { bgVersion++ }
+            prefetchCurPage()
+            // keep two in line so several "다음 그림" in a row stay instant
+            repeat(2) { if (err == null && !Booru.queueFull(this)) err = Booru.fetchNext(this, cookie) }
             runOnUiThread {
-                if (showNow) bgVersion++
                 booruStatus = err ?: if (Booru.hasNext(this)) "다음 그림 준비됨" else ""
             }
         }
@@ -174,7 +193,13 @@ class SearchActivity : ComponentActivity() {
         thread {
             val err = Booru.showPage(this, i)
             runOnUiThread { bgVersion++; booruStatus = err ?: "" }
+            if (err == null) Booru.prefetchPage(this, i)
         }
+    }
+
+    /** Multi-page work on screen: get page 2 ready. Call from a background thread. */
+    private fun prefetchCurPage() {
+        if (Look.source(this) == "pixiv" && Booru.pages(this).size > 1) Booru.prefetchPage(this, Booru.page(this))
     }
 
     private val picker = registerForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
@@ -315,7 +340,7 @@ private fun SearchScreen(
     var pR18 by remember { mutableStateOf(Pixiv.r18(ctx)) }
     var pTop by remember { mutableStateOf(Pixiv.top(ctx).toString()) }
     var pTags by remember { mutableStateOf(Pixiv.tags(ctx)) }
-    val bg by produceState<ImageBitmap?>(null, bgVersion) { value = withContext(Dispatchers.IO) { Look.loadBg(ctx) } }
+    val bg by produceState(Look.cachedBg(ctx), bgVersion) { value = withContext(Dispatchers.IO) { Look.loadBg(ctx) } }
     val focus = remember { FocusRequester() }
     val focusManager = LocalFocusManager.current
     val keyboard = LocalSoftwareKeyboardController.current
