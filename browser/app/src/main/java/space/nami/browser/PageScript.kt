@@ -289,10 +289,12 @@ object PageScript {
   var peek = function(where, m){
     try {
       var s = typeof m === 'string' ? m : JSON.stringify(m, function(k, v){ return (v instanceof Blob) ? '[Blob ' + v.size + ']' : (v && (ArrayBuffer.isView(v) || v instanceof ArrayBuffer)) ? '[bytes]' : (typeof ReadableStream !== 'undefined' && v instanceof ReadableStream) ? '[stream]' : v; });
-      if (s && s.length > 4) { LOG.push(where + ': ' + s.slice(0, 1500)); if (LOG.length > 12) LOG.shift(); }
+      if (s && s.length > 4) { LOG.push(where + ': ' + s.slice(0, 1500)); if (LOG.length > 30) LOG.shift(); }
     } catch(e) {}
   };
   var seeZip = function(where, m){
+    if (m && m.type === 'nami-keepalive') return;   // our own ping, not the site
+    if (/analytics|zaraz|collect|beacon/i.test(where)) return;
     peek(where, m);
     try { noteName(typeof m === 'string' ? JSON.parse(m) : m, 0); } catch(e) {}
     try { var z = zipOf(typeof m === 'string' ? JSON.parse(m) : m); if (z) { lastZip = { z: z, at: Date.now() }; if (m && m.id) ZIPREQ[m.id] = z; } } catch(e) {}
