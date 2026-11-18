@@ -451,10 +451,18 @@ private fun MainMenu(b: Browser, prefs: Prefs, open: Boolean, close: () -> Unit,
             DropdownMenuItem(text = { Text(label, fontSize = 15.sp) }, onClick = { close(); onClick() }, enabled = enabled,
                 leadingIcon = lead, trailingIcon = if (checked) check else null)
         }
+        // icon row on top (like Chrome): keeps 설정 in sight even when the list below gets long
+        Row(Modifier.fillMaxWidth().padding(horizontal = 6.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+            @Composable fun icon(a: Action, enabled: Boolean = true) =
+                IconButton({ close(); run(a) }, enabled = enabled) {
+                    a.icon?.let { Icon(it, a.label, tint = if (enabled) C.Ink else C.Sub.copy(alpha = 0.4f)) }
+                }
+            icon(Action.BACK, tab?.canBack == true)
+            icon(Action.FORWARD, tab?.canForward == true)
+            icon(Action.RELOAD)
+            icon(Action.SETTINGS)
+        }
         item("새 탭", Action.NEW_TAB.icon) { run(Action.NEW_TAB) }
-        item("뒤로", Action.BACK.icon, tab?.canBack == true) { run(Action.BACK) }
-        item("앞으로", Action.FORWARD.icon, tab?.canForward == true) { run(Action.FORWARD) }
-        item("새로고침", Action.RELOAD.icon) { run(Action.RELOAD) }
         item(if (tab?.translateOn == true) "원문 보기" else "한국어로 번역", Action.TRANSLATE.icon) { run(Action.TRANSLATE) }
         val host = tab?.host ?: ""
         if (host.isNotEmpty()) {
@@ -477,7 +485,6 @@ private fun MainMenu(b: Browser, prefs: Prefs, open: Boolean, close: () -> Unit,
         val nv = tab?.media?.size ?: 0
         item(if (nv > 0) "동영상 · ${nv}개" else "동영상", Action.VIDEO.icon) { run(Action.VIDEO) }
         item("받은 파일", Icons.Filled.Download) { run(Action.DOWNLOADS) }
-        item("설정", Action.SETTINGS.icon) { run(Action.SETTINGS) }
     }
 }
 
