@@ -4,6 +4,8 @@
     <!-- to list every installed app (to turn Samsung apps off/on) -->
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES"
         tools:ignore="QueryAllPackagesPermission" />
+    <!-- only to translate app descriptions into Korean -->
+    <uses-permission android:name="android.permission.INTERNET" />
     <queries>
         <package android:name="moe.shizuku.privileged.api" />
     </queries>

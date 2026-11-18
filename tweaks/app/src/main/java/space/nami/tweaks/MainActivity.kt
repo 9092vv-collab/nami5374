@@ -318,10 +318,28 @@ private fun Screen(tick: Int) {
                         Text("삼성 페이·월렛·패스, 보안 폴더, 생체 인증 쪽과 관련된 앱이에요. 이런 걸 쓰고 있다면 끄지 마세요.",
                             color = Color(0xFFC0392B), fontSize = 14.sp, lineHeight = 20.sp)
                     }
-                    row.desc?.takeIf { it.isNotBlank() }?.let {
+                    row.desc?.takeIf { it.isNotBlank() }?.let { en ->
+                        var showEn by remember(row.pkg) { mutableStateOf(false) }
+                        val ko by produceState(Ko.cached(c, row.pkg) ?: "", row.pkg) {
+                            if (value.isEmpty()) value = Ko.translate(c, row.pkg, en) ?: "!"
+                        }
                         Spacer(Modifier.height(10.dp))
-                        Text("목록 설명(영어)", color = Gray, fontSize = 12.sp)
-                        Text(it, color = Ink, fontSize = 13.sp, lineHeight = 19.sp)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("설명", color = Gray, fontSize = 12.sp, modifier = Modifier.weight(1f))
+                            if (ko.isNotEmpty() && ko != "!") Text(if (showEn) "한국어로 보기" else "원문 보기",
+                                color = Accent, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.clip(RoundedCornerShape(50)).clickable { showEn = !showEn }
+                                    .padding(horizontal = 6.dp, vertical = 4.dp))
+                        }
+                        Text(
+                            when {
+                                showEn || ko == "!" -> en
+                                ko.isEmpty() -> "번역 중…"
+                                else -> ko
+                            },
+                            color = if (ko.isEmpty() && !showEn) Gray else Ink, fontSize = 13.sp, lineHeight = 19.sp,
+                        )
+                        if (ko == "!") Text("번역을 못 했어요(인터넷 확인). 원문을 보여 드려요.", color = Gray, fontSize = 12.sp)
                     }
                 }
             },
