@@ -20,6 +20,9 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -214,6 +217,7 @@ fun toUrl(input: String): String? {
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun SearchScreen(
     onGo: (String) -> Unit,
@@ -242,12 +246,18 @@ private fun SearchScreen(
     val keyboard = LocalSoftwareKeyboardController.current
     val opacity = (100 - transparency) / 100f
     val swallow = remember { MutableInteractionSource() }
+    val imeUp = WindowInsets.isImeVisible
 
     Box(
         Modifier
             .fillMaxSize()
             .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {
-                if (settingsOpen) onSettings(false) else onClose()
+                // keyboard up → just put it away; otherwise close settings, then the window
+                when {
+                    imeUp -> { keyboard?.hide(); focusManager.clearFocus() }
+                    settingsOpen -> onSettings(false)
+                    else -> onClose()
+                }
             },
     ) {
         val img = bg
