@@ -12,7 +12,17 @@ import java.net.URLEncoder
 object Ko {
     private fun cache(c: Context) = c.getSharedPreferences("ko", Context.MODE_PRIVATE)
 
-    fun cached(c: Context, key: String): String? = cache(c).getString(key, null)
+    /** Hand-written Korean descriptions (assets/ko.json, pkg -> text). They win over machine translation. */
+    @Volatile private var curated: Map<String, String>? = null
+
+    private fun curated(c: Context): Map<String, String> = curated ?: synchronized(this) {
+        curated ?: runCatching {
+            val o = org.json.JSONObject(c.assets.open("ko.json").bufferedReader().readText())
+            o.keys().asSequence().associateWith { o.getString(it) }
+        }.getOrDefault(emptyMap()).also { curated = it }
+    }
+
+    fun cached(c: Context, key: String): String? = curated(c)[key] ?: cache(c).getString(key, null)
 
     /** null when it couldn't be translated (offline etc.). */
     suspend fun translate(c: Context, key: String, text: String): String? {

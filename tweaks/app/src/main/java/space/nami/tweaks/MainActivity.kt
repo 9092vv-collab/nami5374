@@ -261,7 +261,14 @@ private fun Screen(tick: Int) {
                         modifier = Modifier.padding(start = 4.dp))
                     Text("끈 앱은 안 열리고 알림도 안 와요. 지우는 게 아니라서 언제든 다시 켤 수 있어요. 등급은 UAD(Universal Android Debloater) 목록 기준이고, 앱을 누르면 설명이 나와요. 꼭 필요한 앱과 '위험' 등급은 끌 수 없게 막아 뒀어요.",
                         color = Gray, fontSize = 13.sp, lineHeight = 19.sp, modifier = Modifier.padding(start = 4.dp, top = 4.dp))
-                    Spacer(Modifier.height(12.dp))
+                    Text("번역용 목록 복사", color = Accent, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.padding(start = 0.dp, top = 6.dp).clip(RoundedCornerShape(50)).clickable {
+                            val list = apps.orEmpty().filter { it.desc != null }.joinToString("\n") { it.pkg + "\t" + it.label }
+                            val cm = c.getSystemService(android.content.ClipboardManager::class.java)
+                            cm?.setPrimaryClip(android.content.ClipData.newPlainText("apps", list))
+                            Toast.makeText(c, "${apps.orEmpty().count { it.desc != null }}개 복사했어요", Toast.LENGTH_SHORT).show()
+                        }.padding(horizontal = 4.dp, vertical = 4.dp))
+                    Spacer(Modifier.height(10.dp))
                     SearchBox(query) { query = it }
                     Spacer(Modifier.height(10.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
