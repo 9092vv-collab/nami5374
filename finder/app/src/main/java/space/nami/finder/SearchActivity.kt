@@ -255,6 +255,11 @@ class SearchActivity : ComponentActivity() {
                 onOpenPost = { Booru.curUrl(this).takeIf { it.isNotEmpty() }?.let { go(it) } },
             )
         }
+        // the search window opens and closes without animation
+        if (Build.VERSION.SDK_INT >= 34) {
+            overrideActivityTransition(OVERRIDE_TRANSITION_OPEN, 0, 0)
+            overrideActivityTransition(OVERRIDE_TRANSITION_CLOSE, 0, 0)
+        }
         prewarm(true)
         Accounts.migrate(this)
         refreshAccounts()
@@ -271,6 +276,12 @@ class SearchActivity : ComponentActivity() {
     // Leaving the window (home button, another app) closes it, so the next tap starts empty.
     // Not while the photo picker is open — that's us.
     override fun onStop() { super.onStop(); if (!picking) finish() }
+
+    @Suppress("DEPRECATION")
+    override fun finish() {
+        super.finish()
+        if (Build.VERSION.SDK_INT < 34) overridePendingTransition(0, 0)
+    }
 
     override fun onResume() {
         super.onResume()
@@ -300,7 +311,8 @@ class SearchActivity : ComponentActivity() {
             .addCategory(Intent.CATEGORY_BROWSABLE)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         try {
-            startActivity(Intent(view).setPackage(NAMI))
+            // no transition animation: Nami just appears
+            startActivity(Intent(view).setPackage(NAMI), android.app.ActivityOptions.makeCustomAnimation(this, 0, 0).toBundle())
         } catch (_: ActivityNotFoundException) {
             Toast.makeText(this, "Nami가 없어서 다른 브라우저로 열어요", Toast.LENGTH_SHORT).show()
             runCatching { startActivity(view) }
