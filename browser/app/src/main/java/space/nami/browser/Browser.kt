@@ -17,6 +17,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.webkit.CookieManager
 import android.webkit.JavascriptInterface
+import android.webkit.RenderProcessGoneDetail
 import android.webkit.URLUtil
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
@@ -491,16 +492,18 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
     }
 
     /** Address-bar input → url or Google search. */
+    private fun isSafeUrl(u: String): Boolean = u.trim().lowercase().let { it.startsWith("http://") || it.startsWith("https://") || it.startsWith("about:") }
     fun load(t: BrowserTab, input: String) {
         val s = input.trim()
         val url = when {
             s.isEmpty() -> prefs.homeUrl
-            Regex("^[a-zA-Z][a-zA-Z0-9+.-]*://").containsMatchIn(s) || s.startsWith("about:") -> s
+            isSafeUrl(s) -> s
+            Regex("^[a-zA-Z][a-zA-Z0-9+.-]*://").containsMatchIn(s) -> return
             !s.contains(' ') && Regex("^[^/]+\\.[a-zA-Z]{2,}(:\\d+)?(/.*)?$").matches(s) -> "https://$s"
             !s.contains(' ') && s.startsWith("localhost") -> "http://$s"
             else -> "https://www.google.com/search?q=" + URLEncoder.encode(s, "UTF-8")
         }
-        if (isUserJs(url)) { offerInstall(url); return }
+        if (!isSafeUrl(url)) return; if (isUserJs(url)) { offerInstall(url); return }
         t.url = url
         t.web.loadUrl(url)
     }
@@ -654,7 +657,7 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
             val o = runCatching { org.json.JSONObject(json) }.getOrNull() ?: return false
             val items = o.optJSONArray("items") ?: return false
             if (items.length() == 0) return false
-            val first = items.getJSONObject(0).optString("u")
+            val first = items.optJSONObject(0)?.optString("u") ?: return false
             if (!first.startsWith("http")) return false
             // sites whose files only exist inside their service worker (kio.ac): don't try again
             val fh = Uri.parse(first).host ?: ""
@@ -731,7 +734,7 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
             scope.launch {
                 val o = runCatching { org.json.JSONObject(json) }.getOrNull() ?: return@launch
                 val id = o.optString("id")
-                val res = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { GmXhr.run(o, t.web.settings.userAgentString) }
+                val ua = t.web.settings.userAgentString; val res = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { GmXhr.run(o, ua) }
                 val q = org.json.JSONObject.quote(id)
                 t.web.evaluateJavascript("window.__namiGmCb&&__namiGmCb($q,$res)", null)
             }
@@ -783,7 +786,7 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
             applyScripts(t)
         }
 
-        web.webViewClient = object : WebViewClient() {
+        web.webViewClient = object : WebViewClient() { override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail): Boolean { val i = tabs.indexOfFirst { it.web === view }; if (i >= 0) closeTab(i) else { (view.parent as? android.view.ViewGroup)?.removeView(view); runCatching { view.destroy() } }; return true }
             override fun shouldInterceptRequest(view: WebView, req: WebResourceRequest): android.webkit.WebResourceResponse? {
                 if (req.isForMainFrame) return null
                 val u = req.url.toString()
@@ -836,7 +839,7 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
                     act.startActivity(i); true
                 } catch (e: ActivityNotFoundException) {
                     val fb = if (s == "intent") runCatching { Intent.parseUri(u.toString(), Intent.URI_INTENT_SCHEME).getStringExtra("browser_fallback_url") }.getOrNull() else null
-                    if (fb != null) view.loadUrl(fb)
+                    if (fb != null && isSafeUrl(fb)) view.loadUrl(fb)
                     true
                 } catch (e: Exception) { true }
             }
@@ -910,9 +913,9 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
             when (h.type) {
                 WebView.HitTestResult.IMAGE_TYPE -> { longPress = LongPress(null, h.extra); true }
                 WebView.HitTestResult.SRC_IMAGE_ANCHOR_TYPE -> {
-                    val msg = Handler(Looper.getMainLooper()).obtainMessage()
+                    val msg = Handler(Looper.getMainLooper()) { m -> longPress = LongPress(m.data.getString("url"), h.extra ?: m.data.getString("src")); true }.obtainMessage()
                     web.requestFocusNodeHref(msg)
-                    longPress = LongPress(msg.data.getString("url"), h.extra ?: msg.data.getString("src")); true
+                    true
                 }
                 WebView.HitTestResult.SRC_ANCHOR_TYPE -> { longPress = LongPress(h.extra, null); true }
                 else -> false
