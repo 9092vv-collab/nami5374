@@ -44,7 +44,7 @@ class MainActivity : ComponentActivity(), Host {
     }
 
     private fun urlFrom(i: Intent?): String? = when (i?.action) {
-        Intent.ACTION_VIEW -> i.dataString
+        Intent.ACTION_VIEW -> i.dataString?.takeIf { val s = Uri.parse(it).scheme?.lowercase(); s == "http" || s == "https" }
         Intent.ACTION_SEND -> i.getStringExtra(Intent.EXTRA_TEXT)?.let { t ->
             Regex("https?://\\S+").find(t)?.value ?: "https://www.google.com/search?q=" + Uri.encode(t)
         }
@@ -62,7 +62,8 @@ class MainActivity : ComponentActivity(), Host {
     override fun onResume() { super.onResume(); Downloads.resumePending(this) }
 
     override fun onStop() { super.onStop(); browser.save() }
-
+    override fun onDestroy() { if (::browser.isInitialized) { browser.tabs.forEach { t -> t.frame.removeAllViews(); t.web.destroy(); t.thumb = null }; browser.tabs.clear() }; super.onDestroy() }
+    
     /**
      * While a page is streaming a download (kio.ac), leaving Nami turns it into a small picture-in-picture window,
      * like the user's own "pop-up window in a corner" trick: a page that stays on screen isn't frozen.
@@ -86,6 +87,6 @@ class MainActivity : ComponentActivity(), Host {
     override fun chooseFile(cb: ValueCallback<Array<Uri>>, params: WebChromeClient.FileChooserParams): Boolean {
         fileCb?.onReceiveValue(null)
         fileCb = cb
-        return runCatching { pickFile.launch(params.createIntent()); true }.getOrElse { fileCb = null; false }
+        return try { pickFile.launch(params.createIntent()); true } catch (_: Exception) { fileCb?.onReceiveValue(null); fileCb = null; false }
     }
 }
