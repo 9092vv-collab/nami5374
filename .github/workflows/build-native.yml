@@ -55,6 +55,28 @@ jobs:
             echo "::warning::attempt $i failed on a download, retrying"; sleep 30
           done
           exit 1
+      - name: Sign (new key + rotation lineage from the old key)
+        env:
+          NAMI_KEY_PASS: ${{ secrets.NAMI_KEY_PASS }}
+        run: |
+          set -e
+          if [ -z "$NAMI_KEY_PASS" ]; then echo "::error::secret NAMI_KEY_PASS is missing"; exit 1; fi
+          BT="$ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -1)"
+          K="$RUNNER_TEMP/nami.jks"
+          OLD=native/app/sgu-next.keystore
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -in browser/signing/nami-release.jks.enc -out "$K" -pass env:NAMI_KEY_PASS
+          IN=native/app/build/outputs/apk/release/app-release-unsigned.apk
+          "$BT/zipalign" -f -p 4 "$IN" "$RUNNER_TEMP/aligned.apk"
+          "$BT/apksigner" rotate --out "$RUNNER_TEMP/lineage" \
+            --old-signer --ks "$OLD" --ks-key-alias sgu --ks-pass pass:sgunext --key-pass pass:sgunext \
+            --new-signer --ks "$K" --ks-key-alias nami --ks-pass env:NAMI_KEY_PASS --key-pass env:NAMI_KEY_PASS
+          "$BT/apksigner" sign \
+            --ks "$OLD" --ks-key-alias sgu --ks-pass pass:sgunext --key-pass pass:sgunext \
+            --next-signer --ks "$K" --ks-key-alias nami --ks-pass env:NAMI_KEY_PASS --key-pass env:NAMI_KEY_PASS \
+            --lineage "$RUNNER_TEMP/lineage" --rotation-min-sdk-version 28 \
+            --out native/app/build/outputs/apk/release/app-release.apk "$RUNNER_TEMP/aligned.apk"
+          "$BT/apksigner" verify -v --print-certs native/app/build/outputs/apk/release/app-release.apk | grep -E "Verified|Signer|SHA-256" | head -20
+          rm -f "$K"
       - name: Publish (fixed link, tag next-latest)
         env:
           GH_TOKEN: ${{ github.token }}

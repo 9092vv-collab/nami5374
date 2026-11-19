@@ -12,27 +12,18 @@ android {
         applicationId = "space.sgu.next"
         minSdk = 31
         targetSdk = 36
-        versionCode = 69
-        versionName = "0.9.32"
+        versionCode = 70
+        versionName = "0.9.33"
         ndk { abiFilters.add("arm64-v8a") }
     }
 
-    // Personal sideload key (kept in the repo so updates install over the old version).
-    signingConfigs {
-        create("sgu") {
-            storeFile = file("sgu-next.keystore")
-            storePassword = "sgunext"
-            keyAlias = "sgu"
-            keyPassword = "sgunext"
-        }
-    }
+    // Signed in the workflow ("Sign" step): new Nami key + rotation lineage from the old sgu key.
 
     buildTypes {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"))
-            signingConfig = signingConfigs.getByName("sgu")
         }
     }
 
