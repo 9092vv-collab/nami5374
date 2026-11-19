@@ -12,6 +12,8 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity(), Host {
     private lateinit var prefs: Prefs
@@ -34,7 +36,10 @@ class MainActivity : ComponentActivity(), Host {
         handleOpenFile(intent)
         val incoming = urlFrom(intent)
         if (!browser.restore(incoming)) browser.newTab(incoming ?: prefs.homeUrl).fromLink = incoming != null
-        setContent { NamiApp(browser, prefs, this) }
+        setContent { NamiApp(browser, prefs, this) }; if ((prefs.boostRamCache || prefs.boostOom) && (prefs.boostRoot || prefs.boostShizuku)) {
+            lifecycleScope.launch(Dispatchers.IO) {
+                if (prefs.boostRamCache) Booster.mountRamCache(applicationContext, prefs.boostRoot, prefs.boostShizuku)
+                if (prefs.boostOom) Booster.boostOomAndPriority(applicationContext, prefs.boostRoot, prefs.boostShizuku); } }
     }
 
     override fun onNewIntent(intent: Intent) {
