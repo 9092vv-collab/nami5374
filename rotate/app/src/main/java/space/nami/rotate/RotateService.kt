@@ -27,7 +27,12 @@ object Prefs {
     private const val PREV_USER = "prevUser"
     private const val PREV_IGNORE = "prevIgnore"
 
+    const val EXCLUDED = "excluded"
+
     fun of(c: Context): SharedPreferences = c.getSharedPreferences(FILE, Context.MODE_PRIVATE)
+    /** Apps that get the screen back (no lock) while they're in front. */
+    fun excluded(c: Context): Set<String> = of(c).getStringSet(EXCLUDED, emptySet()) ?: emptySet()
+    fun setExcluded(c: Context, v: Set<String>) = of(c).edit().putStringSet(EXCLUDED, HashSet(v)).apply()
     fun enabled(c: Context) = of(c).getBoolean(ENABLED, true)
     fun rotation(c: Context) = of(c).getInt(ROTATION, Surface.ROTATION_90)
     fun setEnabled(c: Context, v: Boolean) = of(c).edit().putBoolean(ENABLED, v).apply()
@@ -179,11 +184,24 @@ class RotateService : AccessibilityService() {
         schedule()
     }
 
-    override fun onAccessibilityEvent(event: AccessibilityEvent?) {}
+    override fun onAccessibilityEvent(event: AccessibilityEvent?) {
+        if (event?.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return
+        val pkg = event.packageName?.toString() ?: return
+        // The notification shade and the keyboard pop over apps; they don't change which app is in front.
+        if (pkg == "com.android.systemui" || pkg == imePackage()) return
+        if (pkg != front) {
+            front = pkg
+            schedule(60)
+        }
+    }
+
+    private fun imePackage(): String? =
+        Settings.Secure.getString(contentResolver, Settings.Secure.DEFAULT_INPUT_METHOD)?.substringBefore('/')
     override fun onInterrupt() {}
 
     override fun onDestroy() {
         running = false
+        pausedFor = null
         bg.removeCallbacks(check)
         bg.post { releaseIgnore(); thread.quitSafely() }
         getSystemService(DisplayManager::class.java)?.unregisterDisplayListener(displays)
@@ -227,6 +245,12 @@ class RotateService : AccessibilityService() {
         Sh.run("cmd", "window", "set-ignore-orientation-request", Prefs.prevIgnore(this).toString())
     }
 
+    /** Let the app in front turn the screen as it likes (auto-rotate on). */
+    private fun free() {
+        if (get(Settings.System.ACCELEROMETER_ROTATION, 0) == 1) return
+        if (Sh.run("cmd", "window", "user-rotation", "free") == null) put(Settings.System.ACCELEROMETER_ROTATION, 1)
+    }
+
     private fun restore(accel: Int, user: Int) {
         val cmd = if (accel == 1) arrayOf("cmd", "window", "user-rotation", "free")
         else arrayOf("cmd", "window", "user-rotation", "lock", user.toString())
@@ -248,6 +272,15 @@ class RotateService : AccessibilityService() {
                     get(Settings.System.USER_ROTATION, Surface.ROTATION_0))
                 enforcing = true
             }
+            val f = front
+            if (f != null && f in Prefs.excluded(this)) {
+                // An excluded app is in front: hand the screen back until another app comes up.
+                pausedFor = f
+                releaseIgnore()
+                free()
+                return
+            }
+            pausedFor = null
             if (shizuku && Prefs.force(this)) holdIgnore() else releaseIgnore()
             lock(Prefs.rotation(this))
             return
@@ -272,5 +305,9 @@ class RotateService : AccessibilityService() {
 
     companion object {
         @Volatile var running = false
+        /** App in front (from window changes), shown on the status line. */
+        @Volatile var front: String? = null
+        /** Set while the lock is let go for an excluded app. */
+        @Volatile var pausedFor: String? = null
     }
 }

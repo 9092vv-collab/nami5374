@@ -6,6 +6,11 @@
         tools:ignore="ProtectedPermissions" />
     <queries>
         <package android:name="moe.shizuku.privileged.api" />
+        <!-- to list apps for "exclude from the lock" -->
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
     </queries>
     <application
         android:label="회전 고정"

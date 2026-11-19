@@ -214,6 +214,8 @@ private fun Screen(tick: Int) {
                     color = Gray, fontSize = 13.sp)
             }
 
+            ExcludeCard()
+
             // Status line for finding problems (screenshot this when something is off).
             var status by remember { mutableStateOf("") }
             LaunchedEffect(Unit) {
@@ -226,12 +228,108 @@ private fun Screen(tick: Int) {
                         " · Shizuku " + (if (Sh.ready()) "연결" else "없음") +
                         " · " + (if (isUnfolded(c)) "펼침" else "접힘") + " (${panelSize(c)})" +
                         "\n화면 ${r * 90}° · 자동 회전 $accel · 잠금 값 ${user * 90}°" +
+                        (RotateService.pausedFor?.let { "\n고정 풀림: $it (뺀 앱)" } ?: "") +
                         (if (Sh.last.isNotEmpty()) "\n마지막 명령: ${Sh.last}" else "")
                     delay(1000)
                 }
             }
             Text(status, color = Gray, fontSize = 12.sp, lineHeight = 17.sp, modifier = Modifier.padding(horizontal = 6.dp))
         }
+    }
+}
+
+private data class LaunchApp(val pkg: String, val label: String)
+
+private fun launchApps(c: android.content.Context): List<LaunchApp> {
+    val pm = c.packageManager
+    val i = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
+    return pm.queryIntentActivities(i, 0)
+        .map { LaunchApp(it.activityInfo.packageName, it.loadLabel(pm).toString()) }
+        .filter { it.pkg != c.packageName }
+        .distinctBy { it.pkg }
+        .sortedBy { it.label.lowercase() }
+}
+
+/** Apps that get the screen back (lock let go) while they're in front. */
+@Composable
+private fun ExcludeCard() {
+    val c = LocalContext.current
+    var excluded by remember { mutableStateOf(Prefs.excluded(c)) }
+    var picking by remember { mutableStateOf(false) }
+    val apps by androidx.compose.runtime.produceState<List<LaunchApp>>(emptyList(), picking) {
+        if (picking || value.isEmpty()) value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { launchApps(c) }
+    }
+    fun set(v: Set<String>) { excluded = v; Prefs.setExcluded(c, v) }
+
+    Card {
+        Text("고정에서 뺄 앱", color = Ink, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+        Text("이 앱이 맨 앞에 있는 동안은 고정을 풀고 자동 회전으로 둬요. 다른 앱으로 가면 다시 고정해요.",
+            color = Gray, fontSize = 13.sp, lineHeight = 19.sp)
+        Spacer(Modifier.height(10.dp))
+        excluded.map { p -> p to (apps.firstOrNull { it.pkg == p }?.label ?: p) }.sortedBy { it.second }.forEach { (p, label) ->
+            Row(
+                Modifier.fillMaxWidth().padding(vertical = 3.dp).clip(RoundedCornerShape(50)).background(Bg)
+                    .padding(start = 16.dp, end = 6.dp, top = 4.dp, bottom = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(label, color = Ink, fontSize = 14.sp, modifier = Modifier.weight(1f))
+                Text("빼기 취소", color = Accent, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.clip(RoundedCornerShape(50)).clickable { set(excluded - p) }
+                        .padding(horizontal = 10.dp, vertical = 8.dp))
+            }
+        }
+        Spacer(Modifier.height(6.dp))
+        Text("+ 앱 추가", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+            modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(50)).background(Accent)
+                .clickable { picking = true }.padding(vertical = 11.dp))
+    }
+
+    if (picking) {
+        var q by remember { mutableStateOf("") }
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { picking = false },
+            title = { Text("고정에서 뺄 앱") },
+            text = {
+                Column {
+                    androidx.compose.foundation.text.BasicTextField(
+                        value = q, onValueChange = { q = it }, singleLine = true,
+                        textStyle = androidx.compose.ui.text.TextStyle(color = Ink, fontSize = 15.sp),
+                        cursorBrush = androidx.compose.ui.graphics.SolidColor(Accent),
+                        modifier = Modifier.fillMaxWidth(),
+                        decorationBox = { inner ->
+                            Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(50)).background(Bg)
+                                .padding(horizontal = 16.dp, vertical = 11.dp)) {
+                                if (q.isEmpty()) Text("앱 이름 검색", color = Gray, fontSize = 15.sp)
+                                inner()
+                            }
+                        },
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    val shown = apps.filter { q.isBlank() || it.label.contains(q, true) || it.pkg.contains(q, true) }
+                    androidx.compose.foundation.lazy.LazyColumn(Modifier.height(380.dp)) {
+                        items(shown.size) { i ->
+                            val a = shown[i]
+                            val on = a.pkg in excluded
+                            Row(
+                                Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp))
+                                    .clickable { set(if (on) excluded - a.pkg else excluded + a.pkg) }
+                                    .padding(horizontal = 6.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Column(Modifier.weight(1f)) {
+                                    Text(a.label, color = Ink, fontSize = 15.sp)
+                                    Text(a.pkg, color = Gray, fontSize = 11.sp, maxLines = 1)
+                                }
+                                Text(if (on) "뺌" else "", color = Accent, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = { androidx.compose.material3.TextButton(onClick = { picking = false }) { Text("닫기", color = Accent) } },
+            containerColor = Color.White,
+        )
     }
 }
 
