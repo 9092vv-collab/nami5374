@@ -137,7 +137,18 @@ class Prefs(ctx: Context) {
         private set
     var homeUrl by mutableStateOf(sp.getString("homeUrl", "https://www.google.com") ?: "https://www.google.com")
         private set
-
+    var boostShizuku by mutableStateOf(sp.getBoolean("boostShizuku", false))
+        private set
+    var boostRoot by mutableStateOf(sp.getBoolean("boostRoot", false))
+        private set
+    var boostOom by mutableStateOf(sp.getBoolean("boostOom", false))
+        private set
+    var boostRamCache by mutableStateOf(sp.getBoolean("boostRamCache", false))
+        private set
+    var boostWebViewPool by mutableStateOf(sp.getBoolean("boostWebViewPool", true))
+        private set
+    var boostKeepAlive by mutableStateOf(sp.getBoolean("boostKeepAlive", true))
+        private set
     fun putToolbar(v: List<Action>) {
         val list = v.distinct().let { if (Action.MENU in it) it else it + Action.MENU }
         toolbar = list; sp.edit().putString("toolbar", list.joinToString(",") { it.name }).apply()
@@ -202,7 +213,13 @@ class Prefs(ctx: Context) {
     fun setAlways(host: String, on: Boolean) {
         val s = if (on) alwaysHosts + host else alwaysHosts - host
         alwaysHosts = s; sp.edit().putStringSet("alwaysHosts", s).apply()
-    }
+    } 
+    fun putBoostShizuku(v: Boolean) { boostShizuku = v; sp.edit().putBoolean("boostShizuku", v).apply() }
+    fun putBoostRoot(v: Boolean) { boostRoot = v; sp.edit().putBoolean("boostRoot", v).apply() }
+    fun putBoostOom(v: Boolean) { boostOom = v; sp.edit().putBoolean("boostOom", v).apply() }
+    fun putBoostRamCache(v: Boolean) { boostRamCache = v; sp.edit().putBoolean("boostRamCache", v).apply() }
+    fun putBoostWebViewPool(v: Boolean) { boostWebViewPool = v; sp.edit().putBoolean("boostWebViewPool", v).apply() }
+    fun putBoostKeepAlive(v: Boolean) { boostKeepAlive = v; sp.edit().putBoolean("boostKeepAlive", v).apply() }
 
     // Open tabs survive restarts (urls only).
     fun saveTabs(urls: List<String>, current: Int) {
