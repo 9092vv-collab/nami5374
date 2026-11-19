@@ -12,8 +12,8 @@ android {
         applicationId = "space.nami.rotate"
         minSdk = 31
         targetSdk = 36
-        versionCode = 11
-        versionName = "0.4.2"
+        versionCode = 12
+        versionName = "0.4.3"
     }
 
     // Signed in CI (.github/workflows/build-rotate.yml) with the Nami key.

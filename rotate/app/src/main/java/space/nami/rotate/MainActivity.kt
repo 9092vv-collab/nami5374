@@ -14,6 +14,8 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import kotlinx.coroutines.launch
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -128,13 +130,40 @@ private fun Screen(tick: Int) {
 
     // What the system is actually doing right now (checked every second), shown under each item.
     var live by remember { mutableStateOf(Live()) }
-    LaunchedEffect(Unit) {
-        while (true) {
-            live = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { Live.read(c) }
-            delay(1000)
-        }
+    // "적용 중": after a change, block the screen until the system shows it took (or give up after 7 s).
+    var pendingUntil by remember { mutableStateOf(0L) }
+    var pendingIgnore by remember { mutableStateOf(false) }
+    var failMsg by remember { mutableStateOf<String?>(null) }
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+
+    fun wantIgnore(l: Live) = force && enabled && l.unfolded && RotateService.pausedFor == null
+    fun lockOk(l: Live) = !l.unfolded || RotateService.pausedFor != null || !enabled ||
+        (l.accel == 0 && l.rot == rotation)
+    fun ignoreOk(l: Live) = !shizuku || l.ignore == null || l.ignore == wantIgnore(l)
+    fun startPending(ignore: Boolean) {
+        pendingUntil = System.currentTimeMillis() + 7000
+        pendingIgnore = ignore
+        failMsg = null
     }
 
+    LaunchedEffect(Unit) {
+        while (true) {
+            val l = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { Live.read(c) }
+            live = l
+            if (pendingUntil > 0) {
+                val ok = lockOk(l) && (!pendingIgnore || ignoreOk(l))
+                if (ok) pendingUntil = 0
+                else if (System.currentTimeMillis() > pendingUntil) {
+                    pendingUntil = 0
+                    failMsg = "적용이 안 됐어요. 각 항목의 '지금' 줄을 확인해 주세요."
+                }
+            }
+            delay(if (pendingUntil > 0) 250 else 1000)
+        }
+    }
+    LaunchedEffect(failMsg) { if (failMsg != null) { delay(4000); failMsg = null } }
+
+    Box(Modifier.fillMaxSize()) {
     Column(
         Modifier.fillMaxSize().background(Bg).safeDrawingPadding()
             .verticalScroll(rememberScrollState()).padding(horizontal = 20.dp, vertical = 16.dp),
@@ -190,7 +219,7 @@ private fun Screen(tick: Int) {
                     }
                     Switch(
                         checked = enabled,
-                        onCheckedChange = { enabled = it; Prefs.setEnabled(c, it) },
+                        onCheckedChange = { enabled = it; Prefs.setEnabled(c, it); startPending(false) },
                         colors = SwitchDefaults.colors(checkedTrackColor = Accent),
                     )
                 }
@@ -213,12 +242,23 @@ private fun Screen(tick: Int) {
                                 else -> LiveText("지금 시스템 값: 앱 방향 무시 " + (if (live.ignore == true) "켜짐" else "꺼짐"),
                                     live.ignore == want)
                             }
+                            if (live.ignore != null && live.ignore != want && pendingUntil == 0L) {
+                                Text("이 값은 펼친 화면·커버 화면이 따로 가져요. 눌러서 " + (if (want) "켜기" else "끄기"),
+                                    color = Accent, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+                                    modifier = Modifier.padding(top = 4.dp).clip(RoundedCornerShape(50)).clickable {
+                                        startPending(true)
+                                        scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                                            Sh.run("cmd", "window", "set-ignore-orientation-request", want.toString())
+                                            if (!want) Prefs.of(c).edit().putBoolean("ignoring", false).commit()
+                                        }
+                                    }.padding(vertical = 4.dp))
+                            }
                         }
                     }
                     Switch(
                         checked = force && shizuku,
                         enabled = shizuku,
-                        onCheckedChange = { force = it; Prefs.setForce(c, it) },
+                        onCheckedChange = { force = it; Prefs.setForce(c, it); startPending(true) },
                         colors = SwitchDefaults.colors(checkedTrackColor = Accent),
                     )
                 }
@@ -229,10 +269,10 @@ private fun Screen(tick: Int) {
                 Spacer(Modifier.height(10.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     Pill(holeBottomRight = false, rotation == Surface.ROTATION_90, Modifier.weight(1f)) {
-                        rotation = Surface.ROTATION_90; Prefs.setRotation(c, rotation)
+                        rotation = Surface.ROTATION_90; Prefs.setRotation(c, rotation); startPending(false)
                     }
                     Pill(holeBottomRight = true, rotation == Surface.ROTATION_270, Modifier.weight(1f)) {
-                        rotation = Surface.ROTATION_270; Prefs.setRotation(c, rotation)
+                        rotation = Surface.ROTATION_270; Prefs.setRotation(c, rotation); startPending(false)
                     }
                 }
                 Spacer(Modifier.height(10.dp))
@@ -262,6 +302,33 @@ private fun Screen(tick: Int) {
             }
             Text(status, color = Gray, fontSize = 12.sp, lineHeight = 17.sp, modifier = Modifier.padding(horizontal = 6.dp))
         }
+    }
+
+    if (pendingUntil > 0) {
+        // Covers the screen so nothing else gets pressed while waiting.
+        Box(
+            Modifier.fillMaxSize().background(Color(0x33000000))
+                .clickable(interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                    indication = null) {},
+            contentAlignment = Alignment.Center,
+        ) {
+            Row(
+                Modifier.clip(RoundedCornerShape(50)).background(Color.White).padding(horizontal = 22.dp, vertical = 14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                androidx.compose.material3.CircularProgressIndicator(Modifier.size(18.dp), color = Accent, strokeWidth = 2.5.dp)
+                Spacer(Modifier.width(12.dp))
+                Text("적용 중…", color = Ink, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+            }
+        }
+    }
+    failMsg?.let { m ->
+        Box(Modifier.fillMaxSize().padding(bottom = 40.dp), contentAlignment = Alignment.BottomCenter) {
+            Text(m, color = Color.White, fontSize = 14.sp,
+                modifier = Modifier.padding(horizontal = 24.dp).clip(RoundedCornerShape(50))
+                    .background(Ink).padding(horizontal = 18.dp, vertical = 12.dp))
+        }
+    }
     }
 }
 
