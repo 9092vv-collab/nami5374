@@ -76,7 +76,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.launch
 import org.json.JSONObject
-
+import android.content.pm.PackageManager
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import rikka.shizuku.Shizuku
 @Composable
 fun SettingsScreen(b: Browser, prefs: Prefs) {
     var page by rememberSaveable { mutableIntStateOf(0) }
@@ -88,7 +91,7 @@ fun SettingsScreen(b: Browser, prefs: Prefs) {
             }
             Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 6.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf("툴바", "동작", "번역", "확장", "네트워크", "디스플레이", "일반").forEachIndexed { i, t ->
+                listOf("툴바", "동작", "번역", "확장", "네트워크", "디스플레이", "일반", "부스트").forEachIndexed { i, t ->
                     val sel = i == page
                     Text(t, fontSize = 15.sp, fontWeight = if (sel) FontWeight.Bold else FontWeight.Medium,
                         color = if (sel) Color.White else C.Ink, textAlign = TextAlign.Center,
@@ -106,6 +109,7 @@ fun SettingsScreen(b: Browser, prefs: Prefs) {
                         3 -> ExtensionsSection(b, prefs)
                         4 -> NetworkSection(b, prefs)
                         5 -> DisplaySection(prefs)
+                        7 -> BoostSection(b, prefs)
                         else -> {
                             GeneralSection(prefs)
                             Text("Nami 0.7.6", color = C.Sub, fontSize = 13.sp, modifier = Modifier.padding(start = 6.dp))
@@ -624,5 +628,119 @@ private fun NetworkSection(b: Browser, prefs: Prefs) {
         SwitchRow("차단 우회", prefs.dpiBypass) { prefs.putDpiBypass(it) }
         HostList("우회에서 뺄 사이트", "쪼갠 패킷 때문에 안 열리는 사이트가 있으면 여기 등록해요.", prefs.bypassOff, "예: example.com",
             { prefs.putBypassOff(it, true) }, { prefs.putBypassOff(it, false) })
+    }
+}
+
+@Composable
+private fun BoostSection(b: Browser, prefs: Prefs) {
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    fun checkShizukuStatus(): String = when {
+        !Booster.isShizukuRunning() -> "미실행"
+        !Booster.hasShizukuPermission() -> "권한 없음"
+        Booster.shizukuUid() == 0 -> "연결됨 (루트)"
+        else -> "연결됨 (ADB)"
+    }
+    var shizukuStatus by remember { mutableStateOf(checkShizukuStatus()) }
+    var rootStatus by remember { mutableStateOf("미확인") }
+    var running by remember { mutableStateOf(false) }
+    var statusMsg by remember { mutableStateOf("") }
+
+    DisposableEffect(Unit) {
+        val listener = Shizuku.OnRequestPermissionResultListener { _, grantResult ->
+            shizukuStatus = checkShizukuStatus()
+            if (grantResult == PackageManager.PERMISSION_GRANTED) {
+                statusMsg = "Shizuku 권한이 허용되었습니다."
+            }
+        }
+        Shizuku.addRequestPermissionResultListener(listener)
+        onDispose { Shizuku.removeRequestPermissionResultListener(listener) }
+    }
+
+    Card("권한 모드", "Shizuku 또는 루트(su) 권한을 사용하면 시스템 레벨 최적화를 실행할 수 있어요.") {
+        SwitchRow("Shizuku 사용", prefs.boostShizuku) { prefs.putBoostShizuku(it) }
+        Text("Shizuku 상태: $shizukuStatus", fontSize = 13.sp, color = C.Sub)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            TextButton(onClick = {
+                if (Booster.isShizukuRunning() && !Booster.hasShizukuPermission()) {
+                    Booster.requestShizukuPermission()
+                }
+                shizukuStatus = checkShizukuStatus()
+            }) { Text("권한 요청", color = C.Accent) }
+            TextButton(onClick = {
+                shizukuStatus = checkShizukuStatus()
+            }) { Text("상태 새로고침", color = C.Accent) }
+        }
+        SwitchRow("루트(su) 사용", prefs.boostRoot) { prefs.putBoostRoot(it) }
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+            Text("루트 상태: $rootStatus", fontSize = 13.sp, color = C.Sub)
+            TextButton(enabled = !running, onClick = {
+                scope.launch {
+                    running = true
+                    val ok = withContext(Dispatchers.IO) { Booster.hasRoot() }
+                    rootStatus = if (ok) "루트 허용됨" else "루트 불가"
+                    running = false
+                }
+            }) { Text("루트 확인", color = C.Accent) }
+        }
+    }
+
+    Card("즉시 실행 최적화 (Shizuku / 루트)", "앱과 WebView를 AOT 컴파일하거나 절전 제한을 해제해 반응 속도를 높여요.") {
+        if (running) {
+            Text("실행 중...", fontSize = 13.sp, color = C.Accent)
+        }
+        if (statusMsg.isNotEmpty()) {
+            Text(statusMsg, fontSize = 13.sp, color = C.Sub)
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            TextButton(enabled = !running, onClick = {
+                scope.launch {
+                    running = true
+                    statusMsg = withContext(Dispatchers.IO) {
+                        Booster.compileAot(ctx, prefs.boostRoot, prefs.boostShizuku)
+                    }
+                    running = false
+                }
+            }) { Text("앱 + WebView AOT 컴파일", color = C.Accent) }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            TextButton(enabled = !running, onClick = {
+                scope.launch {
+                    running = true
+                    statusMsg = withContext(Dispatchers.IO) {
+                        Booster.disableBatteryLimits(ctx, prefs.boostRoot, prefs.boostShizuku)
+                    }
+                    running = false
+                }
+            }) { Text("절전·백그라운드 제한 완전 해제", color = C.Accent) }
+        }
+    }
+
+    Card("루트 전용 상시 가속", "루트 권한으로 프로세스 우선순위와 RAM 캐시 마운트를 적용해요.") {
+        SwitchRow("OOM 방어 & 우선순위 상향 (시작 시 자동)", prefs.boostOom) { prefs.putBoostOom(it) }
+        TextButton(enabled = !running, onClick = {
+            scope.launch {
+                running = true
+                statusMsg = withContext(Dispatchers.IO) {
+                    Booster.boostOomAndPriority(ctx, prefs.boostRoot, prefs.boostShizuku)
+                }
+                running = false
+            }
+        }) { Text("지금 적용", color = C.Accent) }
+        SwitchRow("WebView 캐시 RAM 디스크(tmpfs)", prefs.boostRamCache) { prefs.putBoostRamCache(it) }
+        TextButton(enabled = !running, onClick = {
+            scope.launch {
+                running = true
+                statusMsg = withContext(Dispatchers.IO) {
+                    Booster.mountRamCache(ctx, prefs.boostRoot, prefs.boostShizuku)
+                }
+                running = false
+            }
+        }) { Text("지금 마운트", color = C.Accent) }
+    }
+
+    Card("앱 내부 가속 (권한 불필요)", "브라우저 내부 WebView 풀링과 렌더러 유지 옵션을 설정해요.") {
+        SwitchRow("새 탭 WebView 미리 준비 (풀링)", prefs.boostWebViewPool) { prefs.putBoostWebViewPool(it) }
+        SwitchRow("렌더러 우선순위 항상 최상 유지", prefs.boostKeepAlive) { prefs.putBoostKeepAlive(it) }
     }
 }
