@@ -235,6 +235,7 @@ fun NamiApp(b: Browser, prefs: Prefs, act: Activity) = NamiTheme {
             Action.SETTINGS -> b.showSettings = true
             Action.DOWNLOADS -> b.showDownloads = true
             Action.VIDEO -> b.openVideos()
+            Action.DESKTOP -> t?.let { b.toggleDesktop(it) }
             Action.NEXT_TAB -> b.switchBy(1)
             Action.PREV_TAB -> b.switchBy(-1)
         }
@@ -408,6 +409,7 @@ private fun Toolbar(b: Browser, prefs: Prefs, menuOpen: Boolean, setMenu: (Boole
                     val tint = when {
                         !enabled -> C.Line
                         a == Action.TRANSLATE && tab?.translateOn == true -> C.Accent
+                        a == Action.DESKTOP && tab?.desktop == true -> C.Accent
                         else -> C.Ink
                     }
                     IconButton({ run(a) }, enabled = enabled) { Icon(a.icon ?: Icons.Filled.MoreVert, a.label, tint = tint) }
@@ -482,6 +484,7 @@ private fun MainMenu(b: Browser, prefs: Prefs, open: Boolean, close: () -> Unit,
         if (b.scripts.list.isNotEmpty()) item("유저스크립트", Icons.Filled.Code) { b.loadScriptPanel() }
         item("공유", Action.SHARE.icon) { run(Action.SHARE) }
         item("맨 위로", Action.TOP.icon) { run(Action.TOP) }
+        item("데스크톱 사이트", Action.DESKTOP.icon, checked = tab?.desktop == true) { run(Action.DESKTOP) }
         val nv = tab?.media?.size ?: 0
         item(if (nv > 0) "동영상 · ${nv}개" else "동영상", Action.VIDEO.icon) { run(Action.VIDEO) }
         if (host == "kio.ac" || host.endsWith(".kio.ac")) item("이 폴더 파일 전부 받기", Icons.Filled.Download) { b.grabAll() }

@@ -10,6 +10,7 @@ import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PlayCircle
+import androidx.compose.material.icons.filled.Computer
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
@@ -42,14 +43,15 @@ enum class Action(val label: String, val icon: ImageVector?) {
     PREV_TAB("이전 탭", Icons.AutoMirrored.Filled.ArrowBack),
     DOWNLOADS("받은 파일", Icons.Filled.Download),
     VIDEO("동영상", Icons.Filled.PlayCircle),
+    DESKTOP("데스크톱 사이트", Icons.Filled.Computer),
     SETTINGS("설정", Icons.Filled.Settings);
 
     companion object {
         fun of(s: String?): Action? = entries.firstOrNull { it.name == s }
         /** Buttons that can live on the toolbar. */
-        val toolbarChoices = listOf(ADDRESS, TABS, MENU, BACK, FORWARD, RELOAD, TRANSLATE, NEW_TAB, HOME, SHARE, TOP, DOWNLOADS, VIDEO, SETTINGS)
+        val toolbarChoices = listOf(ADDRESS, TABS, MENU, BACK, FORWARD, RELOAD, TRANSLATE, NEW_TAB, HOME, SHARE, TOP, DOWNLOADS, VIDEO, DESKTOP, SETTINGS)
         /** Things a gesture can be bound to. */
-        val gestureChoices = listOf(NONE, RELOAD, TRANSLATE, BACK, FORWARD, NEXT_TAB, PREV_TAB, TOOLBAR, NEW_TAB, TABS, TOP, HOME, DOWNLOADS, VIDEO)
+        val gestureChoices = listOf(NONE, RELOAD, TRANSLATE, BACK, FORWARD, NEXT_TAB, PREV_TAB, TOOLBAR, NEW_TAB, TABS, TOP, HOME, DOWNLOADS, VIDEO, DESKTOP)
     }
 }
 

@@ -60,6 +60,10 @@ class BrowserTab(val id: Long, val web: WebView, val frame: PullFrame) {
     var canForward by mutableStateOf(false)
     /** Translation wanted on this tab (stays on while moving around the same site). */
     var translateOn by mutableStateOf(false)
+    /** "데스크톱 사이트" on this tab (desktop user agent + wide viewport), like Chrome. */
+    var desktop by mutableStateOf(false)
+    var mobileUa = ""
+    var desktopScript: androidx.webkit.ScriptHandler? = null
     var translating by mutableStateOf(false)
     /** Small screenshot for the tab list (taken when leaving the tab). */
     var thumb by mutableStateOf<Bitmap?>(null)
@@ -504,6 +508,31 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
     private fun isUserJs(url: String) = (url.startsWith("http://") || url.startsWith("https://")) &&
         Uri.parse(url).path?.endsWith(".user.js") == true
 
+    // ---------- desktop site ----------
+
+    fun toggleDesktop(t: BrowserTab) {
+        t.desktop = !t.desktop
+        val st = t.web.settings
+        if (t.desktop) {
+            val chrome = Regex("Chrome/[\\d.]+").find(t.mobileUa)?.value ?: "Chrome/131.0.0.0"
+            st.userAgentString = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) $chrome Safari/537.36"
+            if (docStart) t.desktopScript = runCatching { WebViewCompat.addDocumentStartJavaScript(t.web, DESKTOP_VIEWPORT_JS, setOf("*")) }.getOrNull()
+        } else {
+            st.userAgentString = t.mobileUa
+            t.desktopScript?.let { runCatching { it.remove() } }
+            t.desktopScript = null
+        }
+        // client hints (Sec-CH-UA-Mobile, navigator.userAgentData) follow the switch too
+        if (WebViewFeature.isFeatureSupported(WebViewFeature.USER_AGENT_METADATA)) runCatching {
+            val md = androidx.webkit.UserAgentMetadata.Builder().setMobile(!t.desktop)
+                .setPlatform(if (t.desktop) "Linux" else "Android").build()
+            androidx.webkit.WebSettingsCompat.setUserAgentMetadata(st, md)
+        }
+        val u = t.web.url
+        if (!u.isNullOrEmpty()) t.web.loadUrl(u) else t.web.reload()
+        showPill(if (t.desktop) "데스크톱 사이트로 볼게요" else "모바일 사이트로 돌아왔어요", 1200)
+    }
+
     // ---------- translation ----------
 
     fun toggleTranslate(t: BrowserTab) {
@@ -744,6 +773,7 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
             // Look like plain Chrome (drop the WebView "; wv" marker).
             userAgentString = userAgentString.replace("; wv", "").replace(Regex("Version/\\d+(\\.\\d+)* "), "")
         }
+        t.mobileUa = web.settings.userAgentString
         CookieManager.getInstance().setAcceptThirdPartyCookies(web, true)
         web.addJavascriptInterface(Bridge(t), "NamiBridge")
         if (docStart) {
@@ -1078,3 +1108,14 @@ class PrewarmReceiver : android.content.BroadcastReceiver() {
         }
     }
 }
+
+/** Desktop mode: make pages lay out at a desktop width instead of the phone's (rewrites the viewport meta tag). */
+private const val DESKTOP_VIEWPORT_JS = """(function(){
+  var W = Math.max(1024, screen.width || 0), want = 'width=' + W;
+  function fix(){ var ms = document.querySelectorAll('meta[name="viewport" i]');
+    for (var i = 0; i < ms.length; i++) if (ms[i].content !== want) ms[i].content = want; }
+  var mo = new MutationObserver(fix);
+  mo.observe(document, {childList: true, subtree: true});
+  document.addEventListener('DOMContentLoaded', function(){ fix(); setTimeout(function(){ mo.disconnect(); }, 3000); });
+  fix();
+})();"""
