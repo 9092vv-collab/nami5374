@@ -185,7 +185,7 @@ private fun Screen(tick: Int) {
                         Text(
                             when {
                                 !shizuku -> "Shizuku 연결이 필요해요"
-                                force -> "방향을 정해 둔 앱도 따라와요"
+                                force -> "방향을 정해 둔 앱도 따라와요. 이 앱을 지우기 전엔 꼭 끄세요(안 끄면 설정이 남아요)"
                                 else -> "앱이 정한 방향은 그대로 둬요"
                             }, color = Gray, fontSize = 13.sp)
                     }
