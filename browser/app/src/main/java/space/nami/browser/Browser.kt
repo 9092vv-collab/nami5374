@@ -375,7 +375,7 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
             t.web.setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_IMPORTANT, false)
             t.web.onResume()
         } else {
-            t.web.setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_IMPORTANT, true)
+            t.web.setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_IMPORTANT, !prefs.boostKeepAlive)
             if (t !== tab) t.web.onPause()
         }
     }
@@ -751,7 +751,8 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
 
     @SuppressLint("SetJavaScriptEnabled")
     private fun createTab(): BrowserTab {
-        val web = Prewarm.take(act) ?: KeepWebView(act)
+        val web = Prewarm.take(act) ?: KeepWebView(act); if (prefs.boostWebViewPool) Handler(Looper.getMainLooper()).post { Prewarm.warm(act) }
+        if (prefs.boostKeepAlive) web.setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_IMPORTANT, false)
         val frame = PullFrame(act, web,
             threshold = { prefs.pullStrength.dp * density },
             onPull = { if (prefs.pullAction != Action.NONE && tab?.web === web) pull = it },
