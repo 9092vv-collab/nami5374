@@ -511,7 +511,7 @@ object Chat {
             // Gemini 1.x/2.x take a token budget; Gemini 3 and newer only accept thinkingLevel (a budget → HTTP 400).
             if (Regex("gemini-[12](\\.|-|$)", RegexOption.IGNORE_CASE).containsMatchIn(modelId)) r.thinking.int("budget")?.let { put("thinkingBudget", it) }
             else {
-                val effort = r.thinking.s("effort").lowercase().takeIf { it in setOf("minimal", "low", "medium", "high") }
+                val effort = r.thinking.s("effort").lowercase().takeIf { it in setOf("minimal", "low", "medium", "high", "xhigh") }
                     ?: r.thinking.int("budget")?.let { b -> when { b <= 0 -> "minimal"; b <= 2048 -> "low"; b <= 8192 -> "medium"; else -> "high" } }
                 effort?.let { put("thinkingLevel", it) }
             }

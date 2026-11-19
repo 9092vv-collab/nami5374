@@ -567,7 +567,7 @@ fun ModelScreen(id: String, onBack: () -> Unit) {
                 NumberBox("$id-budget", thinking.d("budget"), { setThinking("budget", num(it?.toInt())) }, "미지정")
                 FieldLabel("추론 강도 (OpenAI · Gemini 3 이상)")
                 Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    listOf(null to "미지정", "minimal" to "minimal", "low" to "low", "medium" to "medium", "high" to "high").forEach { (k, label) ->
+                    listOf(null to "미지정", "minimal" to "minimal", "low" to "low", "medium" to "medium", "high" to "high", "xhigh" to "xhigh").forEach { (k, label) ->
                         PillChip(label, thinking.sOrNull("effort") == k) { setThinking("effort", str(k)) }
                     }
                 }
