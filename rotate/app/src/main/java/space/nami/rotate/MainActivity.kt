@@ -126,6 +126,15 @@ private fun Screen(tick: Int) {
     var rotation by remember { mutableIntStateOf(Prefs.rotation(c)) }
     var force by remember { mutableStateOf(Prefs.force(c)) }
 
+    // What the system is actually doing right now (checked every second), shown under each item.
+    var live by remember { mutableStateOf(Live()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            live = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { Live.read(c) }
+            delay(1000)
+        }
+    }
+
     Column(
         Modifier.fillMaxSize().background(Bg).safeDrawingPadding()
             .verticalScroll(rememberScrollState()).padding(horizontal = 20.dp, vertical = 16.dp),
@@ -169,6 +178,15 @@ private fun Screen(tick: Int) {
                     Column(Modifier.weight(1f)) {
                         Text("펼쳤을 때 고정", color = Ink, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
                         Text(if (enabled) "켜짐" else "꺼짐 · 원래 회전 설정으로 돌아가요", color = Gray, fontSize = 13.sp)
+                        val paused = RotateService.pausedFor
+                        when {
+                            !live.unfolded -> LiveText("지금: 접혀 있어서 쉬는 중", null)
+                            paused != null -> LiveText("지금: 풀림 · 뺀 앱(${appLabel(c, paused)})이 앞에 있어서 자동 회전", null)
+                            !enabled -> LiveText("지금: 고정 안 함 · 화면 ${live.deg}°", null)
+                            live.accel == 0 && live.rot == rotation -> LiveText("지금: 고정됨 · ${live.deg}°", true)
+                            else -> LiveText("지금: 아직 안 걸림 · 화면 ${live.deg}° · 자동 회전 " +
+                                (if (live.accel == 1) "켜짐" else "꺼짐"), false)
+                        }
                     }
                     Switch(
                         checked = enabled,
@@ -188,6 +206,14 @@ private fun Screen(tick: Int) {
                                 force -> "방향을 정해 둔 앱도 따라와요. 이 앱을 지우기 전엔 꼭 끄세요(안 끄면 설정이 남아요)"
                                 else -> "앱이 정한 방향은 그대로 둬요"
                             }, color = Gray, fontSize = 13.sp)
+                        if (shizuku) {
+                            val want = force && enabled && live.unfolded && RotateService.pausedFor == null
+                            when (live.ignore) {
+                                null -> LiveText("지금 시스템 값: 확인 못 함", null)
+                                else -> LiveText("지금 시스템 값: 앱 방향 무시 " + (if (live.ignore == true) "켜짐" else "꺼짐"),
+                                    live.ignore == want)
+                            }
+                        }
                     }
                     Switch(
                         checked = force && shizuku,
@@ -212,6 +238,7 @@ private fun Screen(tick: Int) {
                 Spacer(Modifier.height(10.dp))
                 Text("누르면 바로 바뀌어요.",
                     color = Gray, fontSize = 13.sp)
+                LiveText("지금 화면: ${live.deg}°", if (live.unfolded && enabled) live.rot == rotation else null)
             }
 
             ExcludeCard()
@@ -236,6 +263,38 @@ private fun Screen(tick: Int) {
             Text(status, color = Gray, fontSize = 12.sp, lineHeight = 17.sp, modifier = Modifier.padding(horizontal = 6.dp))
         }
     }
+}
+
+/** The system's real state, for the "지금" lines. */
+private data class Live(
+    val rot: Int = -1, val accel: Int = -1, val ignore: Boolean? = null, val unfolded: Boolean = false,
+) {
+    val deg get() = if (rot < 0) "?" else (rot * 90).toString()
+
+    companion object {
+        fun read(c: android.content.Context): Live {
+            val r = c.getSystemService(android.hardware.display.DisplayManager::class.java)
+                ?.getDisplay(android.view.Display.DEFAULT_DISPLAY)?.rotation ?: -1
+            val accel = Settings.System.getInt(c.contentResolver, Settings.System.ACCELEROMETER_ROTATION, -1)
+            val ign = Sh.peek("cmd", "window", "get-ignore-orientation-request")?.let { it.contains("true") }
+            return Live(r, accel, ign, isUnfolded(c))
+        }
+    }
+}
+
+private fun appLabel(c: android.content.Context, pkg: String): String = runCatching {
+    c.packageManager.getApplicationLabel(c.packageManager.getApplicationInfo(pkg, 0)).toString()
+}.getOrDefault(pkg)
+
+/** Green when it matches what you set, orange when it doesn't, gray when there's nothing to compare. */
+@Composable
+private fun LiveText(text: String, ok: Boolean?) {
+    Text(
+        (if (ok == true) "● " else if (ok == false) "● " else "") + text,
+        color = when (ok) { true -> Color(0xFF2F8F5B); false -> Accent; null -> Gray },
+        fontSize = 13.sp, fontWeight = FontWeight.Medium,
+        modifier = Modifier.padding(top = 4.dp),
+    )
 }
 
 private data class LaunchApp(val pkg: String, val label: String)

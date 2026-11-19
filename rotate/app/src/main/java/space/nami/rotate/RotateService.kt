@@ -71,6 +71,18 @@ object Sh {
     /** What the last command did, shown on the app screen to find problems. */
     @Volatile var last = ""
 
+    /** Like [run] but for reading state: doesn't touch [last]. */
+    fun peek(vararg cmd: String): String? {
+        if (!ready()) return null
+        return runCatching {
+            val p = newProcess.invoke(null, arrayOf(*cmd), null, null) as Process
+            val out = p.inputStream.bufferedReader().readText()
+            p.errorStream.bufferedReader().readText()
+            p.waitFor()
+            if (p.exitValue() == 0) out else null
+        }.getOrNull()
+    }
+
     fun run(vararg cmd: String): String? {
         val name = cmd.drop(2).joinToString(" ")
         if (!ready()) { last = "$name → Shizuku 안 됨"; return null }
