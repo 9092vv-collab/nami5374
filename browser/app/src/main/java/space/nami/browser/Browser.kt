@@ -78,7 +78,7 @@ class BrowserTab(val id: Long, val web: WebView, val frame: PullFrame) {
     val media = mutableStateListOf<MediaFound>()
 }
 
-class LongPress(val link: String?, val image: String?)
+class LongPress(val link: String?, val image: String?, val text: String? = null)
 
 class PageScriptInfo(val sid: String, val name: String, val commands: List<Pair<String, String>>)
 
@@ -918,7 +918,15 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
                     web.requestFocusNodeHref(msg)
                     true
                 }
-                WebView.HitTestResult.SRC_ANCHOR_TYPE -> { longPress = LongPress(h.extra, null); true }
+                WebView.HitTestResult.SRC_ANCHOR_TYPE -> {
+                    // ask for the link's text too ("title" = the anchor text) for "텍스트 복사"
+                    val link = h.extra
+                    val msg = Handler(Looper.getMainLooper()) { m ->
+                        longPress = LongPress(m.data.getString("url")?.takeIf { it.isNotEmpty() } ?: link, null, m.data.getString("title")?.trim()?.takeIf { it.isNotEmpty() }); true
+                    }.obtainMessage()
+                    web.requestFocusNodeHref(msg)
+                    true
+                }
                 else -> false
             }
         }
