@@ -62,7 +62,7 @@ object Presets {
             listOf("gpt-4.1", "gpt-5-mini", "claude-sonnet-4.5", "gemini-2.5-pro"), false, "GitHub OAuth 토큰(로그인하면 자동 입력)",
             listOf(
                 "'GitHub 로그인'으로 받은 OAuth 토큰만 기기 보안 저장소에 저장됩니다.",
-                "SGU Next에서는 GitHub 로그인이 아직 준비 중이에요. 기존 앱 설정 백업(키 포함)을 가져오면 토큰이 함께 옮겨져요.",
+                "Nami next에서는 GitHub 로그인이 아직 준비 중이에요. 기존 앱 설정 백업(키 포함)을 가져오면 토큰이 함께 옮겨져요.",
             ),
             "Copilot은 캐싱 파라미터를 공개하지 않으므로 앱은 캐싱 설정을 보내지 않습니다.", "off", hidden = true),
         Preset("vertex-express", "Vertex AI (Express)", "gemini", "https://aiplatform.googleapis.com/v1/publishers/google", "query-key",

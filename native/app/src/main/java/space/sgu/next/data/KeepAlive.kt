@@ -46,7 +46,7 @@ object KeepAlive {
         var done = 0; var total = 0
         gen.forEach { (cid, p) -> parts.add("${name(cid)} · 이미지 ${p.done}/${p.total} · ETA ${GenRun.eta(p)}"); done += p.done; total += p.total }
         comp.forEach { (cid, p) -> parts.add("${name(cid)} · 압축 ${p.first}/${p.second}") }
-        val title = if (gen.isNotEmpty()) "에셋 작업(ETA ${GenRun.eta(gen.first().value)})" else "SGU 작업 중"
+        val title = if (gen.isNotEmpty()) "에셋 작업(ETA ${GenRun.eta(gen.first().value)})" else "Nami next 작업 중"
         return Status(true, title, parts.joinToString("\n"), done, total)
     }
 
@@ -87,13 +87,13 @@ object KeepAlive {
     private fun notifyDone() {
         runCatching {
             val n = Notification.Builder(app, CHANNEL_DONE).setSmallIcon(android.R.drawable.stat_sys_download_done)
-                .setContentTitle("SGU 작업이 끝났어요").setContentText("눌러서 결과를 확인하세요").setContentIntent(openApp(app)).setAutoCancel(true).build()
+                .setContentTitle("Nami next 작업이 끝났어요").setContentText("눌러서 결과를 확인하세요").setContentIntent(openApp(app)).setAutoCancel(true).build()
             app.getSystemService(NotificationManager::class.java).notify(DONE_ID, n)
         }
     }
 
     fun build(ctx: Context, s: Status): Notification = Notification.Builder(ctx, CHANNEL)
-        .setSmallIcon(android.R.drawable.stat_notify_sync).setContentTitle(s.title.ifBlank { "SGU 작업 중" })
+        .setSmallIcon(android.R.drawable.stat_notify_sync).setContentTitle(s.title.ifBlank { "Nami next 작업 중" })
         .setContentText(s.text.lineSequence().firstOrNull() ?: "").setStyle(Notification.BigTextStyle().bigText(s.text))
         .setOngoing(true).setOnlyAlertOnce(true).setContentIntent(openApp(ctx))
         .apply { if (s.total > 0) setProgress(s.total, s.done, false) }
@@ -104,7 +104,7 @@ object KeepAlive {
 
 class WorkService : Service() {
     companion object {
-        @Volatile var status = KeepAlive.Status(true, "SGU 작업 중", "", 0, 0)
+        @Volatile var status = KeepAlive.Status(true, "Nami next 작업 중", "", 0, 0)
         @Volatile var wasBusy = false
         fun refresh(ctx: Context) {
             runCatching { ctx.getSystemService(NotificationManager::class.java).notify(KeepAlive.ID, KeepAlive.build(ctx, status)) }

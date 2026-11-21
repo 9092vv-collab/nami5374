@@ -78,7 +78,7 @@ object Llm {
             base = Vertex.baseUrl(v.s("projectId"), v.s("location"))
         }
         if (preset == "copilot" || auth == "copilot-oauth") {
-            throw ProviderError("GitHub Copilot은 SGU Next에서 아직 준비 중이에요. 다음 업데이트에서 열려요.")
+            throw ProviderError("GitHub Copilot은 Nami next에서 아직 준비 중이에요. 다음 업데이트에서 열려요.")
         }
         val headers = parseObj(p.s("headersJson")).mapValues { (_, v) -> (v as? JsonPrimitive)?.contentOrNull ?: v.toString() }
         Resolved(base, key, auth, defaultTokenParam(p), headers, parseObj(p.s("bodyJson")))
