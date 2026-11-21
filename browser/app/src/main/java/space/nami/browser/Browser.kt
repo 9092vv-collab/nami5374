@@ -45,6 +45,9 @@ import java.net.URLEncoder
 class BrowserTab(val id: Long, val web: WebView, val frame: PullFrame) {
     /** Files this tab's page is streaming to us right now (keep it running even when hidden). */
     @Volatile var relays = 0
+    /** Hidden helper tab that opens one image URL just to save it (Cloudflare CDNs refuse our own downloader). */
+    @Volatile var helperFor: String? = null
+    @Volatile var helperStarted = false
     /** Folder being fetched file by file (JSON list), where it is, and whether a reload cut it off. */
     @Volatile var batchJson: String? = null
     @Volatile var batchIdx = 0
@@ -183,8 +186,9 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
         }
         Downloads.onBatchDone = { msg -> batchPending.clear(); showPill(msg, 5000) }
         // our downloader was refused (signed/one-time links, cookies it can't see…): let the page fetch it once
-        Downloads.onFail = { url, code ->
+        Downloads.onFail = onFail@{ url, code ->
             if (url.startsWith("http") && retried.add(url)) {
+                if (looksImage(url)) { grabViaPage(url); return@onFail }
                 val h = Uri.parse(url).host ?: ""
                 val ok = tabs.filter { !it.web.url.isNullOrEmpty() && it.web.url != url }
                 val t = ok.firstOrNull { it.host == h && it === tab } ?: ok.lastOrNull { it.host == h } ?: tab?.takeIf { !it.web.url.isNullOrEmpty() }
@@ -344,6 +348,28 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
     }
 
     @Volatile var lastNativeFail = ""
+
+    private fun looksImage(url: String) =
+        Regex("\\.(jpe?g|png|gif|webp|avif|bmp|jfif)$", RegexOption.IGNORE_CASE).containsMatchIn(Uri.parse(url).path ?: "")
+
+    private val helpers = mutableListOf<BrowserTab>()
+
+    /**
+     * Open the image itself in a hidden tab (Chromium's own network stack + the site's cookies get past
+     * Cloudflare) and let that page hand the bytes over, same origin, from its cache.
+     */
+    fun grabViaPage(url: String) {
+        val t = createTab()
+        t.helperFor = url
+        helpers.add(t)
+        showPill("다른 방법으로 다시 받아 볼게요", 2500)
+        t.web.loadUrl(url, mapOf("Referer" to (tab?.url ?: "")))
+        ui.postDelayed({ if (t in helpers) { dropHelper(t); showPill("이미지를 받지 못했어요", 3000) } }, 90_000)
+    }
+
+    fun dropHelper(t: BrowserTab) {
+        if (helpers.remove(t)) runCatching { t.web.stopLoading(); t.web.destroy() }
+    }
     /** Links we already re-tried through the page once (no loops). */
     private val retried = java.util.Collections.synchronizedSet(HashSet<String>())
     private val misc by lazy { act.getSharedPreferences("nami_misc", android.content.Context.MODE_PRIVATE) }
@@ -714,6 +740,7 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
         @JavascriptInterface fun grabAt(k: String, i: Double, n: Double, name: String) { /* progress shows in the download note */ }
         @JavascriptInterface fun relayFail(k: String, msg: String, url: String, got: Double, opened: Boolean) {
             if (k != key) return
+            if (t.helperFor != null) scope.launch { dropHelper(t) }
             if (opened) { t.relays = (t.relays - 1).coerceAtLeast(0); scope.launch { relayKeep(t) } }
             val fb = relayFallback.remove(url)
             scope.launch {
@@ -727,6 +754,7 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
         }
         @JavascriptInterface fun relayDone(k: String, url: String) {
             if (k != key) return
+            if (t.helperFor != null) scope.launch { dropHelper(t) }
             relayFallback.remove(url)
             t.relays = (t.relays - 1).coerceAtLeast(0); scope.launch { relayKeep(t) }
         }
@@ -877,6 +905,15 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
             }
 
             override fun onPageFinished(view: WebView, url: String) {
+                val hf = t.helperFor
+                if (hf != null) {
+                    if (!t.helperStarted && url != "about:blank") {
+                        t.helperStarted = true
+                        if (!docStart) view.evaluateJavascript(pageJs, null)
+                        view.evaluateJavascript("window.__nami&&__nami.relay('$key'," + org.json.JSONObject.quote(hf) + ",'')", null)
+                    }
+                    return
+                }
                 t.url = url; t.progress = 100
                 if (t.batchBroken && t.batchJson != null) offerResume(t)
                 t.canBack = view.canGoBack(); t.canForward = view.canGoForward()
