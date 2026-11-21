@@ -358,11 +358,17 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
      * Open the image itself in a hidden tab (Chromium's own network stack + the site's cookies get past
      * Cloudflare) and let that page hand the bytes over, same origin, from its cache.
      */
-    fun grabViaPage(url: String) {
+    /** "이미지 저장": the picture is already on screen, so fetch it the way the page did (passes Cloudflare, uses the cache). */
+    fun saveImage(url: String) {
+        if (url.startsWith("http")) { grabViaPage(url, quiet = true); Toast.makeText(act, "이미지 저장 중…", Toast.LENGTH_SHORT).show() }
+        else download(url)
+    }
+
+    fun grabViaPage(url: String, quiet: Boolean = false) {
         val t = createTab()
         t.helperFor = url
         helpers.add(t)
-        showPill("다른 방법으로 다시 받아 볼게요", 2500)
+        if (!quiet) showPill("다른 방법으로 다시 받아 볼게요", 2500)
         t.web.loadUrl(url, mapOf("Referer" to (tab?.url ?: "")))
         ui.postDelayed({ if (t in helpers) { dropHelper(t); showPill("이미지를 받지 못했어요", 3000) } }, 90_000)
     }
@@ -740,7 +746,8 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
         @JavascriptInterface fun grabAt(k: String, i: Double, n: Double, name: String) { /* progress shows in the download note */ }
         @JavascriptInterface fun relayFail(k: String, msg: String, url: String, got: Double, opened: Boolean) {
             if (k != key) return
-            if (t.helperFor != null) scope.launch { dropHelper(t) }
+            val hf = t.helperFor
+            if (hf != null) { scope.launch { dropHelper(t); if (got <= 0 && retried.add(hf)) download(hf, direct = true) }; return }
             if (opened) { t.relays = (t.relays - 1).coerceAtLeast(0); scope.launch { relayKeep(t) } }
             val fb = relayFallback.remove(url)
             scope.launch {
@@ -1099,6 +1106,15 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
         if (!url.startsWith("http")) { Toast.makeText(act, "이 파일은 받을 수 없어요", Toast.LENGTH_SHORT).show(); return }
         if (isSwUrl(url)) { relay(url, hint); return }
         val (name, guessed) = FileName.build(url, cd, mime, hint)
+        // split off → still our own downloader (one part), so a refusal can be retried another way
+        run {
+            if (prefs.splitParts > 0) return@run
+            val ok = runCatching {
+                DownloadService.start(act, url, name, mime, CookieManager.getInstance().getCookie(url),
+                    ua ?: tab?.web?.settings?.userAgentString, tab?.url, 1, guessed, prefs.dualNetwork)
+            }.isSuccess
+            if (ok) { Toast.makeText(act, "받는 중: $name", Toast.LENGTH_SHORT).show(); return }
+        }
         if (prefs.splitParts > 0) runCatching {
             if (act.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED)
                 act.requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 11)

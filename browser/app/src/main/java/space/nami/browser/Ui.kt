@@ -632,7 +632,7 @@ private fun LongPressDialog(b: Browser, lp: LongPress) {
                         .clickable { close(); onClick() }.padding(horizontal = 8.dp, vertical = 13.dp))
                 }
                 lp.image?.let { img ->
-                    row("이미지 저장") { b.download(img) }
+                    row("이미지 저장") { b.saveImage(img) }
                     row("이미지를 새 탭에서 열기") { b.newTab(img) }
                     row("이미지 주소 복사") { copyText(ctx, img) }
                 }
