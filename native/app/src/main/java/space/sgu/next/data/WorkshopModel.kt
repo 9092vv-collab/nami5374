@@ -748,7 +748,15 @@ object PromptBlocks {
     fun activePreset(): JsonObject = presets().firstOrNull { it.s("id") == SettingsStore.root.s("activePromptPresetId") } ?: presets().firstOrNull()
         ?: buildJsonObject { put("id", "preset_default"); put("name", "기본"); put("blocks", JsonArray(defaults())); put("createdAt", 0) }
     fun presetFor(doc: JsonObject): JsonObject = presets().firstOrNull { it.s("id") == doc.s("promptPresetId") } ?: activePreset()
-    fun blocksFor(doc: JsonObject): List<JsonObject> = presetFor(doc).let { applyToggles(it, it.arr("blocks").ifEmpty { defaults() }) }
+    fun blocksFor(doc: JsonObject): List<JsonObject> = presetFor(doc).let { applyUser(applyToggles(it, it.arr("blocks").ifEmpty { defaults() })) }
+
+    /** 설정 "프롬프트에 유저 설정": 글 블록의 {{user}}를 사용자 이름으로 (RisuAI처럼). 카드 내용·내장 문구는 그대로. */
+    fun applyUser(blocks: List<JsonObject>): List<JsonObject> {
+        val name = SettingsStore.root.s("userName").trim()
+        if (name.isEmpty()) return blocks
+        val rx = Regex("\\{\\{\\s*user\\s*\\}\\}", RegexOption.IGNORE_CASE)
+        return blocks.map { b -> if (b.s("type") == "text" && rx.containsMatchIn(b.s("text"))) JsonObject(b + ("text" to JsonPrimitive(rx.replace(b.s("text")) { name }))) else b }
+    }
 
     /** 프리셋에 저장된 RisuAI 토글 값 (risuToggleValues) */
     fun toggleValues(preset: JsonObject): Map<String, String> =

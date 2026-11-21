@@ -69,6 +69,7 @@ import space.sgu.next.data.sOrNull
 fun SettingsScreen(open: (String) -> Unit) {
     val scroll = TopAppBarDefaults.enterAlwaysScrollBehavior(rememberTopAppBarState())
     var editingCreator by remember { mutableStateOf(false) }
+    var editingUser by remember { mutableStateOf(false) }
     val procs = SettingsStore.root.o("processors")
     val mainModel = SettingsStore.model(procs.o("main").sOrNull("modelId"))
     val subLabel = when {
@@ -82,6 +83,9 @@ fun SettingsScreen(open: (String) -> Unit) {
         topBar = { SguTopBar(title = "설정", scrollBehavior = scroll) },
     ) { pad ->
         LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(top = pad.calculateTopPadding(), bottom = 40.dp)) {
+            item { SectionLabel("나") }
+            item { GroupRow(0, 1, "프롬프트에 유저 설정 ({{user}})", subtitle = SettingsStore.root.s("userName").trim().let { if (it.isEmpty()) "비어 있음 · 작업실 프롬프트의 {{user}}가 그대로 나가요" else "작업실 프롬프트의 {{user}} → $it (카드 내용은 그대로)" },
+                icon = Icons.Outlined.Badge, onClick = { editingUser = true }) }
             item { SectionLabel("실행") }
             item { GroupRow(0, 3, "프로세서 배정", subtitle = "메인 ${mainModel?.s("name") ?: "미지정"} · $subLabel", icon = Icons.Outlined.Tune, onClick = { open("processors") }) }
             item { GroupRow(1, 3, "프로바이더", subtitle = SettingsStore.providers.size.let { if (it == 0) "없음 · 눌러서 추가" else "${it}개 · " + SettingsStore.providers.joinToString(", ") { p -> p.s("name") } }, icon = Icons.Outlined.Key, onClick = { open("providers") }) }
@@ -112,12 +116,14 @@ fun SettingsScreen(open: (String) -> Unit) {
             item { GroupRow(4, 5, "첫 실행 안내 다시 보기", subtitle = "SGU 소개 화면", icon = Icons.Outlined.Info, onClick = { open("welcome") }) }
             item {
                 Text(
-                    "Nami next 0.9.38 · 캐릭터·스크립트·기타·로어북·설정·이미지·작업실·참고 자료·내보내기 작동",
+                    "Nami next 0.9.39 · 캐릭터·스크립트·기타·로어북·설정·이미지·작업실·참고 자료·내보내기 작동",
                     modifier = Modifier.fillMaxWidth().padding(24.dp),
                     style = MaterialTheme.typography.bodySmall, color = Sgu.Sub,
                 )
             }
         }
+        if (editingUser) NameDialog("프롬프트에 유저 설정", SettingsStore.root.s("userName"), "예: 자기",
+            onDismiss = { editingUser = false }) { v -> SettingsStore.update { it["userName"] = JsonPrimitive(v.trim()) } }
         if (editingCreator) NameDialog("제작자 이름", SettingsStore.root.s("creatorName"), "비워 두면 새 프로젝트의 제작자도 비어 있습니다",
             onDismiss = { editingCreator = false }) { v -> SettingsStore.update { it["creatorName"] = JsonPrimitive(v.trim()) } }
     }
