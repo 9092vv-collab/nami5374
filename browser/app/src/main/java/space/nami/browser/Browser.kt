@@ -148,6 +148,8 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
     var inPip by mutableStateOf(false)
     var pill by mutableStateOf<String?>(null)
     var longPress by mutableStateOf<LongPress?>(null)
+    /** What made Nami close last time (shown once on the next start). */
+    var crashLog by mutableStateOf<String?>(null)
     var customView by mutableStateOf<View?>(null)
     private var customCb: WebChromeClient.CustomViewCallback? = null
     /** Set by the UI: runs an Action (used by gestures). */
@@ -360,8 +362,23 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
      */
     /** "이미지 저장": the picture is already on screen, so fetch it the way the page did (passes Cloudflare, uses the cache). */
     fun saveImage(url: String) {
-        if (url.startsWith("http")) { grabViaPage(url, quiet = true); Toast.makeText(act, "이미지 저장 중…", Toast.LENGTH_SHORT).show() }
-        else download(url)
+        runCatching {
+            when {
+                url.startsWith("http") -> { grabViaPage(url, quiet = true); Toast.makeText(act, "이미지 저장 중…", Toast.LENGTH_SHORT).show() }
+                url.startsWith("data:") -> saveDataAsync(url, null)
+                else -> download(url)
+            }
+        }.onFailure { Toast.makeText(act, "이미지를 저장하지 못했어요", Toast.LENGTH_SHORT).show() }
+    }
+
+    /** Pictures built into the page (Google 이미지 thumbnails are big base64 data: URLs) — decode off the main thread. */
+    private fun saveDataAsync(url: String, hint: String?) {
+        scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val n = runCatching { blobs.saveDataUrl(url, hint) }.getOrNull()
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                Toast.makeText(act, if (n != null) "저장했어요: $n" else "이 파일은 받을 수 없어요", Toast.LENGTH_SHORT).show()
+            }
+        }
     }
 
     fun grabViaPage(url: String, quiet: Boolean = false) {
@@ -1091,10 +1108,7 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
             }
         }
         downloadHints.remove(url)
-        if (url.startsWith("data:")) {
-            val n = blobs.saveDataUrl(url, hint)
-            Toast.makeText(act, if (n != null) "저장했어요: $n" else "이 파일은 받을 수 없어요", Toast.LENGTH_SHORT).show(); return
-        }
+        if (url.startsWith("data:")) { saveDataAsync(url, hint); return }
         if (url.startsWith("blob:")) {
             if (blobs.taken.remove(url)) return  // already being saved from the click
             val q = org.json.JSONObject.quote(url); val h = org.json.JSONObject.quote(hint ?: "")

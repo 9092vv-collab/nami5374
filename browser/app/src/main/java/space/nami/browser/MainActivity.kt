@@ -31,8 +31,15 @@ class MainActivity : ComponentActivity(), Host {
             navigationBarStyle = SystemBarStyle.light(Color.TRANSPARENT, Color.TRANSPARENT),
         )
         super.onCreate(savedInstanceState)
+        val crashFile = java.io.File(filesDir, "last_crash.txt")
+        val prev = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { th, e ->
+            runCatching { crashFile.writeText("Nami 0.7.12 · ${java.util.Date()}\n" + android.util.Log.getStackTraceString(e).take(8000)) }
+            prev?.uncaughtException(th, e)
+        }
         prefs = Prefs(this)
         browser = Browser(this, prefs, lifecycleScope, this)
+        if (crashFile.exists()) { browser.crashLog = runCatching { crashFile.readText() }.getOrNull(); crashFile.delete() }
         handleOpenFile(intent)
         val incoming = urlFrom(intent)
         if (!browser.restore(incoming)) browser.newTab(incoming ?: prefs.homeUrl).fromLink = incoming != null

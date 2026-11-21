@@ -23,6 +23,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -169,11 +170,15 @@ fun NamiTheme(content: @Composable () -> Unit) {
 }
 
 fun copyText(ctx: Context, s: String) {
-    (ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("url", s))
-    Toast.makeText(ctx, "복사했어요", Toast.LENGTH_SHORT).show()
+    // a huge data: URL is too big for the clipboard (the system would crash us)
+    if (s.length > 200_000) { Toast.makeText(ctx, "너무 길어서 복사할 수 없어요", Toast.LENGTH_SHORT).show(); return }
+    runCatching { (ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("url", s)) }
+        .onSuccess { Toast.makeText(ctx, "복사했어요", Toast.LENGTH_SHORT).show() }
+        .onFailure { Toast.makeText(ctx, "복사하지 못했어요", Toast.LENGTH_SHORT).show() }
 }
 
 fun shareText(ctx: Context, s: String) {
+    if (s.length > 200_000) { Toast.makeText(ctx, "너무 길어서 공유할 수 없어요", Toast.LENGTH_SHORT).show(); return }
     ctx.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, s), null))
 }
 
@@ -332,6 +337,15 @@ fun NamiApp(b: Browser, prefs: Prefs, act: Activity) = NamiTheme {
         if (b.showDownloads) DownloadsScreen(b)
         if (b.showSettings) SettingsScreen(b, prefs)
         b.longPress?.let { LongPressDialog(b, it) }
+        b.crashLog?.let { log ->
+            val c = LocalContext.current
+            AlertDialog(onDismissRequest = { b.crashLog = null }, containerColor = Color.White, shape = RoundedCornerShape(24.dp),
+                title = { Text("지난번에 Nami가 갑자기 꺼졌어요", fontWeight = FontWeight.Bold) },
+                text = { Text("아래 기록을 복사해서 보내 주면 원인을 찾을 수 있어요.\n\n" + log.take(1500), fontSize = 12.sp, color = C.Sub,
+                    modifier = Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState())) },
+                confirmButton = { TextButton({ copyText(c, log); b.crashLog = null }) { Text("기록 복사", color = C.Accent, fontWeight = FontWeight.Bold) } },
+                dismissButton = { TextButton({ b.crashLog = null }) { Text("닫기", color = C.Ink) } })
+        }
         if (b.showVideos) VideoSheet(b)
         b.pendingInstall?.let { InstallDialog(b, it) }
         b.scriptPanel?.let { ScriptPanel(b, it) }
@@ -624,7 +638,7 @@ private fun LongPressDialog(b: Browser, lp: LongPress) {
     val ctx = LocalContext.current
     fun close() { b.longPress = null }
     AlertDialog(onDismissRequest = ::close, confirmButton = {}, containerColor = Color.White, shape = RoundedCornerShape(24.dp),
-        title = { Text(lp.link ?: lp.image ?: "", fontSize = 13.sp, color = C.Sub, maxLines = 2, overflow = TextOverflow.Ellipsis) },
+        title = { Text((lp.link ?: lp.image ?: "").let { if (it.startsWith("data:")) "페이지 안 이미지 (" + it.substring(5).substringBefore(';').substringBefore(',') + ")" else it.take(300) }, fontSize = 13.sp, color = C.Sub, maxLines = 2, overflow = TextOverflow.Ellipsis) },
         text = {
             Column {
                 @Composable fun row(label: String, onClick: () -> Unit) {
