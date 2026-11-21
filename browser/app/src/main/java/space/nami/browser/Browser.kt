@@ -182,6 +182,19 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
             }
         }
         Downloads.onBatchDone = { msg -> batchPending.clear(); showPill(msg, 5000) }
+        // our downloader was refused (signed/one-time links, cookies it can't see…): let the page fetch it once
+        Downloads.onFail = { url, code ->
+            if (url.startsWith("http") && retried.add(url)) {
+                val h = Uri.parse(url).host ?: ""
+                val ok = tabs.filter { !it.web.url.isNullOrEmpty() && it.web.url != url }
+                val t = ok.firstOrNull { it.host == h && it === tab } ?: ok.lastOrNull { it.host == h } ?: tab?.takeIf { !it.web.url.isNullOrEmpty() }
+                if (t != null) {
+                    showPill("서버가 거절해서($code) 페이지를 거쳐 다시 받아 볼게요", 3000)
+                    val q = org.json.JSONObject.quote(url)
+                    t.web.evaluateJavascript("window.__nami&&__nami.relay('$key',$q,'')", null)
+                }
+            }
+        }
         RelayService.onCancel = {
             tabs.filter { it.relays > 0 || it.batchJson != null }.forEach { t ->
                 t.web.evaluateJavascript("window.__nami&&__nami.cancelAll('$key')", null)
@@ -331,6 +344,8 @@ class Browser(private val act: Activity, val prefs: Prefs, private val scope: Co
     }
 
     @Volatile var lastNativeFail = ""
+    /** Links we already re-tried through the page once (no loops). */
+    private val retried = java.util.Collections.synchronizedSet(HashSet<String>())
     private val misc by lazy { act.getSharedPreferences("nami_misc", android.content.Context.MODE_PRIVATE) }
     /** Press every file's download button on the page in turn (kio.ac folders). */
     fun grabAll() { tab?.web?.evaluateJavascript("window.__nami&&__nami.grabAll('$key')", null) }

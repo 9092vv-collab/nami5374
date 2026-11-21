@@ -173,9 +173,11 @@ class DownloadService : Service() {
         try {
             // 1) probe
             var ranged = false
-            val c = open(req, "bytes=0-0")
+            var c = open(req, "bytes=0-0")
             try {
-                val code = c.responseCode
+                var code = c.responseCode
+                // some servers refuse a Range request (400/403/405/416…): ask again the plain way
+                if (code !in 200..299) { c.disconnect(); c = open(req, null); code = c.responseCode }
                 val cr = c.getHeaderField("Content-Range")
                 // the real response often names the file even when the page didn't
                 FileName.fromDisposition(c.getHeaderField("Content-Disposition"))?.let { n ->

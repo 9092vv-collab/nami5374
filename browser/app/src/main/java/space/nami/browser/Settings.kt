@@ -112,7 +112,7 @@ fun SettingsScreen(b: Browser, prefs: Prefs) {
                         7 -> BoostSection(b, prefs)
                         else -> {
                             GeneralSection(prefs)
-                            Text("Nami 0.7.8", color = C.Sub, fontSize = 13.sp, modifier = Modifier.padding(start = 6.dp))
+                            Text("Nami 0.7.9", color = C.Sub, fontSize = 13.sp, modifier = Modifier.padding(start = 6.dp))
                         }
                     }
                 }
