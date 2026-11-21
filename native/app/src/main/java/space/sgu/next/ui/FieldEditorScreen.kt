@@ -33,6 +33,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.LaunchedEffect
@@ -50,6 +51,7 @@ fun FieldEditorScreen(characterId: String, key: String, onBack: () -> Unit) {
         if (isGen) space.sgu.next.data.ImageGenStore.getText(characterId, key) else CharacterStore.getField(CharacterStore.readCard(characterId), key)
     }
     var text by rememberSaveable(characterId, key) { mutableStateOf(original) }
+    val press = remember { PressState() }
     var tfv by rememberSaveable(characterId, key, stateSaver = androidx.compose.ui.text.input.TextFieldValue.Saver) {
         mutableStateOf(androidx.compose.ui.text.input.TextFieldValue(text))
     }
@@ -107,18 +109,38 @@ fun FieldEditorScreen(characterId: String, key: String, onBack: () -> Unit) {
                 value = tfv,
                 onValueChange = { nv ->
                     var v = nv
-                    // Image prompts: a long press (or double tap) selects the whole tag, not one word.
-                    if (isGen && v.text == tfv.text && !v.selection.collapsed &&
-                        (tfv.selection.collapsed || v.selection.max <= tfv.selection.min || v.selection.min >= tfv.selection.max)) {
-                        PromptTags.expand(v.text, v.selection)?.let { v = v.copy(selection = it) }
+                    // Image prompts: a long press (or double tap) selects the whole tag under the finger, not one word.
+                    // While that finger stays down, the text field keeps re-sending its own word selection → keep ours.
+                    if (isGen && v.text == tfv.text && !v.selection.collapsed && (press.down || (press.pin != null && android.os.SystemClock.uptimeMillis() - press.upAt < 400))) {
+                        val pin = press.pin
+                        if (pin != null) v = v.copy(selection = pin)
+                        else if (tfv.selection.collapsed || v.selection.max <= tfv.selection.min || v.selection.min >= tfv.selection.max) {
+                            val at = press.layout?.getOffsetForPosition(press.pos)
+                            (if (at != null) PromptTags.expandAt(v.text, at) else PromptTags.expand(v.text, v.selection))?.let {
+                                press.pin = it; v = v.copy(selection = it)
+                            }
+                        }
                     }
                     tfv = v; text = v.text
                 },
+                onTextLayout = { press.layout = it },
                 textStyle = MaterialTheme.typography.bodyLarge.copy(color = Sgu.Ink).let {
                     if (mono) it.copy(fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace, fontSize = androidx.compose.ui.unit.TextUnit(14f, androidx.compose.ui.unit.TextUnitType.Sp)) else it
                 },
                 cursorBrush = SolidColor(Sgu.Accent),
-                modifier = Modifier.fillMaxSize().focusRequester(focus).padding(bottom = 200.dp),
+                modifier = Modifier.fillMaxSize().focusRequester(focus)
+                    .pointerInput(isGen) {
+                        if (!isGen) return@pointerInput
+                        awaitPointerEventScope {
+                            while (true) {
+                                val e = awaitPointerEvent(androidx.compose.ui.input.pointer.PointerEventPass.Initial)
+                                val c = e.changes.firstOrNull() ?: continue
+                                if (c.pressed && !c.previousPressed) { press.down = true; press.pin = null; press.pos = c.position }
+                                else if (!c.pressed && c.previousPressed) { press.down = false; press.upAt = android.os.SystemClock.uptimeMillis() }
+                            }
+                        }
+                    }
+                    .padding(bottom = 200.dp),
             )
         }
         val wt = if (isGen) PromptTags.weightOf(tfv.text, tfv.selection) else null
@@ -178,6 +200,15 @@ private fun WeightBar(value: java.math.BigDecimal, onStep: (java.math.BigDecimal
     }
 }
 
+/** Where the finger went down in the editor (for long-press tag selection). */
+private class PressState {
+    var down = false
+    var upAt = 0L
+    var pos = androidx.compose.ui.geometry.Offset.Zero
+    var pin: androidx.compose.ui.text.TextRange? = null
+    var layout: androidx.compose.ui.text.TextLayoutResult? = null
+}
+
 /** Tag selection and weights (`1.2::tag::`) for image prompt fields. */
 internal object PromptTags {
     private val WEIGHTED = Regex("""-?\d+(?:\.\d+)?::.*?::""")
@@ -201,6 +232,24 @@ internal object PromptTags {
         var ts = s; while (ts < e && seg[ts - s] in trim) ts++
         var te = e; while (te > ts && seg[te - 1 - s] in trim) te--
         if (te <= ts || ts > a || te < b) return null
+        return androidx.compose.ui.text.TextRange(ts, te)
+    }
+
+    /** The tag at character offset [at] (where the finger is). */
+    fun expandAt(text: String, at0: Int): androidx.compose.ui.text.TextRange? {
+        if (text.isEmpty()) return null
+        var at = at0.coerceIn(0, text.length)
+        if (at == text.length || isSep(text[at])) { if (at > 0 && !isSep(text[at - 1])) at-- else return null }
+        var s = at; while (s > 0 && !isSep(text[s - 1])) s--
+        var e = at; while (e < text.length && !isSep(text[e])) e++
+        val seg = text.substring(s, e)
+        WEIGHTED.findAll(seg).firstOrNull { s + it.range.first <= at && at <= s + it.range.last }?.let {
+            return androidx.compose.ui.text.TextRange(s + it.range.first, s + it.range.last + 1)
+        }
+        val trim = " \t{}[]()"
+        var ts = s; while (ts < e && text[ts] in trim) ts++
+        var te = e; while (te > ts && text[te - 1] in trim) te--
+        if (te <= ts) return null
         return androidx.compose.ui.text.TextRange(ts, te)
     }
 
