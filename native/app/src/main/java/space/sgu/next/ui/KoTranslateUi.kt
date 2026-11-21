@@ -2,6 +2,11 @@ package space.sgu.next.ui
 
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.background
+import androidx.compose.ui.draw.clip
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Translate
 import androidx.compose.material3.MaterialTheme
@@ -29,4 +34,25 @@ fun KoToggle(modifier: Modifier = Modifier) {
         if (KoTranslate.on && KoTranslate.status.isNotEmpty())
             Text(KoTranslate.status, style = MaterialTheme.typography.bodySmall, color = Sgu.Sub, modifier = Modifier.padding(start = 6.dp, top = 4.dp))
     }
+}
+
+/** 블록마다 다는 번역 버튼 */
+@Composable
+fun KoButton(on: Boolean, onClick: () -> Unit) {
+    androidx.compose.material3.IconButton(onClick = onClick) {
+        androidx.compose.material3.Icon(Icons.Outlined.Translate, if (on) "번역 닫기" else "번역", tint = if (on) Sgu.Accent else Sgu.Sub)
+    }
+}
+
+/** 블록 하나의 한글 번역 (원문은 그대로) */
+@Composable
+fun KoBubble(text: String, modifier: Modifier = Modifier) {
+    val cached = KoTranslate.cache[text]
+    var err by androidx.compose.runtime.remember(text) { androidx.compose.runtime.mutableStateOf("") }
+    LaunchedEffect(text) { if (KoTranslate.cache[text] == null) runCatching { KoTranslate.translate(text) }.onFailure { err = "번역하지 못했어요 (${it.message})" } }
+    Text(
+        when { text.isBlank() -> "비어 있음"; cached != null -> cached; err.isNotEmpty() -> err; else -> KoTranslate.status.ifEmpty { "번역 중…" } },
+        style = MaterialTheme.typography.bodySmall, color = if (cached != null) Sgu.Ink else Sgu.Sub,
+        modifier = modifier.fillMaxWidth().clip(androidx.compose.foundation.shape.RoundedCornerShape(14.dp)).background(Sgu.Bubble).padding(12.dp),
+    )
 }

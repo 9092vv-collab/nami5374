@@ -17,7 +17,7 @@ import kotlin.coroutines.resumeWithException
 
 /**
  * 임시 번역 (영어 → 한국어, 화면 표시용). 원문은 건드리지 않고 번역문만 따로 보관.
- * 폰 안에서 도는 ML Kit 번역 — 처음 한 번 번역 데이터를 내려받음.
+ * 구글 무료 번역(translate.googleapis.com) 먼저, 안 되면 폰 안에서 도는 ML Kit 번역(처음 한 번 데이터 받음).
  * {{…}} 명령어와 <태그>는 번역하지 않고 그대로 둠.
  */
 object KoTranslate {
@@ -76,15 +76,48 @@ object KoTranslate {
 
     suspend fun translate(text: String): String {
         cache[text]?.let { return it }
-        ensure()
-        val sb = StringBuilder()
-        for ((keep, piece) in split(text)) {
-            if (keep || !latin.containsMatchIn(piece)) { sb.append(piece); continue }
-            val lead = piece.takeWhile { it.isWhitespace() }
-            val trail = piece.takeLastWhile { it.isWhitespace() }
-            val core = piece.trim()
-            sb.append(lead).append(runCatching { client.translate(core).await() }.getOrDefault(core)).append(trail)
+        val parts = split(text)
+        val todo = parts.indices.filter { !parts[it].first && latin.containsMatchIn(parts[it].second) }
+        val cores = todo.map { parts[it].second.trim() }
+        // 구글 무료 번역(한 번에 묶어서) → 안 되면 폰 안 번역(ML Kit)
+        val done: List<String> = runCatching { google(cores) }.getOrElse {
+            ensure()
+            cores.map { c -> runCatching { client.translate(c).await() }.getOrDefault(c) }
         }
-        return sb.toString().also { cache[text] = it }
+        val out = parts.map { it.second }.toMutableList()
+        todo.forEachIndexed { k, i ->
+            val piece = parts[i].second
+            out[i] = piece.takeWhile { it.isWhitespace() } + done[k] + piece.takeLastWhile { it.isWhitespace() }
+        }
+        return out.joinToString("").also { cache[text] = it }
+    }
+
+    /** translate.googleapis.com (client=gtx). 조각들을 줄바꿈으로 묶어 보내고 줄 수가 맞으면 그대로 나눔. */
+    private suspend fun google(cores: List<String>): List<String> = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        if (cores.isEmpty()) return@withContext emptyList()
+        fun call(q: String): String {
+            val c = java.net.URL("https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=ko&dt=t").openConnection() as java.net.HttpURLConnection
+            c.requestMethod = "POST"; c.doOutput = true; c.connectTimeout = 10000; c.readTimeout = 20000
+            c.setRequestProperty("Content-Type", "application/x-www-form-urlencoded;charset=UTF-8")
+            c.outputStream.use { it.write(("q=" + java.net.URLEncoder.encode(q, "UTF-8")).toByteArray()) }
+            if (c.responseCode != 200) error("HTTP ${c.responseCode}")
+            val body = c.inputStream.bufferedReader().use { it.readText() }
+            val arr = kotlinx.serialization.json.Json.parseToJsonElement(body) as kotlinx.serialization.json.JsonArray
+            return (arr[0] as kotlinx.serialization.json.JsonArray).joinToString("") {
+                ((it as kotlinx.serialization.json.JsonArray)[0] as? kotlinx.serialization.json.JsonPrimitive)?.content ?: ""
+            }
+        }
+        val out = ArrayList<String>()
+        // 너무 길면 나눠서 (주소 대신 본문으로 보내지만 한 번에 약 4000자까지)
+        var batch = ArrayList<String>(); var len = 0
+        fun flush() {
+            if (batch.isEmpty()) return
+            val lines = call(batch.joinToString("\n")).split("\n")
+            if (lines.size == batch.size) out.addAll(lines.map { it.trim() }) else batch.forEach { out.add(call(it).trim()) }
+            batch = ArrayList(); len = 0
+        }
+        for (c in cores) { if (len + c.length > 4000) flush(); batch.add(c); len += c.length + 1 }
+        flush()
+        out
     }
 }

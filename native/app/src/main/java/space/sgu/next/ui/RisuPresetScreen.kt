@@ -94,6 +94,7 @@ fun RisuPresetScreen(onBack: () -> Unit) {
     var removing by remember { mutableStateOf<Int?>(null) }
     var msg by remember { mutableStateOf("") }
     var previewing by remember { mutableStateOf(false) }
+    var koOpen by remember { mutableStateOf(setOf<String>()) }
     var saveMsg by remember { mutableStateOf<Pair<Boolean?, String>>(null to "") }
     val scope = androidx.compose.runtime.rememberCoroutineScope()
     var retyping by remember { mutableStateOf<Int?>(null) }
@@ -160,6 +161,7 @@ fun RisuPresetScreen(onBack: () -> Unit) {
         SectionLabel("프롬프트 템플릿 ${items.size}개")
         KoToggle(Modifier.padding(bottom = 6.dp))
         items.forEachIndexed { i, it ->
+            val koKey = "risu:$i"
             val key = RisuPreset.textKey(it)
             val role = when (it.s("type")) { in RisuPreset.TEXT_TYPES -> it.s("role"); "cache" -> it.s("role"); else -> it.s("role2") }
             LineCard(Modifier.padding(vertical = 4.dp), onClick = if (key != null) ({ editing = i }) else null) {
@@ -169,6 +171,7 @@ fun RisuPresetScreen(onBack: () -> Unit) {
                             modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
                         IconButton(onClick = { RisuPresetEditor.setItems(items.toMutableList().apply { if (i > 0) add(i - 1, removeAt(i)) }) }, enabled = i > 0) { Icon(Icons.Outlined.KeyboardArrowUp, "위로") }
                         IconButton(onClick = { RisuPresetEditor.setItems(items.toMutableList().apply { if (i < size - 1) add(i + 1, removeAt(i)) }) }, enabled = i < items.size - 1) { Icon(Icons.Outlined.KeyboardArrowDown, "아래로") }
+                        if (key != null) KoButton(koKey in koOpen) { koOpen = if (koKey in koOpen) koOpen - koKey else koOpen + koKey }
                         IconButton(onClick = { removing = i }) { Icon(Icons.Outlined.Delete, "삭제", tint = Sgu.Sub) }
                     }
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -187,6 +190,7 @@ fun RisuPresetScreen(onBack: () -> Unit) {
                         val text = it.s(key)
                         Text(if (text.isBlank()) "비어 있음 · 탭하여 편집" else koText(text.take(700)), style = MaterialTheme.typography.bodySmall, color = if (text.isBlank()) Sgu.Sub else Sgu.Ink,
                             maxLines = 4, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 6.dp))
+                        if (koKey in koOpen) KoBubble(text, Modifier.padding(top = 6.dp))
                     }
                     if (it.s("type") in RisuPreset.TEXT_TYPES && it.s("type") != "chatML") {
                         Row(Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {

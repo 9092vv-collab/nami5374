@@ -546,16 +546,19 @@ fun PromptPresetScreen(presetId: String, onBack: () -> Unit) {
             Spacer(Modifier.height(6.dp))
         }
         Hint("위에서 아래 순서로 메인 프로세서에 전달됩니다. 블록을 누르면 편집합니다. 켜져 있는 맨 마지막 블록이 assistant 역할 글이면 프리필(모델이 그 글에 이어서 답함)로 전송돼요. 프리필을 받지 않는 모델(Claude 4.6 이후 등)에는 프리필 뒤에 짧은 유저 메시지를 붙여서 보내요.")
+        var koOpen by remember { mutableStateOf(setOf<String>()) }
         // 프리필 = 실제로 전송되는 블록 중 맨 끝이 assistant 글 블록일 때
         val prefillIndex = blocks.indexOfLast { it.b("enabled", true) && it.s("type") !in setOf("risu", "cachePoint") }
             .let { if (it >= 0 && blocks[it].s("type") == "text" && blocks[it].s("role") == "assistant" && blocks[it].s("text").isNotBlank()) it else -1 }
         blocks.forEachIndexed { i, b ->
             val on = b.b("enabled", true)
-            Row(
+            val koKey = b.s("id").ifBlank { "$i" }
+            val btext = b.s("text")
+            Column(
                 Modifier.fillMaxWidth().padding(vertical = 3.dp).clip(RoundedCornerShape(18.dp)).background(Sgu.Card).border(1.dp, Sgu.Line, RoundedCornerShape(18.dp))
                     .clickable { editing = b }.padding(start = 14.dp, end = 2.dp, top = 2.dp, bottom = 2.dp),
-                verticalAlignment = Alignment.CenterVertically,
             ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f).padding(vertical = 8.dp)) {
                     Text(b.s("name").ifBlank { b.s("type") }, style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.SemiBold), color = if (on) Sgu.Ink else Sgu.Sub)
                     Text("${(b["risuItem"] as? JsonObject)?.let { space.sgu.next.data.RisuPreset.typeLabel(it) + if (b.s("type") == "risu") " · RisuAI 전용" else "" } ?: PromptBlocks.TYPE_LABELS[b.s("type")] ?: b.s("type")} · ${b.s("role").ifBlank { "system" }}${if (i == prefillIndex) " · 프리필" else ""}" + if (!on) " · 꺼짐" else "", style = MaterialTheme.typography.bodySmall, color = Sgu.Sub)
@@ -563,6 +566,9 @@ fun PromptPresetScreen(presetId: String, onBack: () -> Unit) {
                 SguSwitch(on) { v -> setBlocks { l -> l[i] = JsonObject(l[i] + ("enabled" to JsonPrimitive(v))) } }
                 IconButton(onClick = { setBlocks { l -> if (i > 0) { val t = l[i]; l[i] = l[i - 1]; l[i - 1] = t } } }, enabled = i > 0) { Icon(Icons.Outlined.KeyboardArrowUp, "위로", tint = Sgu.Sub) }
                 IconButton(onClick = { setBlocks { l -> if (i < l.size - 1) { val t = l[i]; l[i] = l[i + 1]; l[i + 1] = t } } }, enabled = i < blocks.size - 1) { Icon(Icons.Outlined.KeyboardArrowDown, "아래로", tint = Sgu.Sub) }
+                if (btext.isNotBlank()) KoButton(koKey in koOpen) { koOpen = if (koKey in koOpen) koOpen - koKey else koOpen + koKey }
+            }
+            if (koKey in koOpen && btext.isNotBlank()) KoBubble(btext, Modifier.padding(end = 12.dp, bottom = 10.dp))
             }
         }
         Row(Modifier.padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
