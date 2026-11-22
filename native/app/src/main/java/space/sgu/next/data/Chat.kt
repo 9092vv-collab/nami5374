@@ -553,8 +553,10 @@ object Chat {
         if (!res.isStream) {
             val o = parse(res.body ?: "") ?: throw ProviderError("응답을 해석할 수 없어요")
             if (r.stream) apiError(o)?.let { if (Regex("stream", RegexOption.IGNORE_CASE).containsMatchIn(it)) return gemini(rs, model, r.copy(stream = false), cb, retries) else throw ProviderError(it) }
-            o.o("promptFeedback").sOrNull("blockReason")?.let { throw ProviderError("Gemini 차단: $it") }
+            o.o("promptFeedback").sOrNull("blockReason")?.let { throw ProviderError(geminiBlocked(it)) }
             val (t, th) = split(o)
+            val fr = o.arr("candidates").firstOrNull().sOrNull("finishReason")
+            if (t.isBlank() && fr in GEMINI_BLOCKS) throw ProviderError(geminiBlocked(fr!!))
             return ChatResult(t, th.ifEmpty { null }, Usage(o.o("usageMetadata").int("promptTokenCount"), o.o("usageMetadata").int("candidatesTokenCount")),
                 o.arr("candidates").firstOrNull().sOrNull("finishReason"))
         }
@@ -562,14 +564,19 @@ object Chat {
         readSse(res.conn!!) { d, _ ->
             val o = parse(d) ?: return@readSse
             apiError(o)?.let { throw ProviderError(it) }
+            o.o("promptFeedback").sOrNull("blockReason")?.let { throw ProviderError(geminiBlocked(it)) }
             val (t, rr) = split(o)
             if (t.isNotEmpty()) { text.append(t); cb.onDelta(t) }
             if (rr.isNotEmpty()) { th.append(rr); cb.onReasoning(rr) }
             o.o("usageMetadata")?.let { usage = Usage(it.int("promptTokenCount"), it.int("candidatesTokenCount")) }
             o.arr("candidates").firstOrNull().sOrNull("finishReason")?.let { finish = it }
         }
+        if (text.isBlank() && finish in GEMINI_BLOCKS) throw ProviderError(geminiBlocked(finish!!))
         return ChatResult(text.toString(), th.toString().ifEmpty { null }, usage, finish)
     }
+
+    private val GEMINI_BLOCKS = setOf("SAFETY", "PROHIBITED_CONTENT", "BLOCKLIST", "SPII", "IMAGE_SAFETY", "RECITATION", "OTHER")
+    fun geminiBlocked(reason: String) = "구글 안전 필터에 막혔어요 (사유: $reason). 앱의 안전 설정(BLOCK_NONE)으로는 끌 수 없는 필터예요."
 
     // ---------- Jev (935) ----------
 

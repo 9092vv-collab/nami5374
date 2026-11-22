@@ -450,7 +450,7 @@ object Processors {
             val req = req0.copy(cache = req0.cache?.copy(key = doc.s("id").ifBlank { null }))
             val t0 = System.currentTimeMillis()
             val r = try { Chat.chatWithModel(m, req, cb) } catch (e: CancellationException) { throw e } catch (e: Exception) {
-                if (prefill != null && Regex("prefill|400|invalid|end with a user|assistant", RegexOption.IGNORE_CASE).containsMatchIn(e.message ?: "")) {
+                if (prefill != null && "안전 필터" !in (e.message ?: "") && Regex("prefill|400|invalid|end with a user|assistant", RegexOption.IGNORE_CASE).containsMatchIn(e.message ?: "")) {
                     Logs.add("error", m.s("modelId"), error = "프리필 전송 실패, 프리필 뒤에 유저 메시지를 붙여 재시도: ${e.message}")
                     onRestart(); return run(m, appSearch, noPrefill = true)
                 }
