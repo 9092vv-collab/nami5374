@@ -129,7 +129,17 @@ object ImageGenStore {
 
     private val cache = mutableMapOf<String, JsonObject>()
 
-    fun load(cid: String): JsonObject = cache.getOrPut(cid) {
+    /** 그림체 설정은 모든 캐릭터 공용 (설정의 "imageStyle"). 없으면 처음 연 캐릭터의 그림체로 시작. */
+    private fun globalStyle(): JsonObject? = SettingsStore.root.o("imageStyle")?.takeIf { it.isNotEmpty() }
+
+    fun load(cid: String): JsonObject {
+        val g = loadOwn(cid)
+        val gs = globalStyle()
+        if (gs == null) { g.o("style")?.let { st -> SettingsStore.update { it["imageStyle"] = st } }; return g }
+        return if (g.o("style") == gs) g else g.with("style" to gs)
+    }
+
+    private fun loadOwn(cid: String): JsonObject = cache.getOrPut(cid) {
         runCatching { CardIO.json.parseToJsonElement(file(cid).readText()).jsonObject }.getOrNull()?.let { t ->
             val d = defaults()
             // 켜진 블록이 없는데 켜져 있는 폴더는 끔 (생성 결과는 같음, 화면에서만 헷갈렸음)
@@ -151,6 +161,7 @@ object ImageGenStore {
     }
 
     fun save(cid: String, o: JsonObject) {
+        o.o("style")?.let { st -> if (st != globalStyle()) SettingsStore.update { it["imageStyle"] = st } }
         cache[cid] = o
         val text = CardIO.json.encodeToString(JsonElement.serializer(), o)
         CharacterStore.io.launch { file(cid).writeText(text) }
