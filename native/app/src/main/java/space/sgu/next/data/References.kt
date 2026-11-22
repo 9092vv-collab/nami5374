@@ -329,7 +329,7 @@ object References {
         val set = chosen.toSet(); val on = mutableListOf<String>(); val elev = mutableListOf<Elevation>()
         for (r in all(doc)) {
             val st = state(doc, r, command, skipTurnId)
-            if (st == "on" || (subOff && st == "sub")) on.add(r.s("id"))
+            if (st == "on") on.add(r.s("id"))  // 서브가 꺼져 있으면 "서브 판단" 자료는 안 보냄 (사용자 요청)
             else if (st == "sub" && r.s("id") in set) elev.add(Elevation("ref:" + r.s("id"), "view", reasons["view:ref:${r.s("id")}"]))
         }
         return RefAccess(on, elev)
