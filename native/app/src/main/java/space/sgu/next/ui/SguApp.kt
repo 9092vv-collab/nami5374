@@ -130,7 +130,6 @@ fun SguApp() {
         composable("builtinprompts") { BuiltinPromptsScreen(onBack = back) }
         composable("logs") { LogsScreen(onBack = back) }
         composable("sessionsummary") { SessionSummaryScreen(onBack = back) }
-        composable("promptstructure") { PromptStructureScreen(onBack = back) }
         composable("background") { BackgroundScreen(onBack = back) }
         composable("risupreset") { RisuPresetScreen(onBack = back) }
         composable("ref/{id}") { e -> ReferenceEditScreen(e.arguments?.getString("id") ?: "", openRoute = go, onBack = back) }

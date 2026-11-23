@@ -61,8 +61,6 @@ object BuiltinPrompts {
                 "JSON 모양(message, edits, field, op …)을 바꾸면 앱이 답을 읽지 못해서 편집이 적용되지 않아요."),
             Item("main.chatNote", "메인 프로세서", "잡담 안내문", "서브가 '지시가 아니라 대화'라고 판단하면 유저 명령 뒤에 붙어요.",
                 "[Note: the user is making ordinary conversation, not giving an instruction. Reply naturally in \"message\" and return an empty \"edits\" array.]"),
-            Item("main.changes", "메인 프로세서", "기준본 이후 바뀐 부분", "캐싱 최적화 구조에서 명령 바로 앞에 붙어요. [[rows]] = 기준본 이후 바뀐 항목(지금 값).",
-                "## Changes since the character data snapshot above\nThese fields were edited after the snapshot. Their current values below replace the snapshot values.\n\n[[rows]]"),
             Item("main.noFields", "메인 프로세서", "보이는 항목이 없을 때", "'캐릭터 데이터' 블록에 넣을 항목이 하나도 없을 때.", "(no fields are visible this turn)"),
             Item("main.emptyValue", "메인 프로세서", "항목 값이 비었을 때", "'캐릭터 데이터' 블록에서 빈 항목의 값 자리.", "(empty)"),
             Item("main.historySummary", "메인 프로세서", "세션 기록: 요약 머리말", "'세션 기록' 블록. [[summary]] = 이전 턴 요약.", "Summary of earlier turns in this session:\n[[summary]]"),

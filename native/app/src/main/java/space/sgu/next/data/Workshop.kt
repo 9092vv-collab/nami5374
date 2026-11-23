@@ -436,9 +436,7 @@ object Processors {
             val refs = References.loadForPrompt(doc, access.viewRefs, Chat.effectiveVision(m)).toMutableList()
             if (web && !native) refs.add(RefText("Web search results", null, "text", WebSearch.context(command)))
             val prompt = Prompt.assemble(Prompt.Input(data, PromptBlocks.blocksFor(doc), access.viewFields, access.editFields, command, refs,
-                Workshop.historyTurns(doc), instruction, m.o("params").d("maxContext")?.toInt() ?: 150000, summary = Workshop.summaryText(doc),
-                baseline = doc.o("session").o("promptBase")))
-            prompt.newBaseline?.let { nb -> doc.s("id").takeIf { it.isNotBlank() }?.let { id -> Workshop.updateDoc(id) { d -> JsonObject(d + ("session" to JsonObject(d.o("session").orEmptyObj() + ("promptBase" to nb)))) } } }
+                Workshop.historyTurns(doc), instruction, m.o("params").d("maxContext")?.toInt() ?: 150000, summary = Workshop.summaryText(doc)))
             // 프리필(맨 끝 assistant 메시지)이 있으면 답은 그 글의 이어 쓰기 → 답만으로 JSON이 안 되면 프리필을 앞에 붙여 다시 읽음.
             // 프리필을 받지 않는 모델(Claude 4.6 이후 — 대화가 assistant로 끝나면 400)이나 프리필로 보냈다가 거절당한 경우엔
             // 프리필 글을 지우지 않고 그 뒤에 짧은 user 메시지를 붙여 "끝나지 않는 프리필"로 보냄.
