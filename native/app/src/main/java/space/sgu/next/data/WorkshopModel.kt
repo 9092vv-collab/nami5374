@@ -851,6 +851,7 @@ object Prompt {
         body.forEachIndexed { i, b -> if (b.s("type") == "text" && (cmdIdx < 0 || i < cmdIdx)) add(b, "text", b.s("text")) }
         blk("outputFormat")?.let { add(it, "outputFormat", it.s("text").ifBlank { BuiltinPrompts.get("main.outputFormat") }) }
         blk("fieldSchema")?.let { add(it, "fieldSchema", PromptBlocks.applySlot(it.s("text"), SguData.describeEditable(e.data, e.editFields)), e.editFields) }
+        msgs.lastOrNull()?.cacheAfter = true  // 원본처럼 고정 지시 끝에 캐시 구분점
 
         // 2. 기준본: 참고 자료 · 캐릭터 데이터
         val dataBlk = blk("fieldData")
