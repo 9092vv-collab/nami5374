@@ -38,7 +38,7 @@ compose.desktop {
             packageVersion = "1.0.0"
             vendor = "Nami"
             description = "Nami next (PC)"
-            modules("java.net.http", "java.sql", "jdk.crypto.ec", "jdk.unsupported")
+            includeAllModules = true
             windows {
                 menu = true
                 shortcut = true
