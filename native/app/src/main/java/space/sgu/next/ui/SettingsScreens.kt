@@ -777,7 +777,7 @@ fun BackupScreen(onBack: () -> Unit) {
         LineCard {
             Column {
                 Text("기존 SGU 앱의 '설정 JSON 내보내기' 파일을 그대로 가져올 수 있어요.", style = MaterialTheme.typography.bodyMedium)
-                Text("키가 포함된 파일이면 API 키까지 한 번에 옮겨져요. 키가 없는 파일은 가져온 뒤 각 프로바이더에서 키를 다시 입력해야 합니다. "캐릭터 포함"을 켜면 캐릭터 글 데이터도 같이 옮겨져요(이미지까지 옮기려면 CHARX로).",
+                Text("키가 포함된 파일이면 API 키까지 한 번에 옮겨져요. 키가 없는 파일은 가져온 뒤 각 프로바이더에서 키를 다시 입력해야 합니다. 「캐릭터 포함」을 켜면 캐릭터 글 데이터도 같이 옮겨져요(이미지까지 옮기려면 CHARX로).",
                     style = MaterialTheme.typography.bodySmall, color = Sgu.Sub, modifier = Modifier.padding(top = 6.dp))
                 Spacer(Modifier.height(14.dp))
                 InkButton("설정 JSON 가져오기", onClick = { importer.launch(arrayOf("application/json", "text/plain", "*/*")) }, icon = Icons.Outlined.FileUpload)

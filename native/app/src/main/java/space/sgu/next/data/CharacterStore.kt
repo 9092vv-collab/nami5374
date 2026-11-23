@@ -89,7 +89,6 @@ object CharacterStore {
         val fs = (o["folders"] as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull }.orEmpty()
         if (fs.isNotEmpty()) File(root, "folders.json").writeText(CardIO.json.encodeToString(JsonElement.serializer(), JsonArray((folders + fs).distinct().map { JsonPrimitive(it) })))
         synchronized(cardCache) { cardCache.clear() }
-        cache.evictAll()
         reload()
         return n
     }
