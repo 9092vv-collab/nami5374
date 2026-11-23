@@ -30,8 +30,8 @@ jobs:
           cp native/app/src/main/res/font/*.otf desktop/src/main/resources/font/
       - name: Compile
         run: gradle -p desktop compileKotlin --no-daemon --stacktrace 2>&1 | tee compile.log
-      - name: Package MSI
-        run: gradle -p desktop packageMsi createDistributable --no-daemon
+      - name: Build app folder
+        run: gradle -p desktop createDistributable --no-daemon
       - name: Portable zip (설치 없이 실행)
         shell: pwsh
         run: |
@@ -43,10 +43,6 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          f=$(find desktop/build/compose/binaries -name "*.msi" | head -1)
-          echo "MSI: $f"
-          cp "$f" NamiNext.msi
-          ls -la NamiNext.msi
           gh release delete desktop-latest -R "${{ github.repository }}" --cleanup-tag -y || true
-          gh release create desktop-latest NamiNext.msi NamiNext-portable.zip -R "${{ github.repository }}" --prerelease \
+          gh release create desktop-latest NamiNext-portable.zip -R "${{ github.repository }}" --prerelease \
             --title "Nami next PC (빌드 ${{ github.run_number }})" --notes "commit ${{ github.sha }}"
