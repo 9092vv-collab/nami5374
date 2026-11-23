@@ -790,7 +790,7 @@ object Prompt {
 
     class Input(val data: JsonObject, val blocks: List<JsonObject>, val viewFields: List<String>, val editFields: List<String>, val command: String,
                 val references: List<RefText>, val turns: List<JsonObject>, val instruction: Boolean, val maxContext: Int?, val images: List<Part> = emptyList(),
-                val summary: String? = null)
+                val summary: String? = null, val openTable: String? = null)
 
     fun assemble(e: Input): Assembled {
         var t = build(e, Int.MAX_VALUE)
@@ -838,7 +838,7 @@ object Prompt {
                     }
                     text = PromptBlocks.applySlot(l.s("text"), if (rows.isNotEmpty()) rows.joinToString("\n") else BuiltinPrompts.get("main.noFields")); fieldIds = ids
                 }
-                "fieldSchema" -> { text = PromptBlocks.applySlot(l.s("text"), SguData.describeEditable(e.data, e.editFields)); fieldIds = e.editFields }
+                "fieldSchema" -> { text = PromptBlocks.applySlot(l.s("text"), (if (e.openTable != null && e.editFields.isEmpty()) BuiltinPrompts.get("main.openNoneYet") else SguData.describeEditable(e.data, e.editFields)) + (e.openTable?.let { "\n\n$it" } ?: "")); fieldIds = e.editFields }
                 "references" -> {
                     if (e.references.isEmpty()) continue
                     val chunks = mutableListOf<String>()

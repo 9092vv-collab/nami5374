@@ -425,9 +425,40 @@ object Processors {
         return text
     }
 
-    data class MainOut(val message: String, val edits: List<JsonObject>, val raw: String, val usage: Usage?, val model: JsonObject, val prompt: Assembled)
+    data class MainOut(val message: String, val edits: List<JsonObject>, val raw: String, val usage: Usage?, val model: JsonObject, val prompt: Assembled,
+                       val open: Decision? = null)
 
-    suspend fun runMain(doc: JsonObject, data: JsonObject, command: String, access: Access, instruction: Boolean, cb: Stream, onRestart: () -> Unit): MainOut {
+    /** 서브 없이 메인이 필요한 필드를 직접 엶 (원본 SGU 1.4.0 open_fields와 같은 방식, 여기선 JSON 답으로). 기본 켜짐. */
+    fun mainOpens() = !SettingsStore.root.o("processors").o("main").b("sendAll")
+
+    /** 처음 보낼 것: 항상 보기(Lv3) 필드 + 그중 바로 편집 가능(편집 Lv2)한 필드 + 상시·키워드 참고 자료. */
+    fun lightAccess(doc: JsonObject, command: String, turnId: String): Access {
+        val perms = doc.o("permissions").orEmptyObj()
+        val view = WFields.all.filter { it.viewable && Perms.view(perms.o(it.id)) == 3 }.map { it.id }
+        val edit = WFields.all.filter { it.id in view && Perms.edit(perms.o(it.id)) == 2 }.map { it.id }
+        val ra = References.resolveAccess(doc, emptyList(), emptyMap(), false, command, turnId)
+        return Access(view, edit, emptyList(), emptyList(), ra.on)
+    }
+
+    /** "## Fields you can open" 표. */
+    fun openTable(doc: JsonObject, data: JsonObject, a: Access): String {
+        val perms = doc.o("permissions").orEmptyObj()
+        fun lvl(n: Int) = when (n) { 2, 3 -> "yes"; 1 -> "ask"; else -> "no" }
+        val lines = WFields.all.mapNotNull { f ->
+            val p = perms.o(f.id)
+            val empty = SguData.isEmpty(data, f.id)
+            val read = when { !f.viewable -> "-"; f.id in a.viewFields -> "open"; empty -> "-"; else -> lvl(Perms.view(p)) }
+            val edit = if (f.id in a.editFields) "open" else lvl(Perms.edit(p))
+            if (read !in setOf("yes", "ask") && edit !in setOf("yes", "ask")) return@mapNotNull null
+            val size = if (empty) "empty" else "${SguData.serialize(data, f.id).length} chars"
+            "- ${f.id} — ${BuiltinPrompts.label(f.id)} ($size): read ${read}, edit $edit"
+        }
+        val refs = References.subCandidates(doc).filter { it.s("id") !in a.viewRefs }
+        val refText = if (refs.isEmpty()) "" else "\n" + BuiltinPrompts.get("main.openRefs") + "\n" + refs.joinToString("\n") { "- " + References.describe(it) }
+        return BuiltinPrompts.t("main.openTable", "fields" to lines.joinToString("\n").ifEmpty { "(none)" }, "refs" to refText)
+    }
+
+    suspend fun runMain(doc: JsonObject, data: JsonObject, command: String, access: Access, instruction: Boolean, cb: Stream, onRestart: () -> Unit, openTable: String? = null): MainOut {
         val (primary, fallback) = mainModels(doc)
         if (primary == null) throw ProviderError("메인 프로세서 모델이 설정되지 않았습니다. 설정 › 프로세서에서 모델을 지정하세요.")
         suspend fun run(m: JsonObject, appSearch: Boolean, noPrefill: Boolean = false): MainOut {
@@ -436,7 +467,7 @@ object Processors {
             val refs = References.loadForPrompt(doc, access.viewRefs, Chat.effectiveVision(m)).toMutableList()
             if (web && !native) refs.add(RefText("Web search results", null, "text", WebSearch.context(command)))
             val prompt = Prompt.assemble(Prompt.Input(data, PromptBlocks.blocksFor(doc), access.viewFields, access.editFields, command, refs,
-                Workshop.historyTurns(doc), instruction, m.o("params").d("maxContext")?.toInt() ?: 150000, summary = Workshop.summaryText(doc)))
+                Workshop.historyTurns(doc), instruction, m.o("params").d("maxContext")?.toInt() ?: 150000, summary = Workshop.summaryText(doc), openTable = openTable))
             // 프리필(맨 끝 assistant 메시지)이 있으면 답은 그 글의 이어 쓰기 → 답만으로 JSON이 안 되면 프리필을 앞에 붙여 다시 읽음.
             // 프리필을 받지 않는 모델(Claude 4.6 이후 — 대화가 assistant로 끝나면 400)이나 프리필로 보냈다가 거절당한 경우엔
             // 프리필 글을 지우지 않고 그 뒤에 짧은 user 메시지를 붙여 "끝나지 않는 프리필"로 보냄.
@@ -466,6 +497,11 @@ object Processors {
                 if (r.text.isBlank() || parseOut(r.text, prefill) == null) throw ProviderError(msg)
             }
             val j = parseOut(r.text, prefill) ?: return MainOut(r.text.trim(), emptyList(), r.text, r.usage, m, prompt)
+            if (openTable != null) (j["open"] as? JsonObject)?.let { o ->
+                fun l(k: String) = ((o[k] as? JsonArray) ?: JsonArray(emptyList())).mapNotNull { (it as? JsonPrimitive)?.takeIf { p -> p.isString }?.content }
+                val v = l("view"); val e = l("edit"); val rf = l("refs")
+                if (v.isNotEmpty() || e.isNotEmpty() || rf.isNotEmpty()) return MainOut("", emptyList(), r.text, r.usage, m, prompt, Decision(command, v, e, rf, true))
+            }
             val edits = ((j["edits"] as? JsonArray) ?: JsonArray(emptyList())).mapNotNull { it as? JsonObject }
                 .filter { (it["field"] as? JsonPrimitive)?.isString == true && (it["op"] as? JsonPrimitive)?.isString == true }
             return MainOut((j["message"] as? JsonPrimitive)?.takeIf { it.isString }?.content ?: "", edits, r.text, r.usage, m, prompt)
@@ -606,35 +642,61 @@ object Workshop {
                     else Processors.runSub(doc(cid), data0, command)
                 val rawSub = decisionJson(r)
                 if (!subOff) updateTurn(cid, turnId, mapOf("raw" to buildJsonObject { put("sub", rawSub) }))
-                var access = Perms.resolve(doc(cid).o("permissions").orEmptyObj(), r, subOff)
-                References.resolveAccess(doc(cid), r.refs, r.fieldReasons, subOff, command, turnId).let { ra ->
+                val lazy = subOff && Processors.mainOpens()
+                var access = if (lazy) Processors.lightAccess(doc(cid), command, turnId) else Perms.resolve(doc(cid).o("permissions").orEmptyObj(), r, subOff)
+                if (!lazy) References.resolveAccess(doc(cid), r.refs, r.fieldReasons, subOff, command, turnId).let { ra ->
                     access = access.copy(viewRefs = ra.on, elevation = access.elevation + ra.elevation)
                 }
                 if (!subOff) updateTurn(cid, turnId, mapOf("analysis" to buildJsonObject {
                     put("task", r.task); put("view", JsonArray((r.view + r.refs.map { "ref:$it" }).map { js(it) })); put("edit", JsonArray(r.edit.map { js(it) })); r.reason?.let { put("reason", it) }
                 }))
                 setJob(cid) { it.copy(decision = if (subOff) null else r, access = access) }
-                var approved = emptyList<Elevation>()
-                if (access.elevation.isNotEmpty()) {
-                    setJob(cid) { it.copy(phase = "awaiting") }
-                    val wait = CompletableDeferred<List<Elevation>>()
-                    approvals[cid] = wait
-                    approved = wait.await()
-                    approvals.remove(cid)
-                    if (approved.isNotEmpty()) updateDoc(cid) { d -> JsonObject(d + ("permissions" to Perms.applyElevation(d.o("permissions").orEmptyObj(), approved))) }
-                    val ok = approved.map { "${it.kind}:${it.field}" }.toSet()
-                    updateTurn(cid, turnId, mapOf("elevation" to buildJsonObject {
-                        put("approved", JsonArray(ok.map { js(it) }))
-                        put("denied", JsonArray(access.elevation.map { "${it.kind}:${it.field}" }.filter { it !in ok }.map { js(it) }))
-                    }))
+                val approvedAll = mutableSetOf<String>(); val deniedAll = mutableSetOf<String>()
+                suspend fun elevate(a: Access): Access {
+                    var approved = emptyList<Elevation>()
+                    if (a.elevation.isNotEmpty()) {
+                        setJob(cid) { it.copy(access = a, phase = "awaiting") }
+                        val wait = CompletableDeferred<List<Elevation>>()
+                        approvals[cid] = wait
+                        approved = wait.await()
+                        approvals.remove(cid)
+                        if (approved.isNotEmpty()) updateDoc(cid) { d -> JsonObject(d + ("permissions" to Perms.applyElevation(d.o("permissions").orEmptyObj(), approved))) }
+                        val ok = approved.map { "${it.kind}:${it.field}" }.toSet()
+                        approvedAll += ok; deniedAll += a.elevation.map { "${it.kind}:${it.field}" }.filter { it !in ok }
+                        updateTurn(cid, turnId, mapOf("elevation" to buildJsonObject {
+                            put("approved", JsonArray(approvedAll.map { js(it) })); put("denied", JsonArray(deniedAll.map { js(it) }))
+                        }))
+                    }
+                    return Perms.finalize(a, approved)
                 }
-                access = Perms.finalize(access, approved)
-                setJob(cid) { it.copy(access = access, phase = "generating", stream = "", reasoning = "") }
+                access = elevate(access)
                 // "한 번에 불러오기": 서버와는 계속 스트리밍으로 받지만 화면 갱신은 하지 않음 (결과는 끝나고 한 번에 반영됨)
                 val atOnce = SettingsStore.model(Processors.mainModelId(doc(cid)))?.b("streamAtOnce") == true
-                val out = Processors.runMain(doc(cid), sguData(cid), command, access, r.instruction,
-                    if (atOnce) Stream() else Stream(onDelta = { d -> setJob(cid) { it.copy(stream = it.stream + d) } }, onReasoning = { d -> setJob(cid) { it.copy(reasoning = it.reasoning + d) } }),
-                    onRestart = { setJob(cid) { it.copy(stream = "", reasoning = "") } })
+                suspend fun main(a: Access, table: String?): Processors.MainOut {
+                    setJob(cid) { it.copy(access = a, phase = "generating", stream = "", reasoning = "") }
+                    return Processors.runMain(doc(cid), sguData(cid), command, a, r.instruction,
+                        if (atOnce) Stream() else Stream(onDelta = { d -> setJob(cid) { it.copy(stream = it.stream + d) } }, onReasoning = { d -> setJob(cid) { it.copy(reasoning = it.reasoning + d) } }),
+                        onRestart = { setJob(cid) { it.copy(stream = "", reasoning = "") } }, openTable = table)
+                }
+                var out = main(access, if (lazy) Processors.openTable(doc(cid), sguData(cid), access) else null)
+                var inTok = out.usage?.inputTokens ?: 0; var outTok = out.usage?.outputTokens ?: 0
+                var rounds = 0
+                // 메인이 {"open": …}으로 필드를 요청하면 → 권한대로 열고(Lv1은 유저 승인) 다시 요청. 최대 두 번.
+                while (lazy && out.open != null && rounds < 2) {
+                    rounds++
+                    val o = out.open!!
+                    val perms = doc(cid).o("permissions").orEmptyObj()
+                    val add = Perms.resolve(perms, Decision(command, o.view + o.edit.filter { WFields.map[it]?.viewable == true }, o.edit, emptyList(), true), false)
+                    val ra = References.resolveAccess(doc(cid), o.refs, emptyMap(), false, command, turnId)
+                    val have = (access.viewFields.map { "view:$it" } + access.editFields.map { "edit:$it" } + access.viewRefs.map { "view:ref:$it" }).toSet()
+                    val elev = (add.elevation + ra.elevation).filter { "${it.kind}:${it.field}" !in have && "${it.kind}:${it.field}" !in deniedAll }
+                    access = elevate(Access(Perms.order(access.viewFields + add.viewFields), Perms.order(access.editFields + add.editFields), elev,
+                        access.denied + add.denied, (access.viewRefs + ra.on).distinct()))
+                    out = main(access, if (rounds < 2) Processors.openTable(doc(cid), sguData(cid), access) else null)
+                    inTok += out.usage?.inputTokens ?: 0; outTok += out.usage?.outputTokens ?: 0
+                }
+                if (out.open != null) out = out.copy(message = out.message.ifBlank { "필요한 필드를 다 열지 못했어요. 명령을 조금 더 구체적으로 주시거나 권한을 확인해 주세요." })
+                if (rounds > 0) out = out.copy(usage = Usage(inTok, outTok))
                 setJob(cid) { it.copy(phase = "applying") }
                 val before = cardData(cid)
                 val res = Edits.apply(sguData(cid, before), out.edits, access.editFields)

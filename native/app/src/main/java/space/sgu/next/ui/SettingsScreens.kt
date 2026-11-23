@@ -641,6 +641,12 @@ fun ProcessorsScreen(open: (String) -> Unit, onBack: () -> Unit) {
             FieldLabel("채팅 열람 범위 (메시지 수)")
             NumberBox("chatRange", sub.d("chatRange") ?: 2.0, { it?.let { v -> SettingsStore.setProcessor("sub", "chatRange", JsonPrimitive(v.toInt().coerceAtLeast(0))) } })
         }
+        if (sub.b("disabled")) {
+            Spacer(Modifier.height(8.dp))
+            GroupRow(0, 1, "필드를 처음부터 전부 보내기", subtitle = if (main.b("sendAll")) "켜짐 · 보이는 필드 내용과 편집 안내를 매번 한꺼번에 보내요 (예전 방식)"
+                else "꺼짐 · 항상 보기 필드만 보내고, 메인이 필요한 필드를 직접 열어요 (원본 SGU 방식, 입력 토큰이 줄어요)",
+                trailing = { SguSwitch(main.b("sendAll")) { SettingsStore.setProcessor("main", "sendAll", JsonPrimitive(it)) } })
+        }
 
         FieldLabel("네트워크")
         LineCard {
