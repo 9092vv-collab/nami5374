@@ -271,7 +271,7 @@ object SettingsStore {
 
     // ---------- backup (same file as the original's "설정 JSON 내보내기/가져오기") ----------
 
-    data class ImportResult(val providers: Int, val models: Int, val keys: Int)
+    data class ImportResult(val providers: Int, val models: Int, val keys: Int, val characters: Int = 0)
 
     fun importBackup(text: String): ImportResult {
         val obj = CardIO.json.parseToJsonElement(text).jsonObject
@@ -280,12 +280,19 @@ object SettingsStore {
         obj.o("_secrets")?.forEach { (id, v) ->
             (v as? JsonPrimitive)?.contentOrNull?.let { Secrets.put(id, it); keyCount++ }
         }
-        root = migrate(obj)
+        val chars = (obj["_characters"] as? JsonObject)?.let { c ->
+            CharacterStore.importTexts(c).also { Workshop.forgetAll(); ImageGenStore.forgetAll() }
+        } ?: 0
+        root = migrate(JsonObject(obj - "_characters" - "_secrets"))
         scheduleSave()
-        return ImportResult(providers.size, models.size, keyCount)
+        return ImportResult(providers.size, models.size, keyCount, chars)
     }
 
-    fun exportBackup(includeKeys: Boolean): String {
+    fun exportBackup(includeKeys: Boolean, includeCharacters: Boolean = false): String =
+        exportBackup0(includeKeys).let { if (!includeCharacters) it else it.with("_characters" to CharacterStore.exportTexts()) }
+            .let { kotlinx.serialization.json.Json { prettyPrint = !includeCharacters }.encodeToString(JsonElement.serializer(), it) }
+
+    private fun exportBackup0(includeKeys: Boolean): JsonObject {
         val out = if (includeKeys) {
             root.with("_secrets" to JsonObject(keys.mapNotNull { k -> Secrets.get(k.s("id"))?.let { k.s("id") to JsonPrimitive(it) } }.toMap()))
         } else {
@@ -294,6 +301,6 @@ object SettingsStore {
                 "providers" to buildJsonArray { providers.forEach { add(it.with("keyId" to JsonNull)) } },
             )
         }
-        return kotlinx.serialization.json.Json { prettyPrint = true }.encodeToString(JsonElement.serializer(), out)
+        return out
     }
 }

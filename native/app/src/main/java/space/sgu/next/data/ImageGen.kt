@@ -128,6 +128,8 @@ object ImageGenStore {
     }
 
     private val cache = mutableMapOf<String, JsonObject>()
+    /** 백업 복원 뒤 다시 읽게 함. */
+    fun forgetAll() { cache.clear(); version++ }
 
     /** 그림체 설정은 모든 캐릭터 공용 (설정의 "imageStyle"). 없으면 처음 연 캐릭터의 그림체로 시작. */
     private fun globalStyle(): JsonObject? = SettingsStore.root.o("imageStyle")?.takeIf { it.isNotEmpty() }

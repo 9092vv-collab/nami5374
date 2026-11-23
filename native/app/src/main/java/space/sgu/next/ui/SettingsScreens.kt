@@ -696,6 +696,7 @@ fun BackupScreen(onBack: () -> Unit) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     var withKeys by remember { mutableStateOf(DriveBackup.withKeys(ctx)) }
+    var withChars by remember { mutableStateOf(DriveBackup.withChars(ctx)) }
     var target by remember { mutableStateOf(DriveBackup.target(ctx)) }
     var msg by remember { mutableStateOf<Pair<Boolean?, String>>(null to "") }
     var confirmImport by remember { mutableStateOf<String?>(null) }
@@ -727,13 +728,13 @@ fun BackupScreen(onBack: () -> Unit) {
     val exporter = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
         if (uri != null) scope.launch {
             runCatching {
-                val text = SettingsStore.exportBackup(withKeys)
+                val text = SettingsStore.exportBackup(withKeys, withChars)
                 kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { ctx.contentResolver.openOutputStream(uri)!!.use { it.write(text.toByteArray()) } }
             }.onSuccess { msg = true to "설정을 내보냈어요 · ${keyNote()}" }
                 .onFailure { msg = false to "실패: ${it.message}" }
         }
     }
-    Page("백업 · 복원", "프로바이더 · 모델 · 프로세서 · 권한 · 템플릿", onBack) {
+    Page("백업 · 복원", "설정 · 캐릭터(이미지 빼고)", onBack) {
         FieldLabel("드라이브 백업")
         val t = target
         if (t == null) {
@@ -767,13 +768,16 @@ fun BackupScreen(onBack: () -> Unit) {
         Spacer(Modifier.height(12.dp))
         GroupRow(0, 1, "API 키 · 서비스 계정 키 포함", subtitle = if (withKeys) "경고: 해당 파일이 유출되지 않도록 주의하십시오" else "드라이브 백업 · 내보내기 모두에 적용",
             trailing = { SguSwitch(withKeys) { withKeys = it; DriveBackup.setWithKeys(ctx, it) } })
+        Spacer(Modifier.height(8.dp))
+        GroupRow(0, 1, "캐릭터 포함 (이미지 빼고)", subtitle = if (withChars) "카드 글·작업실 기록·이미지 설정까지 넣어요. 이미지 파일은 빠져서 용량이 작아요" else "설정만 백업해요",
+            trailing = { SguSwitch(withChars) { withChars = it; DriveBackup.setWithChars(ctx, it) } })
         ResultLine(msg.first, msg.second)
 
         FieldLabel("파일로 옮기기")
         LineCard {
             Column {
                 Text("기존 SGU 앱의 '설정 JSON 내보내기' 파일을 그대로 가져올 수 있어요.", style = MaterialTheme.typography.bodyMedium)
-                Text("키가 포함된 파일이면 API 키까지 한 번에 옮겨져요. 키가 없는 파일은 가져온 뒤 각 프로바이더에서 키를 다시 입력해야 합니다. 캐릭터는 CHARX로 따로 옮기세요.",
+                Text("키가 포함된 파일이면 API 키까지 한 번에 옮겨져요. 키가 없는 파일은 가져온 뒤 각 프로바이더에서 키를 다시 입력해야 합니다. "캐릭터 포함"을 켜면 캐릭터 글 데이터도 같이 옮겨져요(이미지까지 옮기려면 CHARX로).",
                     style = MaterialTheme.typography.bodySmall, color = Sgu.Sub, modifier = Modifier.padding(top = 6.dp))
                 Spacer(Modifier.height(14.dp))
                 InkButton("설정 JSON 가져오기", onClick = { importer.launch(arrayOf("application/json", "text/plain", "*/*")) }, icon = Icons.Outlined.FileUpload)
@@ -788,12 +792,13 @@ fun BackupScreen(onBack: () -> Unit) {
         AlertDialog(
             onDismissRequest = { confirmImport = null },
             title = { Text("설정 복원") },
-            text = { Text("지금 설정(프로바이더·모델·프로세서 등)을 파일 내용으로 바꿀까요? 캐릭터는 그대로예요.") },
+            text = { Text(if (text.contains("\"_characters\"")) "지금 설정(프로바이더·모델·프로세서 등)을 파일 내용으로 바꾸고, 백업에 있는 캐릭터도 되돌릴까요? 같은 캐릭터는 백업 내용으로 덮어써요. 이미지 파일은 백업에 없어서, 이 기기에 없는 이미지는 비어 보여요."
+                else "지금 설정(프로바이더·모델·프로세서 등)을 파일 내용으로 바꿀까요? 캐릭터는 그대로예요.") },
             confirmButton = {
                 TextButton(onClick = {
                     confirmImport = null
                     runCatching { SettingsStore.importBackup(text) }
-                        .onSuccess { r -> msg = true to "설정을 복원했습니다 · 프로바이더 ${r.providers}개, 모델 ${r.models}개, 키 ${r.keys}개" }
+                        .onSuccess { r -> msg = true to "설정을 복원했습니다 · 프로바이더 ${r.providers}개, 모델 ${r.models}개, 키 ${r.keys}개" + if (r.characters > 0) ", 캐릭터 ${r.characters}개" else "" }
                         .onFailure { msg = false to "가져오지 못했어요: ${it.message}" }
                 }) { Text("복원", color = Sgu.Ink) }
             },

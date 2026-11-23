@@ -552,6 +552,8 @@ object Workshop {
     private var toldSubOff = false
 
     fun init(ctx: Context) { appCtx = ctx.applicationContext; Logs.init(ctx) }
+    /** 백업 복원 뒤: 메모리에 있던 작업실 문서를 버리고 파일에서 다시 읽게 함. */
+    fun forgetAll() { synchronized(docs) { docs.clear() }; version++ }
 
     private fun file(cid: String) = File(CharacterStore.dir(cid), "workshop.json")
 

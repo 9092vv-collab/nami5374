@@ -61,6 +61,39 @@ object CharacterStore {
         reload()
     }
 
+    // ---------- 백업에 캐릭터 글 데이터 넣기 (이미지 파일은 빼고) ----------
+    private val TEXT_FILES = listOf("card" to "card.json", "meta" to "meta.json", "workshop" to "workshop.json", "imagegen" to "imagegen.json")
+
+    /** {folders:[…], items:{id:{card, meta, workshop, imagegen}}} — 이미지(icon.png, x/, gen/)는 안 넣음. */
+    fun exportTexts(): JsonObject {
+        val items = mutableMapOf<String, JsonElement>()
+        root.listFiles()?.filter { it.isDirectory && File(it, "card.json").exists() }?.forEach { d ->
+            val one = TEXT_FILES.mapNotNull { (k, f) ->
+                File(d, f).takeIf { it.exists() }?.let { runCatching { k to CardIO.json.parseToJsonElement(it.readText()) }.getOrNull() }
+            }.toMap()
+            if ("card" in one) items[d.name] = JsonObject(one)
+        }
+        return JsonObject(mapOf("folders" to JsonArray(folders.map { JsonPrimitive(it) }), "items" to JsonObject(items)))
+    }
+
+    /** 백업의 캐릭터 글 데이터를 씀 (같은 id는 덮어씀, 이미지 파일은 그대로 둠). 돌려주는 값 = 캐릭터 수. */
+    fun importTexts(o: JsonObject): Int {
+        var n = 0
+        (o["items"] as? JsonObject)?.forEach { (id, v) ->
+            val one = v as? JsonObject ?: return@forEach
+            if (one["card"] !is JsonObject || id.isBlank() || id.contains('/') || id.contains('\\') || id.startsWith(".")) return@forEach
+            val d = dir(id).apply { mkdirs() }
+            TEXT_FILES.forEach { (k, f) -> one[k]?.let { File(d, f).writeText(CardIO.json.encodeToString(JsonElement.serializer(), it)) } }
+            n++
+        }
+        val fs = (o["folders"] as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull }.orEmpty()
+        if (fs.isNotEmpty()) File(root, "folders.json").writeText(CardIO.json.encodeToString(JsonElement.serializer(), JsonArray((folders + fs).distinct().map { JsonPrimitive(it) })))
+        synchronized(cardCache) { cardCache.clear() }
+        cache.evictAll()
+        reload()
+        return n
+    }
+
     private fun reload() {
         val list = root.listFiles()?.filter { it.isDirectory && File(it, "card.json").exists() }
             ?.mapNotNull { runCatching { loadMeta(it.name) }.getOrNull() }

@@ -25,6 +25,9 @@ object DriveBackup {
 
     fun withKeys(ctx: Context): Boolean = prefs(ctx).getBoolean("withKeys", false)
     fun setWithKeys(ctx: Context, v: Boolean) { prefs(ctx).edit().putBoolean("withKeys", v).apply() }
+    /** 캐릭터 글 데이터(카드·작업실·이미지 설정)도 넣기 — 이미지 파일은 빼고. 기본 켜짐. */
+    fun withChars(ctx: Context): Boolean = prefs(ctx).getBoolean("withChars", true)
+    fun setWithChars(ctx: Context, v: Boolean) { prefs(ctx).edit().putBoolean("withChars", v).apply() }
 
     /** Called with the uri the picker returned. Keeps permission across restarts. */
     fun setTarget(ctx: Context, uri: Uri) {
@@ -53,7 +56,7 @@ object DriveBackup {
     /** Overwrites the target file with the current settings. Throws if the file is gone / permission lost. */
     suspend fun backup(ctx: Context): Target {
         val t = target(ctx) ?: error("백업 위치가 없어요")
-        val bytes = SettingsStore.exportBackup(withKeys(ctx)).toByteArray()
+        val bytes = SettingsStore.exportBackup(withKeys(ctx), withChars(ctx)).toByteArray()
         withContext(Dispatchers.IO) {
             val r = ctx.contentResolver
             // "wt" = truncate; some providers only accept "w"
