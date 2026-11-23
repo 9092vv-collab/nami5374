@@ -29,4 +29,5 @@ open class LruCache<K : Any, V : Any>(private val max: Int) {
     @Synchronized fun remove(k: K): V? = map.remove(k)
     @Synchronized fun evictAll() = map.clear()
     @Synchronized fun size() = map.size
+    @Synchronized fun snapshot(): Map<K, V> = LinkedHashMap(map)
 }

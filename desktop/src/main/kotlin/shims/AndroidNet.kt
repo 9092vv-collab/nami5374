@@ -13,8 +13,8 @@ class Uri private constructor(private val s: String) {
     companion object {
         fun parse(s: String): Uri = Uri(s)
         fun fromFile(f: File): Uri = Uri(f.toURI().toString())
-        fun encode(s: String?): String? = s?.let { java.net.URLEncoder.encode(it, "UTF-8").replace("+", "%20") }
-        fun decode(s: String?): String? = s?.let { java.net.URLDecoder.decode(it.replace("+", "%2B"), "UTF-8") }
+        fun encode(s: String?): String = (s ?: "").let { java.net.URLEncoder.encode(it, "UTF-8").replace("+", "%20") }
+        fun decode(s: String?): String = s?.let { java.net.URLDecoder.decode(it.replace("+", "%2B"), "UTF-8") } ?: ""
         val EMPTY = Uri("")
     }
 }
