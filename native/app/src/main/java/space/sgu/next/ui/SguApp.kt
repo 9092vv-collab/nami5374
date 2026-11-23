@@ -66,7 +66,7 @@ fun SguApp() {
     fun openField(id: String, key: String) = nav.navigate("field/$id/${Uri.encode(key)}")
     // 첫 실행 안내: only before the user has finished it and has no provider yet
     val start = androidx.compose.runtime.saveable.rememberSaveable {
-        if (!SettingsStore.root.b("onboardingDone") && SettingsStore.providers.isEmpty()) "welcome" else "home"
+        "home"
     }
     NavHost(
         navController = nav,
@@ -93,12 +93,6 @@ fun SguApp() {
         composable("model/{id}") { e -> ModelScreen(e.arguments?.getString("id") ?: "", onBack = back) }
         composable("processors") { ProcessorsScreen(open = go, onBack = back) }
         composable("backup") { BackupScreen(onBack = back) }
-        composable("welcome") {
-            WelcomeScreen { goProviders ->
-                if (nav.previousBackStackEntry == null) nav.navigate("home") { popUpTo("welcome") { inclusive = true } } else nav.popBackStack()
-                if (goProviders) nav.navigate("providers")
-            }
-        }
         composable("export/{id}") { e -> ExportScreen(e.arguments?.getString("id") ?: "", onBack = back) }
         composable("character/{id}") { entry ->
             val id = entry.arguments?.getString("id") ?: ""
