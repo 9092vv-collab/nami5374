@@ -32,6 +32,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -375,7 +376,16 @@ private fun GenCharacterTab(cid: String, openField: (String) -> Unit) {
                         { i -> ImageGenStore.update(cid) { it.with("selectedCharacterId" to JsonPrimitive(chars[i].s("id"))) } },
                         contentPadding = PaddingValues(0.dp))
                 }
-                IconButton(onClick = { ImageGenStore.addCharacter(cid) }) { Icon(Icons.Outlined.Add, "캐릭터 추가") }
+                var addMenu by remember { mutableStateOf(false) }
+                var importing by remember { mutableStateOf(false) }
+                Box {
+                    IconButton(onClick = { addMenu = true }) { Icon(Icons.Outlined.Add, "캐릭터 추가") }
+                    DropdownMenu(addMenu, onDismissRequest = { addMenu = false }) {
+                        DropdownMenuItem(text = { Text("새 캐릭터") }, onClick = { addMenu = false; ImageGenStore.addCharacter(cid) })
+                        DropdownMenuItem(text = { Text("다른 봇에서 외형 가져오기") }, onClick = { addMenu = false; importing = true })
+                    }
+                }
+                if (importing) ImportLookDialog(cid) { importing = false }
             }
         }
         if (c == null) {
@@ -885,4 +895,38 @@ fun SeedButton(cid: String) {
     val fixed = remember(cid, ImageGenStore.version) { ImageGenStore.seedFixed(ImageGenStore.load(cid)) }
     LineButton(if (fixed) "시드 고정" else "시드 랜덤", onClick = { ImageGenStore.toggleSeed(cid) },
         icon = if (fixed) Icons.Outlined.Lock else Icons.Outlined.Shuffle)
+}
+
+/** "다른 봇에서 외형 가져오기": 봇 고르기 → 그 봇의 이미지 캐릭터 고르기 → 새 캐릭터로 복사. */
+@Composable
+private fun ImportLookDialog(cid: String, onDismiss: () -> Unit) {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    var bot by remember { mutableStateOf<space.sgu.next.data.CharMeta?>(null) }
+    val bots = remember { space.sgu.next.data.CharacterStore.items.filter { it.id != cid } }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(bot?.let { "${it.name.ifBlank { "(이름 없음)" }} · 외형 고르기" } ?: "어느 봇에서 가져올까요?") },
+        text = {
+            val b = bot
+            val rows: List<Pair<String, () -> Unit>> = if (b == null) bots.map { m ->
+                val n = ImageGenStore.load(m.id).arr("characters").size
+                "${m.name.ifBlank { "(이름 없음)" }}  ·  이미지 캐릭터 ${n}개" to { if (n > 0) bot = m else android.widget.Toast.makeText(ctx, "이 봇엔 이미지 캐릭터가 없어요", android.widget.Toast.LENGTH_SHORT).show() }
+            } else ImageGenStore.load(b.id).arr("characters").map { c ->
+                val blocks = c.arr("blocks").filter { it.s("type") != "folder" }
+                "${c.s("name").ifBlank { "(이름 없음)" }}  ·  블록 ${blocks.size}개" to {
+                    val name = ImageGenStore.importCharacter(cid, c, b.name)
+                    android.widget.Toast.makeText(ctx, "'$name' 외형을 가져왔어요", android.widget.Toast.LENGTH_SHORT).show()
+                    onDismiss()
+                }
+            }
+            if (rows.isEmpty()) Text("가져올 봇이 없어요.", color = Sgu.Sub)
+            else LazyColumn(Modifier.heightIn(max = 420.dp)) {
+                items(rows) { (label, go) ->
+                    Text(label, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.fillMaxWidth().clickable { go() }.padding(vertical = 12.dp))
+                }
+            }
+        },
+        confirmButton = { if (bot != null) TextButton(onClick = { bot = null }) { Text("봇 다시 고르기", color = Sgu.Ink) } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("닫기", color = Sgu.Sub) } },
+    )
 }

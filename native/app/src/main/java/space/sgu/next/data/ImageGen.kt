@@ -785,5 +785,22 @@ object ImageGenStore {
         g.mapList("characters") { it.add(copy) }.with("selectedCharacterId" to JsonPrimitive(copy.s("id")))
     }
 
+    /** 다른 봇의 이미지 캐릭터(외형 블록·폴더·크기·자유 프롬프트)를 새 캐릭터로 복사해 넣음. 돌려주는 값 = 새 캐릭터 이름. */
+    fun importCharacter(cid: String, src: JsonObject, fromBot: String): String {
+        var name = ""
+        update(cid) { g ->
+            val map = src.arr("blocks").associate { it.s("id") to newId("gb") }
+            val taken = g.arr("characters").map { it.s("name") }.toSet()
+            val base = src.s("name").ifBlank { fromBot.ifBlank { "가져온 캐릭터" } }
+            name = if (base !in taken) base else "$base ($fromBot)".let { n -> if (n !in taken) n else "$n ${g.arr("characters").size + 1}" }
+            val copy = src.with("id" to JsonPrimitive(newId("gc")), "name" to JsonPrimitive(name), "blocks" to JsonArray(src.arr("blocks").map { b ->
+                val nb = b.with("id" to JsonPrimitive(map[b.s("id")]!!))
+                b.sOrNull("folderId")?.let { f -> map[f]?.let { nb.with("folderId" to JsonPrimitive(it)) } } ?: nb
+            })).let { c -> (c["activeBlockIds"] as? JsonArray)?.let { a -> c.with("activeBlockIds" to JsonArray(a.mapNotNull { (it as? JsonPrimitive)?.content?.let { id -> map[id]?.let { n -> JsonPrimitive(n) } } })) } ?: c }
+            g.mapList("characters") { it.add(copy) }.with("selectedCharacterId" to JsonPrimitive(copy.s("id")))
+        }
+        return name
+    }
+
     fun thumb(preset: JsonObject?): JsonObject? = preset?.arr("images")?.let { l -> l.firstOrNull { it.b("selected") } ?: l.lastOrNull() }
 }
