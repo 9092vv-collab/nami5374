@@ -773,7 +773,7 @@ object PromptBlocks {
 }
 
 data class PromptPart(val name: String, val type: String, val role: String, val text: String, val tokens: Int, val fieldIds: List<String>)
-data class Assembled(val messages: List<Msg>, val parts: List<PromptPart>, val tokenEstimate: Int)
+data class Assembled(val messages: List<Msg>, val parts: List<PromptPart>, val tokenEstimate: Int, val newBaseline: JsonObject? = null)
 data class RefText(val name: String, val note: String?, val kind: String, val text: String?, val image: Part? = null, val sendNote: Boolean = false)
 
 object Prompt {
@@ -790,16 +790,123 @@ object Prompt {
 
     class Input(val data: JsonObject, val blocks: List<JsonObject>, val viewFields: List<String>, val editFields: List<String>, val command: String,
                 val references: List<RefText>, val turns: List<JsonObject>, val instruction: Boolean, val maxContext: Int?, val images: List<Part> = emptyList(),
-                val summary: String? = null)
+                val summary: String? = null, val baseline: JsonObject? = null)
+
+    /** 설정 "프롬프트 구조": 기본은 캐싱 최적화 구조, legacy = 프리셋 블록 순서 그대로(구 프롬프트 설정). */
+    fun cacheCfg() = SettingsStore.root.o("promptCache").orEmptyObj()
+    fun legacy() = cacheCfg().b("legacy")
+    fun baseMin() = (cacheCfg().d("minTokens")?.toInt() ?: 1500).coerceAtLeast(0)
+    fun baseRatio() = (cacheCfg().d("ratio")?.toInt() ?: 30).coerceIn(0, 1000)
 
     fun assemble(e: Input): Assembled {
-        var t = build(e, Int.MAX_VALUE)
+        val b: (Input, Int) -> Assembled = if (legacy()) ::build else ::buildCached
+        var t = b(e, Int.MAX_VALUE)
         val n = e.maxContext
         if (n != null && n > 0 && t.tokenEstimate > n) {
             var o = e.turns.count { it.s("status") == "done" }
-            while (o > 0 && t.tokenEstimate > n) { o = if (o > 4) o / 2 else o - 1; t = build(e, o) }
+            while (o > 0 && t.tokenEstimate > n) { o = if (o > 4) o / 2 else o - 1; t = b(e, o) }
         }
         return t
+    }
+
+    private fun fieldRows(e: Input, fmt: String, values: Map<String, String>, ids: List<String>): String =
+        ids.joinToString("\n") { id -> fmt.replace("{{label}}", BuiltinPrompts.label(id)).replace("{{id}}", id).replace("{{value}}", values[id].orEmpty().ifEmpty { BuiltinPrompts.get("main.emptyValue") }) }
+
+    private fun refsText(e: Input, pending: MutableList<Part>): String {
+        val chunks = mutableListOf<String>()
+        for (r in e.references) {
+            if (r.text != null) chunks.add(if (r.kind == "persona") BuiltinPrompts.t("main.refPersona", "name" to r.name) + "\n${if (r.sendNote && !r.note.isNullOrEmpty()) BuiltinPrompts.t("main.refNote", "note" to r.note) + "\n" else ""}${r.text}"
+                else "### ${r.name}${if (!r.note.isNullOrEmpty()) " — ${r.note}" else ""}\n${r.text}")
+            if (r.image != null) {
+                val label = if (r.kind == "persona") BuiltinPrompts.t("main.personaImage", "name" to r.name) else r.name + (if (!r.note.isNullOrEmpty()) " — ${r.note}" else "")
+                chunks.add("### ${r.name}\n" + BuiltinPrompts.get("main.refImage"))
+                pending.add(Part(text = BuiltinPrompts.t("main.imageLabel", "label" to label))); pending.add(r.image)
+            }
+        }
+        return chunks.joinToString("\n\n")
+    }
+
+    /**
+     * 캐싱 최적화 구조 (원본 SGU와 같은 순서): 고정 지시 · 필드 안내 → 기준본(참고 자료 · 캐릭터 데이터) → 세션 기록 → 바뀐 부분 · 명령.
+     * AI가 필드를 고쳐도 앞부분이 그대로라 다음 요청에서 캐시로 읽힘. 바뀐 부분이 max(최소 토큰, (기준본 + 세션 기록) × 비율)을 넘으면 기준본을 새로 찍음.
+     */
+    private fun buildCached(e: Input, cap: Int): Assembled {
+        val parts = mutableListOf<PromptPart>(); val msgs = mutableListOf<Msg>()
+        val pending = e.images.flatMap { listOf(Part(text = BuiltinPrompts.get("main.image")), it) }.toMutableList()
+        fun add(l: JsonObject?, type: String, text: String, fieldIds: List<String> = emptyList(), imgs: List<Part> = emptyList(), role0: String? = null) {
+            if (text.isBlank() && imgs.isEmpty()) return
+            val role = role0 ?: l?.s("role")?.ifBlank { null } ?: "system"
+            parts.add(PromptPart(l?.s("name") ?: type, type, role, text, estimateTokens(text) + 800 * imgs.count { !it.isText }, fieldIds))
+            val last = msgs.lastOrNull()
+            if (imgs.isEmpty() && last != null && !last.cacheAfter && last.role == role && last.text != null) msgs[msgs.size - 1] = last.copy(text = "${last.text}\n\n$text")
+            else msgs.add(if (imgs.isNotEmpty()) Msg(role, parts = listOf(Part(text = text)) + imgs) else Msg(role, text))
+        }
+        val enabled = e.blocks.filter { it.b("enabled", true) }
+        val prefillBlk = enabled.lastOrNull()?.takeIf { it.s("type") == "text" && it.s("role") == "assistant" }
+        val body = if (prefillBlk != null) enabled.dropLast(1) else enabled
+        val cmdIdx = body.indexOfFirst { it.s("type") == "command" }
+        fun blk(t: String) = body.firstOrNull { it.s("type") == t }
+
+        // 1. 고정 지시 (명령 앞의 글 블록) · 출력 형식 · 필드 안내
+        body.forEachIndexed { i, b -> if (b.s("type") == "text" && (cmdIdx < 0 || i < cmdIdx)) add(b, "text", b.s("text")) }
+        blk("outputFormat")?.let { add(it, "outputFormat", it.s("text").ifBlank { BuiltinPrompts.get("main.outputFormat") }) }
+        blk("fieldSchema")?.let { add(it, "fieldSchema", PromptBlocks.applySlot(it.s("text"), SguData.describeEditable(e.data, e.editFields)), e.editFields) }
+
+        // 2. 기준본: 참고 자료 · 캐릭터 데이터
+        val dataBlk = blk("fieldData")
+        val view = e.viewFields.filter { WFields.map[it]?.viewable == true }
+        val cur = view.associateWith { SguData.serialize(e.data, it) }
+        val refsBlk = blk("references")
+        val refs = if (refsBlk != null && e.references.isNotEmpty()) PromptBlocks.applySlot(refsBlk.s("text"), refsText(e, pending)) else ""
+        val refsKey = refs.hashCode().toString()
+        val histBlk = blk("history")
+        val hist = if (histBlk != null) history(e, histBlk, cap) else ""
+        val fmt = dataBlk?.s("fieldFormat")?.ifBlank { null } ?: PromptBlocks.DEFAULT_FIELD_FORMAT
+        var base = e.baseline
+        var newBase: JsonObject? = null
+        val baseFields = base?.o("fields").orEmptyObj()
+        var rebuild = base == null || base.arr("view").map { (it as? JsonPrimitive)?.content } != view || base.s("refs") != refsKey
+        var changed = if (rebuild) emptyList() else view.filter { baseFields.s(it) != cur[it] }
+        if (!rebuild && changed.isNotEmpty()) {
+            val diffTok = estimateTokens(fieldRows(e, fmt, cur, changed))
+            val limit = maxOf(baseMin().toDouble(), ((base!!.d("tokens") ?: 0.0) + estimateTokens(hist)) * baseRatio() / 100.0)
+            if (diffTok > limit) rebuild = true
+        }
+        if (rebuild) {
+            changed = emptyList()
+            val rowsText = fieldRows(e, fmt, cur, view)
+            newBase = buildJsonObject {
+                put("view", JsonArray(view.map { JsonPrimitive(it) })); put("refs", refsKey)
+                put("fields", JsonObject(cur.mapValues { JsonPrimitive(it.value) }))
+                put("tokens", estimateTokens(rowsText) + estimateTokens(refs)); put("at", System.currentTimeMillis())
+            }
+            base = newBase
+        }
+        val snap = base!!.o("fields").orEmptyObj().let { o -> view.associateWith { o.s(it) } }
+        if (refs.isNotBlank()) add(refsBlk, "references", refs)
+        if (dataBlk != null) add(dataBlk, "fieldData", PromptBlocks.applySlot(dataBlk.s("text"), if (view.isNotEmpty()) fieldRows(e, fmt, snap, view) else BuiltinPrompts.get("main.noFields")), view)
+        msgs.lastOrNull()?.cacheAfter = true
+
+        // 3. 세션 기록
+        if (hist.isNotEmpty()) { add(histBlk, "history", hist); msgs.lastOrNull()?.cacheAfter = true }
+
+        // 4. 바뀐 부분 · 명령 (매번 바뀌는 건 맨 끝에만)
+        val cmdBlk = blk("command")
+        val cmdRole = cmdBlk?.s("role")?.ifBlank { null } ?: "user"
+        if (changed.isNotEmpty()) add(null, "changes", BuiltinPrompts.t("main.changes", "rows" to fieldRows(e, fmt, cur, changed)), changed, role0 = cmdRole)
+        if (cmdBlk != null) {
+            val cmd = PromptBlocks.applySlot(cmdBlk.s("text"), if (!e.instruction) "${e.command}\n\n" + BuiltinPrompts.get("main.chatNote") else e.command)
+            if (pending.isNotEmpty() && cmdRole == "user") { add(cmdBlk, "command", cmd, imgs = pending.toList()); pending.clear() }
+            else {
+                if (pending.isNotEmpty()) { msgs.add(Msg("user", parts = listOf(Part(text = BuiltinPrompts.get("main.imagesMsg"))) + pending)); pending.clear() }
+                add(cmdBlk, "command", cmd)
+            }
+        }
+        // 명령 뒤의 글 블록, 프리필
+        body.forEachIndexed { i, b -> if (b.s("type") == "text" && cmdIdx >= 0 && i > cmdIdx) add(b, "text", b.s("text")) }
+        if (pending.isNotEmpty()) msgs.add(Msg("user", parts = listOf(Part(text = BuiltinPrompts.get("main.imagesMsg"))) + pending))
+        if (prefillBlk != null) add(prefillBlk, "text", prefillBlk.s("text").trimEnd())
+        return Assembled(msgs, parts, parts.sumOf { it.tokens }, newBase)
     }
 
     private fun history(e: Input, block: JsonObject, cap: Int): String {
