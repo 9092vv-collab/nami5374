@@ -47,9 +47,12 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import space.sgu.next.data.CharacterStore
 
+/** PC판에서 true (desktop/DesktopMain.kt가 켬). 폰 화면처럼 한 화면만 쓰고, 스와이프 대신 탭을 늘 보여 줌. */
+object Platform { @JvmStatic var desktop = false }
+
 /** Unfolded Fold 8 (and tablets / landscape) → side rail + two panes. */
 @Composable
-fun isWide(): Boolean = LocalConfiguration.current.screenWidthDp >= 600
+fun isWide(): Boolean = !Platform.desktop && LocalConfiguration.current.screenWidthDp >= 600
 
 private data class Tab(val label: String, val icon: ImageVector, val selectedIcon: ImageVector)
 

@@ -137,7 +137,7 @@ fun EditorScreen(characterId: String, onBack: (() -> Unit)?, openField: (String)
     val name = meta?.name ?: "(삭제된 캐릭터)"
 
     // 작업실에서는 상단바·탭 줄을 항상 숨김 (탭 이동은 좌우로 밀어서). 봇 전체 검색 중엔 보임.
-    val hideChrome = pager.currentPage == 1 && !BotSearch.open && !sideOpen
+    val hideChrome = !Platform.desktop && pager.currentPage == 1 && !BotSearch.open && !sideOpen
 
     Scaffold(
         containerColor = Sgu.Bg,

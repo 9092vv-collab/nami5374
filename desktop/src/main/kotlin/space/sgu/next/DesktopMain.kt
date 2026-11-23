@@ -73,6 +73,7 @@ object DesktopBack {
 }
 
 fun main() {
+    space.sgu.next.ui.Platform.desktop = true
     val c = DesktopApp.ctx
     CharacterStore.init(c)
     SettingsStore.init(c)
