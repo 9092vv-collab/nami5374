@@ -1,0 +1,45 @@
+name: Build Nami next (Windows)
+# 손으로 시작할 때만 (Actions 탭 또는 Claude가 API로)
+on:
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.14.3
+      - name: Fonts (Pretendard GOV)
+        run: |
+          bash native/fetch-fonts.sh
+          mkdir -p desktop/src/main/resources/font
+          cp native/app/src/main/res/font/*.otf desktop/src/main/resources/font/
+      - name: Compile
+        run: gradle -p desktop compileKotlin --no-daemon --stacktrace 2>&1 | tee compile.log
+      - name: Package MSI
+        run: gradle -p desktop packageMsi --no-daemon
+      - name: Publish (fixed link, tag desktop-latest)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          f=$(find desktop/build/compose/binaries -name "*.msi" | head -1)
+          echo "MSI: $f"
+          cp "$f" NamiNext.msi
+          ls -la NamiNext.msi
+          gh release delete desktop-latest -R "${{ github.repository }}" --cleanup-tag -y || true
+          gh release create desktop-latest NamiNext.msi -R "${{ github.repository }}" --prerelease \
+            --title "Nami next PC (빌드 ${{ github.run_number }})" --notes "commit ${{ github.sha }}"
