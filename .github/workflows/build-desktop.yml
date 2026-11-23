@@ -31,7 +31,14 @@ jobs:
       - name: Compile
         run: gradle -p desktop compileKotlin --no-daemon --stacktrace 2>&1 | tee compile.log
       - name: Package MSI
-        run: gradle -p desktop packageMsi --no-daemon
+        run: gradle -p desktop packageMsi createDistributable --no-daemon
+      - name: Portable zip (설치 없이 실행)
+        shell: pwsh
+        run: |
+          $d = Get-ChildItem -Directory desktop/build/compose/binaries/main/app | Select-Object -First 1
+          Write-Host "app dir: $($d.FullName)"
+          Compress-Archive -Path $d.FullName -DestinationPath NamiNext-portable.zip -Force
+          Get-Item NamiNext-portable.zip
       - name: Publish (fixed link, tag desktop-latest)
         env:
           GH_TOKEN: ${{ github.token }}
@@ -41,5 +48,5 @@ jobs:
           cp "$f" NamiNext.msi
           ls -la NamiNext.msi
           gh release delete desktop-latest -R "${{ github.repository }}" --cleanup-tag -y || true
-          gh release create desktop-latest NamiNext.msi -R "${{ github.repository }}" --prerelease \
+          gh release create desktop-latest NamiNext.msi NamiNext-portable.zip -R "${{ github.repository }}" --prerelease \
             --title "Nami next PC (빌드 ${{ github.run_number }})" --notes "commit ${{ github.sha }}"
