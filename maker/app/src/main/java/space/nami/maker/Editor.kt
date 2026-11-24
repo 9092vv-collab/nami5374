@@ -223,10 +223,11 @@ private fun MapCanvas(doc: Doc, map: GameMap, tool: Tool, tile: Int, onEditEvent
     val img = remember(map.id, map.w, map.h) { MapImage(map) }
     img.map = map
     remember(rev, map) { img.all(); 0 }
-    val ib = remember(img) { img.bmp.asImageBitmap() }
     val mapNow by rememberUpdatedState(map)
     val imgNow by rememberUpdatedState(img)
     var tick by remember { mutableIntStateOf(0) }
+    // phone: wraps the same pixels (cheap). PC: a fresh snapshot, so every stroke/AI edit shows right away.
+    val ib = remember(img, tick, rev) { img.bmp.asImageBitmap() }
     var scale by remember(map.id) { mutableFloatStateOf(0f) }
     var off by remember(map.id) { mutableStateOf(Offset.Zero) }
     var box by remember { mutableStateOf(IntSize.Zero) }
