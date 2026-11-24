@@ -105,6 +105,7 @@ fun EditorScreen(doc: Doc, chat: AiChat, onBack: () -> Unit, onPlay: () -> Unit)
 
     BoxWithConstraints(Modifier.fillMaxSize().background(K.bg)) {
         val wide = maxWidth >= 700.dp
+        val chatW = min(maxWidth.value * 0.4f, 460f).dp
         val pane: @Composable (Modifier) -> Unit = { mod ->
             EditorPane(
                 doc, map, wide, mod,
@@ -117,7 +118,7 @@ fun EditorScreen(doc: Doc, chat: AiChat, onBack: () -> Unit, onPlay: () -> Unit)
             Row(Modifier.fillMaxSize()) {
                 pane(Modifier.weight(1f).fillMaxHeight())
                 Box(Modifier.width(1.dp).fillMaxHeight().background(K.line))
-                ChatPane(chat, map.id, Modifier.width(min(maxWidth.value * 0.4f, 460f).dp).fillMaxHeight(), onSettings = { settings = true }, onClose = null)
+                ChatPane(chat, map.id, Modifier.width(chatW).fillMaxHeight(), onSettings = { settings = true }, onClose = null)
             }
         } else {
             Box(Modifier.fillMaxSize()) {
