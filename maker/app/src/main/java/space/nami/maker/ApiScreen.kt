@@ -206,6 +206,23 @@ private fun ApiHome(onClose: () -> Unit, onOpen: (String) -> Unit, onModel: (Str
                     Btn("취소") { adding = false }
                 }
                 Hint("키는 이 폰의 보안 저장소에 암호화해서 보관해요. 화면에 다시 보이지 않아요.")
+                Label("그림 받기")
+                val uri = androidx.compose.ui.platform.LocalUriHandler.current
+                listOf(
+                    Triple("Pipoya 캐릭터 (32×32)", "RPG Maker풍 걷기 캐릭터 64종 · 4방향", "https://pipoya.itch.io/pipoya-free-rpg-character-sprites-32x32"),
+                    Triple("Pipoya 타일셋 (32×32)", "RPG Maker풍 마을·실내·자연 타일", "https://pipoya.itch.io/pipoya-rpg-tileset-32x32"),
+                ).forEach { (t, d, u) ->
+                    Card(onClick = { runCatching { uri.openUri(u) } }) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text(t, fontSize = 15.sp, color = K.text)
+                                Text(d, fontSize = 12.sp, color = K.sub)
+                            }
+                            Text("열기 ›", fontSize = 13.sp, color = K.sub)
+                        }
+                    }
+                }
+                Hint("무료예요(가격은 0으로 두고 받으면 돼요). 그림을 다시 배포하거나 팔면 안 되고, 게임에 쓰는 건 자유예요.")
                 Spacer(Modifier.height(40.dp))
             }
         }
