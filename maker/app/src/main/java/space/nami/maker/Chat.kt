@@ -132,27 +132,3 @@ fun ChatPane(chat: AiChat, mapId: Int, modifier: Modifier, onSettings: () -> Uni
     }
 }
 
-@Composable
-fun SettingsDialog(onClose: () -> Unit) {
-    val ctx = LocalContext.current
-    var key by remember { mutableStateOf(AiPrefs.key(ctx)) }
-    var model by remember { mutableStateOf(AiPrefs.model(ctx)) }
-    AlertDialog(
-        onDismissRequest = onClose, containerColor = K.bg,
-        title = { Text("AI 설정") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                androidx.compose.material3.OutlinedTextField(
-                    key, { key = it }, label = { Text("Anthropic API 키") }, singleLine = true,
-                    visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp),
-                )
-                Text("console.anthropic.com에서 만든 키. 이 폰에만 저장돼요.", fontSize = 12.sp, color = K.sub)
-                Text("모델", fontSize = 13.sp, color = K.sub, fontWeight = FontWeight.SemiBold)
-                Seg(AiPrefs.MODELS.map { it.second }, AiPrefs.MODELS.indexOfFirst { it.first == model }.coerceAtLeast(0)) { model = AiPrefs.MODELS[it].first }
-                Text("Sonnet이 기본. Opus는 더 똑똑하지만 비싸고, Haiku는 싸고 빨라요.", fontSize = 12.sp, color = K.sub)
-            }
-        },
-        confirmButton = { TextButton(onClick = { AiPrefs.setKey(ctx, key); AiPrefs.setModel(ctx, model); onClose() }) { Text("저장") } },
-        dismissButton = { TextButton(onClick = onClose) { Text("취소", color = K.sub) } },
-    )
-}

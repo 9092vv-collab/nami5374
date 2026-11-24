@@ -5,21 +5,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
-import java.net.HttpURLConnection
-import java.net.URL
-
-object AiPrefs {
-    val MODELS = listOf("claude-sonnet-5-5" to "Sonnet 5.5", "claude-opus-5-5" to "Opus 5.5", "claude-haiku-5-5" to "Haiku 5.5")
-    private fun sp(ctx: Context) = ctx.getSharedPreferences("ai", Context.MODE_PRIVATE)
-    fun key(ctx: Context) = sp(ctx).getString("key", "") ?: ""
-    fun setKey(ctx: Context, v: String) = sp(ctx).edit().putString("key", v.trim()).apply()
-    fun model(ctx: Context) = sp(ctx).getString("model", MODELS[0].first) ?: MODELS[0].first
-    fun setModel(ctx: Context, v: String) = sp(ctx).edit().putString("model", v).apply()
-}
 
 /** The map as text, so the AI can "see" exact positions. */
 object MapText {
@@ -92,7 +79,12 @@ object Tools {
         throw IllegalArgumentException("모르는 타일: $s")
     }
 
-    private fun pages(a: JSONArray?): MutableList<EventPage>? {
+    private fun pages(v: Any?): MutableList<EventPage>? {
+        val a = when (v) {
+            is JSONArray -> v
+            is String -> runCatching { JSONArray(v.trim()) }.getOrElse { throw IllegalArgumentException("pages JSON을 읽지 못했어요: ${it.message}") }
+            else -> null
+        }
         if (a == null || a.length() == 0) return null
         return MutableList(a.length()) { EventPage.from(a.getJSONObject(it)) }
     }
@@ -140,7 +132,7 @@ object Tools {
                 if (!m.inside(x, y)) throw IllegalArgumentException("맵 밖 좌표예요")
                 m.eventAt(x, y)?.let { throw IllegalArgumentException("(${x},${y})에 이미 이벤트 #${it.id}이 있어요") }
                 val e = GameEvent(m.nextEventId(), a.optString("name", "이벤트"), x, y)
-                pages(a.optJSONArray("pages"))?.let { e.pages = it }
+                pages(a.opt("pages"))?.let { e.pages = it }
                 m.events.add(e); doc.changed()
                 return ToolResult("이벤트 #${e.id} 만듦", "이벤트 추가: ${e.name}", mapId = m.id)
             }
@@ -153,7 +145,7 @@ object Tools {
                     m.eventAt(nx, ny)?.let { if (it !== e) throw IllegalArgumentException("그 자리에 이벤트 #${it.id}이 있어요") }
                     e.x = nx; e.y = ny
                 }
-                pages(a.optJSONArray("pages"))?.let { e.pages = it }
+                pages(a.opt("pages"))?.let { e.pages = it }
                 doc.changed()
                 return ToolResult("이벤트 #${e.id} 수정함", "이벤트 수정: ${e.name}", mapId = m.id)
             }
@@ -269,8 +261,7 @@ class AiChat(private val ctx: Context, private val doc: Doc) {
 
     suspend fun send(text: String, viewMapId: Int) {
         if (busy) return
-        val key = AiPrefs.key(ctx)
-        if (key.isBlank()) { items.add(ChatItem("error", "설정에서 API 키를 먼저 넣어주세요")); return }
+        if (Api.current() == null) { items.add(ChatItem("error", "설정 › API에서 프로바이더와 모델을 먼저 추가해 주세요")); return }
         busy = true
         items.add(ChatItem("user", text))
         val mark = messages.length()
@@ -283,15 +274,9 @@ class AiChat(private val ctx: Context, private val doc: Doc) {
                 .put(image(Shot.base64(doc.p, m)))
             messages.put(JSONObject().put("role", "user").put("content", content))
             for (round in 0 until 40) {
-                val body = JSONObject()
-                    .put("model", AiPrefs.model(ctx))
-                    .put("max_tokens", 8000)
-                    .put("system", Tools.system())
-                    .put("tools", Tools.defs)
-                    .put("messages", outgoing())
-                val res = withContext(Dispatchers.IO) { post(key, body) }
-                val blocks = res.getJSONArray("content")
-                messages.put(JSONObject().put("role", "assistant").put("content", blocks))
+                val res = Api.turn(Tools.system(), Tools.defs, outgoing())
+                val blocks = res.blocks
+                messages.put(JSONObject().put("role", "assistant").put("content", blocks).also { m -> res.raw?.let { m.put("gparts", it) } })
                 val results = JSONArray()
                 for (i in 0 until blocks.length()) {
                     val b = blocks.getJSONObject(i)
@@ -310,7 +295,7 @@ class AiChat(private val ctx: Context, private val doc: Doc) {
                         }
                     }
                 }
-                if (results.length() == 0 || res.optString("stop_reason") != "tool_use") break
+                if (results.length() == 0 || !res.wantsTools) break
                 messages.put(JSONObject().put("role", "user").put("content", results))
             }
         } catch (e: Exception) {
@@ -369,23 +354,5 @@ class AiChat(private val ctx: Context, private val doc: Doc) {
         }
         o.put("content", fix(c))
         return o
-    }
-
-    private fun post(key: String, body: JSONObject): JSONObject {
-        val c = URL("https://api.anthropic.com/v1/messages").openConnection() as HttpURLConnection
-        c.requestMethod = "POST"
-        c.connectTimeout = 20000; c.readTimeout = 180000
-        c.doOutput = true
-        c.setRequestProperty("content-type", "application/json")
-        c.setRequestProperty("x-api-key", key)
-        c.setRequestProperty("anthropic-version", "2023-06-01")
-        c.outputStream.use { it.write(body.toString().toByteArray()) }
-        val code = c.responseCode
-        val txt = (if (code in 200..299) c.inputStream else c.errorStream)?.bufferedReader()?.use { it.readText() } ?: ""
-        if (code !in 200..299) {
-            val msg = runCatching { JSONObject(txt).getJSONObject("error").getString("message") }.getOrDefault(txt.take(200))
-            throw RuntimeException("$code $msg")
-        }
-        return JSONObject(txt)
     }
 }

@@ -40,6 +40,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.material.icons.filled.Settings
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -47,6 +48,7 @@ import java.util.Locale
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        Api.init(this)
         val t = android.graphics.Color.TRANSPARENT
         enableEdgeToEdge(SystemBarStyle.light(t, t), SystemBarStyle.light(t, t))
         setContent { MakerTheme { App() } }
@@ -82,11 +84,14 @@ private fun Home(onOpen: (Doc) -> Unit) {
     var games by remember { mutableStateOf(Store.list(ctx)) }
     var newGame by remember { mutableStateOf(false) }
     var del by remember { mutableStateOf<Store.Entry?>(null) }
+    var settings by remember { mutableStateOf(false) }
     val fmt = remember { SimpleDateFormat("M월 d일 HH:mm", Locale.KOREA) }
 
     Column(Modifier.fillMaxSize().padding(horizontal = 20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
         Column(Modifier.widthIn(max = 640.dp).fillMaxWidth()) {
-            Spacer(Modifier.padding(top = 28.dp))
+            Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.End) {
+                IconBtn(androidx.compose.material.icons.Icons.Filled.Settings, "API 설정") { settings = true }
+            }
             Text("Nami Maker", fontSize = 32.sp, fontFamily = FontFamily.Serif, color = K.text)
             Text("AI와 함께 만드는 나만의 게임", fontSize = 14.sp, color = K.sub, modifier = Modifier.padding(top = 4.dp))
             Spacer(Modifier.padding(top = 18.dp))
@@ -126,6 +131,7 @@ private fun Home(onOpen: (Doc) -> Unit) {
             dismissButton = { TextButton(onClick = { newGame = false }) { Text("취소", color = K.sub) } },
         )
     }
+    if (settings) SettingsDialog(onClose = { settings = false })
     del?.let { g ->
         AlertDialog(
             onDismissRequest = { del = null }, containerColor = K.bg,
