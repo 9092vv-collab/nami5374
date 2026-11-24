@@ -29,6 +29,7 @@ fun main() {
     Plat.desktop = true
     Api.init(DesktopApp.ctx)
     Prompts.init(DesktopApp.ctx)
+    Chars.init(DesktopApp.ctx)
     application {
         val state = rememberWindowState(width = 1440.dp, height = 920.dp)
         Window(onCloseRequest = ::exitApplication, state = state, title = "Nami Maker",

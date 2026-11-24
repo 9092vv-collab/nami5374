@@ -404,7 +404,7 @@ private fun MapCanvas(doc: Doc, map: GameMap, tool: Tool, tile: Int, onEditEvent
                     val pg = e.pages.firstOrNull() ?: return@forEach
                     Art.sprite(c.art(), pg.graphic, pg.dir, e.x * 32f, e.y * 32f, 32f)
                 }
-                if (doc.p.startMap == m.id) Art.sprite(c.art(), "hero", 0, doc.p.startX * 32f, doc.p.startY * 32f, 32f)
+                if (doc.p.startMap == m.id) Art.sprite(c.art(), doc.p.hero, 0, doc.p.startX * 32f, doc.p.startY * 32f, 32f)
             }
             val sw = max(2f, 2f / scale)
             m.events.forEach { e ->

@@ -38,6 +38,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import androidx.compose.foundation.layout.width
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.font.FontWeight
@@ -222,7 +224,33 @@ private fun ApiHome(onClose: () -> Unit, onOpen: (String) -> Unit, onModel: (Str
                         }
                     }
                 }
-                Hint("무료예요(가격은 0으로 두고 받으면 돼요). 그림을 다시 배포하거나 팔면 안 되고, 게임에 쓰는 건 자유예요.")
+                Hint("무료예요(Download Now → 'No thanks, just take me to the downloads'). 그림을 다시 배포하거나 팔면 안 되고, 게임에 쓰는 건 자유예요.")
+                Label("캐릭터 그림")
+                @Suppress("UNUSED_VARIABLE") val crev = Chars.rev
+                var charMsg by remember { mutableStateOf<Pair<Boolean?, String>>(null to "") }
+                var delSel by remember { mutableStateOf<String?>(null) }
+                val pick = rememberFilePicker { name, bytes ->
+                    val n = runCatching { Chars.import(name, bytes) }.getOrDefault(0)
+                    charMsg = if (n > 0) true to "캐릭터 ${n}명을 넣었어요" else false to "넣을 캐릭터 그림을 못 찾았어요. 걷기 시트(3칸 × 4줄) PNG나 그걸 담은 zip인지 확인해 주세요."
+                }
+                Btn("zip·PNG 불러오기", filled = true) { pick() }
+                Result(charMsg.first, charMsg.second)
+                val chars = Chars.ids
+                if (chars.isEmpty()) Hint("받은 zip을 그대로 고르면 안에 든 캐릭터를 한 번에 넣어요. 넣은 캐릭터는 이벤트 그래픽에서 고르고, AI도 이름으로 써요.")
+                else {
+                    Hint("${chars.size}명 · 누르면 지우기")
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        chars.forEach { id ->
+                            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(64.dp).clip(RoundedCornerShape(8.dp)).clickable { delSel = if (delSel == id) null else id }.padding(2.dp)) {
+                                androidx.compose.foundation.Canvas(Modifier.size(44.dp).clip(RoundedCornerShape(8.dp)).background(K.panel)) {
+                                    drawIntoCanvas { c -> Art.sprite(c.art(), id, 0, 0f, 0f, size.width) }
+                                }
+                                if (delSel == id) Text("지우기", fontSize = 11.sp, color = K.danger, modifier = Modifier.clickable { Chars.delete(id); delSel = null })
+                                else Text(Sprites.name(id), fontSize = 10.sp, color = K.sub, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                            }
+                        }
+                    }
+                }
                 Spacer(Modifier.height(40.dp))
             }
         }

@@ -100,7 +100,7 @@ object MapJson {
         val maps = p.maps.joinToString(",") { "{\"id\":${it.id},\"name\":${q(it.name)},\"w\":${it.w},\"h\":${it.h}}" }
         val sw = p.switches().joinToString(",") { q(it) }
         return (if (m.w * m.h > BIG) overview(p, m) else map(p, m)) + "\n" +
-            "{\"start\":{\"map\":${p.startMap},\"x\":${p.startX},\"y\":${p.startY}},\"maps\":[$maps],\"switches\":[$sw]}"
+            "{\"start\":{\"map\":${p.startMap},\"x\":${p.startX},\"y\":${p.startY},\"hero\":${q(p.hero)}},\"maps\":[$maps],\"switches\":[$sw]}"
     }
 
     /** Full event (pages + commands) for an "open" request. */
@@ -147,6 +147,11 @@ object Edits {
             val o = edits.optJSONObject(i) ?: continue
             val op = o.optString("op")
             try {
+                if (op == "set_hero") {
+                    val g = o.optString("graphic")
+                    if (g !in Sprites.ids || g == "none") throw IllegalArgumentException("없는 그래픽: $g")
+                    p.hero = g; r.done.add("주인공 모습: ${Sprites.name(g)}"); continue
+                }
                 if (op == "set_plan") {
                     p.plan = o.optString("plan", o.optString("text", "")).trim()
                     r.done.add("제작 계획 저장"); continue

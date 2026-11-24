@@ -340,10 +340,13 @@ fun PlayScreen(p: Project, onExit: () -> Unit) {
                         val pg = game.page(e) ?: return@forEach
                         if (pg.graphic == "none") return@forEach
                         val (ex, ey) = game.evPos[e.id] ?: (e.x.toFloat() to e.y.toFloat())
-                        sprites.add(Triple(ey, 0f) { Art.sprite(nc, pg.graphic, game.face[e.id] ?: game.turned[e.id] ?: pg.dir, ex * ts, ey * ts, ts) })
+                        val mv = game.evPos[e.id]
+                        val fr = if (mv == null) 1 else if (((mv.first + mv.second) % 1f + 1f) % 1f < 0.5f) (if ((e.x + e.y) % 2 == 0) 0 else 2) else 1
+                        sprites.add(Triple(ey, 0f) { Art.sprite(nc, pg.graphic, game.face[e.id] ?: game.turned[e.id] ?: pg.dir, ex * ts, ey * ts, ts, frame = fr) })
                     }
                     val bob = if (game.walking && game.steps % 2 == 0) 1 else 0
-                    sprites.add(Triple(cy, 1f) { Art.sprite(nc, "hero", game.dir, cx * ts, cy * ts, ts, bob) })
+                    val hf = if (game.walking && game.prog.value < 0.5f) (if (game.steps % 2 == 0) 0 else 2) else 1
+                    sprites.add(Triple(cy, 1f) { Art.sprite(nc, game.p.hero, game.dir, cx * ts, cy * ts, ts, bob, hf) })
                     sprites.sortedWith(compareBy<Triple<Float, Float, () -> Unit>>({ it.first }, { it.second })).forEach { it.third() }
                 }
             }

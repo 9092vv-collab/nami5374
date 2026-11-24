@@ -12,8 +12,8 @@ android {
         applicationId = "space.nami.maker"
         minSdk = 31
         targetSdk = 36
-        versionCode = 14
-        versionName = "0.5.5"
+        versionCode = 15
+        versionName = "0.6.0"
     }
 
     // Signed in CI (.github/workflows/build-maker.yml) with the Nami key.

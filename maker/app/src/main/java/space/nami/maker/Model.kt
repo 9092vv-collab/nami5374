@@ -226,6 +226,8 @@ class Project(var name: String) {
     /** 게임으로 옮길 소설(사용자가 붙여 넣음)과 AI가 세운 제작 계획. */
     var story = ""
     var plan = ""
+    /** 주인공 그래픽 (기본 도형 "hero" 또는 불러온 캐릭터 "c:이름"). */
+    var hero = "hero"
     var startMap = 1
     var startX = 1
     var startY = 1
@@ -247,12 +249,12 @@ class Project(var name: String) {
     fun toJson(): JSONObject = JSONObject().put("name", name)
         .put("start_map", startMap).put("start_x", startX).put("start_y", startY)
         .put("maps", JSONArray().also { a -> maps.forEach { a.put(it.toJson()) } })
-        .put("story", story).put("plan", plan)
+        .put("story", story).put("plan", plan).put("hero", hero)
 
     companion object {
         fun from(o: JSONObject): Project {
             val p = Project(o.optString("name", "새 게임"))
-            p.story = o.optString("story", ""); p.plan = o.optString("plan", "")
+            p.story = o.optString("story", ""); p.plan = o.optString("plan", ""); p.hero = o.optString("hero", "hero")
             p.startMap = o.optInt("start_map", 1)
             p.startX = o.optInt("start_x", 1)
             p.startY = o.optInt("start_y", 1)

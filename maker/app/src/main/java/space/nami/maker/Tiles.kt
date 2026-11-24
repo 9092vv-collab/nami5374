@@ -54,11 +54,13 @@ object Tiles {
 }
 
 object Sprites {
-    val ids = listOf("none", "hero", "villager", "girl", "elder", "guard", "ghost", "cat", "chest", "sign", "crystal")
+    private val builtin = listOf("none", "hero", "villager", "girl", "elder", "guard", "ghost", "cat", "chest", "sign", "crystal")
+    /** 기본 도형 그림 + 불러온 캐릭터("c:이름"). */
+    val ids: List<String> get() = builtin + Chars.ids
     fun name(id: String) = when (id) {
         "none" -> "없음(투명)"; "hero" -> "주인공"; "villager" -> "마을 사람"; "girl" -> "소녀"; "elder" -> "노인"
         "guard" -> "경비병"; "ghost" -> "유령"; "cat" -> "고양이"; "chest" -> "상자"; "sign" -> "표지판"; "crystal" -> "수정"
-        else -> id
+        else -> if (Chars.isChar(id)) id.removePrefix("c:") else id
     }
 }
 
@@ -191,7 +193,8 @@ object Art {
     }
 
     /** dir: 0 down, 1 left, 2 right, 3 up. bob: walking frame offset (0/1). */
-    fun sprite(cv: Canvas, g: String, dir: Int, x0: Float, y0: Float, s: Float, bob: Int = 0) {
+    fun sprite(cv: Canvas, g: String, dir: Int, x0: Float, y0: Float, s: Float, bob: Int = 0, frame: Int = 1) {
+        if (Chars.isChar(g)) { if (Chars.draw(cv, g, dir, frame, x0, y0, s)) return; return sprite(cv, "villager", dir, x0, y0, s, bob) }
         fun o(col: Int, cx: Float, cy: Float, rad: Float) {
             p.style = Paint.Style.FILL; p.color = col; cv.drawCircle(x0 + cx * s, y0 + cy * s, rad * s, p)
         }

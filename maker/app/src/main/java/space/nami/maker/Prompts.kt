@@ -40,7 +40,7 @@ object Prompts {
             // 2 = JSON edits instead of tool calls: keep the old presets (renamed), add and use a new 기본
             presets().forEach { it.put("name", it.optString("name") + " (이전 방식)") }
             val np = newPreset("기본", defaults())
-            root.put("presets", JSONArray(listOf(np) + presets())).put("active", np.getString("id")).put("v", 4)
+            root.put("presets", JSONArray(listOf(np) + presets())).put("active", np.getString("id")).put("v", 5)
             save()
         } else if (root.optInt("v") < 3) {
             // 3 = 소설로 게임 만들기: 이전 방식이 아닌 프리셋에 "소설로 게임 만들기"(system)와 "소설·계획"(user, 지금 맵 앞) 블록을 넣음
@@ -74,6 +74,17 @@ object Prompts {
                 pr.put("blocks", JSONArray(l))
             }
             root.put("v", 4); save()
+        }
+        if (root.optInt("v") < 5) {
+            presets().forEach { pr ->
+                val l = blocks(pr)
+                l.forEach { b ->
+                    val t = b.optString("text"); val k = "- {\"op\":\"set_start\",\"map\":1,\"x\":0,\"y\":0}"
+                    if (k in t && "set_hero" !in t) b.put("text", t.replace(k, k + "\n- {\"op\":\"set_hero\",\"graphic\":\"그래픽\"}  — 주인공 모습 바꾸기"))
+                }
+                pr.put("blocks", JSONArray(l))
+            }
+            root.put("v", 5); save()
         }
     }
 
@@ -131,6 +142,7 @@ edits의 op (map을 안 쓰면 지금 맵):
 - {"op":"add_map","ref":"house","name":"집 안","w":12,"h":9,"fill":"F"}  — 뒤의 op에서 "map":"house"로 가리킬 수 있다(id는 아직 모르니까)
 - {"op":"edit_map","map":1,"name":"","w":20,"h":15}
 - {"op":"set_start","map":1,"x":0,"y":0}
+- {"op":"set_hero","graphic":"그래픽"}  — 주인공 모습 바꾸기
 이벤트의 자세한 대사·명령이 필요하면 edits 없이 {"open":[이벤트 id, ...]}만 답한다(다른 맵이면 {"map":2,"id":1}). 앱이 내용을 보내 주면 그때 원래대로 답한다.
 op은 위에서부터 순서대로 적용된다. 적용 뒤 앱이 문제(막힌 도착 칸 등)를 찾으면 다음 메시지에 알려 준다."""),
         block("text", "system", "일하는 법", """## 일하는 법

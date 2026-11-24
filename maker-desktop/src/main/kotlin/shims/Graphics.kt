@@ -12,6 +12,10 @@ import java.io.OutputStream
 
 /** 고칠 수 있는 Skia 비트맵을 감싼 Bitmap. Canvas로 그리면 바로 바뀜. */
 class Bitmap internal constructor(val sk: org.jetbrains.skia.Bitmap) {
+    private var img: Image? = null
+    /** 그릴 때 쓰는 Skia Image (그림이 바뀌면 다시 만듦). */
+    internal fun image(): Image = img ?: Image.makeFromBitmap(sk).also { img = it }
+    internal fun changed() { img = null; sk.notifyPixelsChanged() }
     val width: Int get() = sk.width
     val height: Int get() = sk.height
 
@@ -42,6 +46,16 @@ class Bitmap internal constructor(val sk: org.jetbrains.skia.Bitmap) {
         }
 
         fun createBitmap(w: Int, h: Int, config: Config): Bitmap = blank(w, h)
+
+        fun createBitmap(src: Bitmap, x: Int, y: Int, w: Int, h: Int): Bitmap {
+            val b = blank(w, h)
+            org.jetbrains.skia.Canvas(b.sk).drawImageRect(
+                src.image(), Rect.makeXYWH(x.toFloat(), y.toFloat(), w.toFloat(), h.toFloat()), Rect.makeWH(w.toFloat(), h.toFloat()),
+                SamplingMode.DEFAULT, null, true,
+            )
+            b.sk.notifyPixelsChanged()
+            return b
+        }
 
         fun createScaledBitmap(src: Bitmap, w: Int, h: Int, filter: Boolean): Bitmap {
             val b = blank(w, h)
@@ -75,6 +89,8 @@ class Paint(flags: Int = 0) {
     var style: Style = Style.FILL
         set(v) { field = v; sk.mode = if (v == Style.STROKE) PaintMode.STROKE else if (v == Style.FILL_AND_STROKE) PaintMode.STROKE_AND_FILL else PaintMode.FILL }
 
+    var isFilterBitmap = false
+
     enum class Style { FILL, STROKE, FILL_AND_STROKE }
     companion object { const val ANTI_ALIAS_FLAG = 1 }
 }
@@ -93,7 +109,12 @@ class Canvas private constructor(val sk: org.jetbrains.skia.Canvas, private val 
     constructor(b: Bitmap) : this(org.jetbrains.skia.Canvas(b.sk), b)
     constructor(c: org.jetbrains.skia.Canvas) : this(c, null)
 
-    private fun done() { target?.sk?.notifyPixelsChanged() }
+    private fun done() { target?.changed() }
+
+    /** 도트 그림이라 확대할 때 흐리지 않게(가장 가까운 픽셀). */
+    fun drawBitmap(b: Bitmap, src: Nothing?, dst: RectF, p: Paint?) {
+        sk.drawImageRect(b.image(), Rect.makeWH(b.width.toFloat(), b.height.toFloat()), dst.sk(), SamplingMode.DEFAULT, p?.sk, true); done()
+    }
 
     fun drawRect(l: Float, t: Float, r: Float, b: Float, p: Paint) { sk.drawRect(Rect.makeLTRB(l, t, r, b), p.sk); done() }
     fun drawRoundRect(r: RectF, rx: Float, ry: Float, p: Paint) { sk.drawRRect(RRect.makeLTRB(r.left, r.top, r.right, r.bottom, rx, ry), p.sk); done() }
@@ -113,4 +134,18 @@ object Color {
     const val BLACK = -0x1000000
     const val TRANSPARENT = 0
     fun argb(a: Int, r: Int, g: Int, b: Int): Int = (a shl 24) or (r shl 16) or (g shl 8) or b
+}
+
+object BitmapFactory {
+    fun decodeByteArray(data: ByteArray, offset: Int, length: Int): Bitmap? = runCatching {
+        val img = Image.makeFromEncoded(if (offset == 0 && length == data.size) data else data.copyOfRange(offset, offset + length))
+        val b = org.jetbrains.skia.Bitmap()
+        b.allocN32Pixels(img.width, img.height, false)
+        b.erase(0)
+        org.jetbrains.skia.Canvas(b).drawImage(img, 0f, 0f)
+        b.notifyPixelsChanged()
+        Bitmap(b)
+    }.getOrNull()
+
+    fun decodeFile(path: String): Bitmap? = runCatching { java.io.File(path).readBytes() }.getOrNull()?.let { decodeByteArray(it, 0, it.size) }
 }
