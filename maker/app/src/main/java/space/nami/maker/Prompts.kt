@@ -102,6 +102,15 @@ object Prompts {
             presets().forEach { pr -> pr.put("blocks", JSONArray(blocks(pr).map { upgrade(it) })) }
             root.put("v", 7); save()
         }
+        if (root.optInt("v") < 8) {
+            // 8 = 좌표 이동(move + x, y)
+            presets().forEach { pr ->
+                val l = blocks(pr)
+                l.forEach { b -> val t = b.optString("text"); if (MOVE_LINE in t && "좌표 이동" !in t) b.put("text", t.replace(MOVE_LINE, MOVE_LINE + "\n" + MOVETO_LINE)) }
+                pr.put("blocks", JSONArray(l))
+            }
+            root.put("v", 8); save()
+        }
     }
 
     private const val OLD_ROLE = """너는 게임 제작 앱 "Nami Maker"(쯔꾸르 같은 2D 탑다운 게임 제작 도구) 안의 AI 조수다.
@@ -152,6 +161,7 @@ run: action(바라보고 말 걸기·조사) | touch(밟으면) | auto(맵에 �
 - {"type":"if","cond":"switch","name":"스위치","on":true,"then":[...],"else":[...]}  /  {"type":"if","cond":"item","name":"아이템","then":[...],"else":[...]}
 - {"type":"transfer","map":맵 id,"x":0,"y":0}  (장소 이동, 화면이 자동으로 어두워졌다 밝아짐)
 - {"type":"move","target":"player|this|이벤트 id","route":"UULLR"}  (이동 경로: U D L R = 한 칸 걷기, u d l r = 그쪽 보기, . = 잠깐 쉬기. 다 걸을 때까지 기다림)
+- {"type":"move","target":"player|this|이벤트 id","x":0,"y":0}  (좌표 이동: 그 칸까지 앱이 길을 찾아 자연스럽게 걸어감. 단순히 어디로 가게 할 때는 이쪽을 쓴다)
 - {"type":"goal","map":맵 id,"target":"이벤트 id"}  (목적지 화살표: 그 이벤트 위에 화살표, 다른 맵이면 그 맵으로 가는 문을 가리킴, 그 이벤트를 실행하면 꺼짐. "target":"off" = 끄기)
 - {"type":"item","name":"열쇠","amount":1}  (음수면 잃음)
 - {"type":"wait","ms":500}  /  {"type":"fade","out":true}  /  {"type":"end"}
@@ -185,6 +195,7 @@ op은 위에서부터 순서대로 적용된다. 적용 뒤 앱이 문제(막힌
 
     private const val TRANSFER_LINE = """- {"type":"transfer","map":맵 id,"x":0,"y":0}  (장소 이동, 화면이 자동으로 어두워졌다 밝아짐)"""
     private const val GOAL_LINE = """- {"type":"goal","map":맵 id,"target":"이벤트 id"}  (목적지 화살표: 그 이벤트 위에 화살표, 다른 맵이면 그 맵으로 가는 문을 가리킴, 그 이벤트를 실행하면 꺼짐. "target":"off" = 끄기)"""
+    private const val MOVETO_LINE = """- {"type":"move","target":"player|this|이벤트 id","x":0,"y":0}  (좌표 이동: 그 칸까지 앱이 길을 찾아 자연스럽게 걸어감. 단순히 어디로 가게 할 때는 이쪽을 쓴다)"""
     private const val MOVE_LINE = """- {"type":"move","target":"player|this|이벤트 id","route":"UULLR"}  (이동 경로: U D L R = 한 칸 걷기, u d l r = 그쪽 보기, . = 잠깐 쉬기. 다 걸을 때까지 기다림)"""
 
     fun storyBlock() = block("story", "user", "소설·계획", "[소설과 제작 계획]\n{{slot}}")

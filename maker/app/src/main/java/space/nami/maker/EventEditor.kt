@@ -230,6 +230,7 @@ private fun CmdDialog(p: Project, c: Cmd, onDone: () -> Unit, onDelete: () -> Un
     var out by remember { mutableStateOf(c.out) }
     var target by remember { mutableStateOf(c.target) }
     var route by remember { mutableStateOf(c.route) }
+    var toPos by remember { mutableStateOf(c.toPos) }
     val switches = remember { p.switches() }
 
     AlertDialog(
@@ -286,6 +287,14 @@ private fun CmdDialog(p: Project, c: Cmd, onDone: () -> Unit, onDelete: () -> Un
                         val sel = when (target) { "player" -> 0; "this" -> 1; else -> 2 }
                         Seg(listOf("주인공", "이 이벤트", "다른 이벤트"), sel) { target = when (it) { 0 -> "player"; 1 -> "this"; else -> if (target.toIntOrNull() != null) target else "1" } }
                         if (sel == 2) Field(target, { target = it.filter(Char::isDigit).take(4).ifEmpty { "" } }, "이벤트 번호 (#)", Modifier.fillMaxWidth())
+                        Seg(listOf("좌표로", "경로로"), if (toPos) 0 else 1) { toPos = it == 0 }
+                        if (toPos) {
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Field(x, { x = it.filter(Char::isDigit).take(3) }, "X", Modifier.weight(1f))
+                                Field(y, { y = it.filter(Char::isDigit).take(3) }, "Y", Modifier.weight(1f))
+                            }
+                            Text("그 칸까지 알아서 길을 찾아 걸어가요. 가는 방향을 보면서 걸어요.", fontSize = 12.sp, color = K.sub)
+                        } else {
                         Field(route, { route = it.filter { ch -> ch in "UDLRudlr." } }, "경로", Modifier.fillMaxWidth())
                         Text(routeText(route).ifEmpty { "(비어 있음)" }, fontSize = 18.sp, color = K.text)
                         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -293,6 +302,7 @@ private fun CmdDialog(p: Project, c: Cmd, onDone: () -> Unit, onDelete: () -> Un
                             Pill("⌫") { route = route.dropLast(1) }
                         }
                         Text("U·D·L·R = 한 칸 걷기, u·d·l·r = 그쪽 보기, . = 잠깐 쉬기. 막힌 칸은 건너뛰어요.", fontSize = 12.sp, color = K.sub)
+                        }
                     }
                     "wait" -> Field(ms, { ms = it.filter(Char::isDigit).take(5) }, "밀리초 (1000 = 1초)", Modifier.fillMaxWidth())
                     "fade" -> Seg(listOf("어둡게", "밝게"), if (out) 0 else 1) { out = it == 0 }
@@ -310,7 +320,7 @@ private fun CmdDialog(p: Project, c: Cmd, onDone: () -> Unit, onDelete: () -> Un
                 }
                 c.map = mapId; c.x = x.toIntOrNull() ?: 0; c.y = y.toIntOrNull() ?: 0
                 c.ms = ms.toIntOrNull() ?: 500; c.amount = amount.toIntOrNull() ?: 1; c.out = out
-                c.target = target.ifBlank { "player" }; c.route = route
+                c.target = target.ifBlank { "player" }; c.route = if (toPos) "" else route; c.toPos = toPos
                 if (c.type == "goal") c.map = mapId
                 onDone()
             }) { Text("확인") }

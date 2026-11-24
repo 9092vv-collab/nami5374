@@ -193,7 +193,7 @@ class Game(val p: Project) {
                     delay(120)
                     if (!dark) fade.animateTo(0f, tween(260))
                 }
-                "move" -> moveRoute(c.target, c.route, self)
+                "move" -> if (c.toPos) moveTo(c.target, c.x, c.y, self) else moveRoute(c.target, c.route, self)
                 "goal" -> { val id = c.target.toIntOrNull(); if (id == null) { goalMap = -1; goalEv = -1 } else { goalMap = if (c.map > 0) c.map else mapId; goalEv = id } }
                 "item" -> if (c.name.isNotBlank()) items[c.name] = max(0, (items[c.name] ?: 0) + c.amount)
                 "wait" -> delay(c.ms.toLong().coerceIn(0, 60000))
@@ -206,42 +206,103 @@ class Game(val p: Project) {
 
     /** 이동 경로: U D L R = 한 칸 걷기, u d l r = 그 방향 보기, . = 잠깐 쉬기. 막히면 그 걸음만 건너뜀. */
     private suspend fun moveRoute(target: String, route: String, self: GameEvent?) {
-        val ev: GameEvent? = when (target) {
-            "player" -> null
-            "this" -> self
-            else -> target.toIntOrNull()?.let { id -> map.events.firstOrNull { it.id == id } }
-        }
+        val ev = moveTarget(target, self)
         if (target != "player" && ev == null) return
+        // 움직이는 동안은 '말 걸 때 돌아보기'보다 가는 방향이 먼저
+        ev?.let { face.remove(it.id) }
+        var carry = 0f
         for (ch in route) {
             val d = when (ch.uppercaseChar()) { 'D' -> 0; 'L' -> 1; 'R' -> 2; 'U' -> 3; else -> -1 }
-            if (d < 0) { delay(250); continue }
-            val walk = ch.isUpperCase()
-            if (ev == null) {
-                dir = d
-                if (!walk) { delay(120); continue }
-                val nx = px + DX[d]; val ny = py + DY[d]
-                if (blocked(nx, ny)) { delay(150); continue }
-                fx = px; fy = py; px = nx; py = ny; steps++
-                prog.snapTo(0f)
-                prog.animateTo(1f, tween(210, easing = LinearEasing))
-            } else {
-                turned[ev.id] = d
-                if (!walk) { delay(120); continue }
-                val nx = ev.x + DX[d]; val ny = ev.y + DY[d]
-                val solid = (page(ev)?.graphic ?: "none") != "none"
-                // 이벤트끼리는 한 칸에 겹치지 않음
-                val free = map.inside(nx, ny) && map.events.none { it !== ev && it.x == nx && it.y == ny } &&
-                    !(solid && (blocked(nx, ny) || (nx == px && ny == py)))
-                if (!free) { delay(150); continue }
-                for (k in 1..12) {
-                    val t = k / 12f
-                    evPos[ev.id] = (ev.x + DX[d] * t) to (ev.y + DY[d] * t)
-                    delay(17)
-                }
-                ev.x = nx; ev.y = ny
-                evPos.remove(ev.id)
+            if (d < 0) { carry = 0f; delay(250); continue }
+            if (!ch.isUpperCase()) { carry = 0f; turn(ev, d); delay(120); continue }
+            carry = walkOne(ev, d, carry) ?: run { delay(150); 0f }
+        }
+        ev?.let { evPos.remove(it.id) }
+    }
+
+    private fun moveTarget(target: String, self: GameEvent?): GameEvent? = when (target) {
+        "player" -> null
+        "this" -> self
+        else -> target.toIntOrNull()?.let { id -> map.events.firstOrNull { it.id == id } }
+    }
+
+    private fun turn(ev: GameEvent?, d: Int) { if (ev == null) dir = d else turned[ev.id] = d }
+
+    /** 좌표 이동: (tx, ty)까지 길을 찾아 걸어감. 길이 막히면 다시 찾고, 그래도 없으면 갈 수 있는 데까지. */
+    private suspend fun moveTo(target: String, tx: Int, ty: Int, self: GameEvent?) {
+        val ev = moveTarget(target, self)
+        if (target != "player" && ev == null) return
+        ev?.let { face.remove(it.id) }
+        var carry = 0f
+        var tries = 0
+        while (tries < 200) {
+            val sx = ev?.x ?: px; val sy = ev?.y ?: py
+            if (sx == tx && sy == ty) break
+            val path = findPath(ev, sx, sy, tx, ty) ?: break
+            val d = path.firstOrNull() ?: break
+            val c = walkOne(ev, d, carry)
+            if (c == null) { carry = 0f; tries += 10; delay(200); continue }  // 누가 막고 있음: 잠깐 기다렸다 다시
+            carry = c; tries++
+        }
+        ev?.let { evPos.remove(it.id) }
+    }
+
+    private fun canStand(ev: GameEvent?, x: Int, y: Int): Boolean {
+        val m = map
+        if (!m.inside(x, y)) return false
+        if (ev == null) return !blocked(x, y)
+        val solid = (page(ev)?.graphic ?: "none") != "none"
+        if (map.events.any { it !== ev && it.x == x && it.y == y }) return false
+        return !(solid && (blocked(x, y) || (x == px && y == py)))
+    }
+
+    /** 가장 짧은 길의 방향 목록 (BFS). 도착 칸이 막혀 있으면 그 옆까지. */
+    private fun findPath(ev: GameEvent?, sx: Int, sy: Int, tx: Int, ty: Int): List<Int>? {
+        val m = map
+        val w = m.w; val h = m.h
+        val prev = IntArray(w * h) { -1 }; val how = IntArray(w * h) { -1 }
+        val q = ArrayDeque<Int>(); val start = sy * w + sx
+        prev[start] = start; q.add(start)
+        var best = start; var bestD = Math.abs(sx - tx) + Math.abs(sy - ty)
+        while (q.isNotEmpty()) {
+            val i = q.removeFirst(); val x = i % w; val y = i / w
+            val dist = Math.abs(x - tx) + Math.abs(y - ty)
+            if (dist < bestD) { best = i; bestD = dist }
+            if (dist == 0) break
+            for (d in 0..3) {
+                val nx = x + DX[d]; val ny = y + DY[d]
+                if (nx !in 0 until w || ny !in 0 until h) continue
+                val j = ny * w + nx
+                if (prev[j] >= 0) continue
+                if (!canStand(ev, nx, ny)) continue
+                prev[j] = i; how[j] = d; q.add(j)
             }
         }
+        if (best == start) return null
+        val out = ArrayList<Int>(); var k = best
+        while (k != start) { out.add(how[k]); k = prev[k] }
+        return out.reversed()
+    }
+
+    /**
+     * 한 칸 걷기 (가는 방향으로 돌아서). 화면 프레임에 맞춰 움직여서 끊기지 않고, 남은 몫은 다음 칸으로 넘김.
+     * 막혔으면 null (방향만 돌림).
+     */
+    private suspend fun walkOne(ev: GameEvent?, d: Int, carry: Float): Float? {
+        turn(ev, d)
+        val sx = ev?.x ?: px; val sy = ev?.y ?: py
+        val nx = sx + DX[d]; val ny = sy + DY[d]
+        if (!canStand(ev, nx, ny)) return null
+        if (ev == null) { fx = px; fy = py; px = nx; py = ny; steps++; walking = true }
+        var t = carry; var last = -1L
+        while (true) {
+            if (ev == null) prog.snapTo(t.coerceAtMost(1f)) else evPos[ev.id] = (sx + DX[d] * t.coerceAtMost(1f)) to (sy + DY[d] * t.coerceAtMost(1f))
+            if (t >= 1f) break
+            androidx.compose.runtime.withFrameNanos { now -> if (last >= 0) t += (now - last) / 200_000_000f; last = now }
+        }
+        if (ev == null) walking = false
+        else { ev.x = nx; ev.y = ny; evPos[ev.id] = nx.toFloat() to ny.toFloat() }
+        return (t - 1f).coerceIn(0f, 0.5f)
     }
 
     private suspend fun say(s: String, t: String, keep: Boolean) {
@@ -343,7 +404,11 @@ fun PlayScreen(p: Project, onExit: () -> Unit) {
                         if (pg.graphic == "none") return@forEach
                         val (ex, ey) = game.evPos[e.id] ?: (e.x.toFloat() to e.y.toFloat())
                         val mv = game.evPos[e.id]
-                        val fr = if (mv == null) 1 else if (((mv.first + mv.second) % 1f + 1f) % 1f < 0.5f) (if ((e.x + e.y) % 2 == 0) 0 else 2) else 1
+                        // 걷는 중: 칸 앞쪽 절반은 발 내딛기(번갈아 왼발·오른발), 뒤쪽 절반은 서 있기
+                        val fr = if (mv == null) 1 else {
+                            val f = ((mv.first + mv.second) % 1f + 1f) % 1f
+                            if (f > 0.001f && f < 0.5f) (if ((kotlin.math.floor(mv.first + mv.second).toInt() and 1) == 0) 0 else 2) else 1
+                        }
                         sprites.add(Triple(ey, 0f) { Art.sprite(nc, pg.graphic, game.face[e.id] ?: game.turned[e.id] ?: pg.dir, ex * ts, ey * ts, ts, frame = fr) })
                     }
                     val bob = if (game.walking && game.steps % 2 == 0) 1 else 0

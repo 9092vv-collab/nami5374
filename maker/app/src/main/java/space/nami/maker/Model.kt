@@ -23,6 +23,7 @@ class Cmd(var type: String) {
     var out = true         // fade out (true) or in (false)
     var target = "player"  // move: "player", "this" or an event id
     var route = ""         // move: U D L R = step, u d l r = turn, . = pause
+    var toPos = false      // move: true면 route 대신 (x, y)까지 길을 찾아 걸어감
 
     fun toJson(): JSONObject {
         val o = JSONObject().put("type", type)
@@ -42,7 +43,7 @@ class Cmd(var type: String) {
             "wait" -> o.put("ms", ms)
             "fade" -> o.put("out", out)
             "item" -> o.put("name", name).put("amount", amount)
-            "move" -> o.put("target", target).put("route", route)
+            "move" -> { o.put("target", target); if (toPos) o.put("x", x).put("y", y) else o.put("route", route) }
             "goal" -> o.put("map", map).put("target", target)
         }
         return o
@@ -95,6 +96,7 @@ class Cmd(var type: String) {
             c.out = o.optBoolean("out", true)
             c.target = o.opt("target")?.toString()?.ifBlank { null } ?: "player"
             c.route = o.optString("route", "").filter { it in "UDLRudlr." }
+            c.toPos = c.type == "move" && c.route.isEmpty() && o.has("x") && o.has("y")
             return c
         }
 
@@ -114,7 +116,7 @@ class Cmd(var type: String) {
         "if" -> if (cond == "item") "만약 아이템 [$name] 있으면" else "만약 스위치 [$name] ${if (on) "켜짐" else "꺼짐"}"
         "transfer" -> "이동: ${p?.map(map)?.name ?: "맵 $map"} ($x, $y)"
         "goal" -> if (target == "off" || target.toIntOrNull() == null) "목적지 표시 끄기" else "목적지: " + (p?.map(map)?.let { m -> m.name + " · " + (m.event(target.toInt())?.name?.ifBlank { null } ?: "이벤트 #$target") } ?: "맵 $map 이벤트 #$target")
-        "move" -> "이동 경로 [" + (when (target) { "player" -> "주인공"; "this" -> "이 이벤트"; else -> "이벤트 #$target" }) + "] " + routeText(route)
+        "move" -> "이동 [" + (when (target) { "player" -> "주인공"; "this" -> "이 이벤트"; else -> "이벤트 #$target" }) + "] " + (if (toPos) "→ ($x, $y)" else routeText(route))
         "item" -> "아이템 [$name] ${if (amount >= 0) "+$amount" else "$amount"}"
         "wait" -> "기다리기 ${ms}ms"
         "fade" -> if (out) "화면 어둡게" else "화면 밝게"
