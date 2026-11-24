@@ -85,6 +85,9 @@ class Game(val p: Project) {
     val switches = mutableStateMapOf<String, Boolean>()
     val items = mutableStateMapOf<String, Int>()
     val face = mutableStateMapOf<Int, Int>()
+    /** 이동 경로 명령: 움직이는 중인 이벤트의 그려질 위치, 돌아선 방향. */
+    val evPos = mutableStateMapOf<Int, Pair<Float, Float>>()
+    val turned = mutableStateMapOf<Int, Int>()
     var msg by mutableStateOf<Pair<String, String>?>(null)
     var choices by mutableStateOf<List<String>?>(null)
     var busy by mutableStateOf(false)
@@ -137,18 +140,18 @@ class Game(val p: Project) {
         val pg = page(e) ?: return
         busy = true
         if (faceMe && pg.graphic != "none") face[e.id] = opposite(dir)
-        try { exec(pg.commands) } finally { face.remove(e.id); msg = null; choices = null; busy = false }
+        try { exec(pg.commands, e) } finally { face.remove(e.id); msg = null; choices = null; busy = false }
     }
 
-    private suspend fun exec(list: List<Cmd>): Boolean {
+    private suspend fun exec(list: List<Cmd>, self: GameEvent?): Boolean {
         for ((n, c) in list.withIndex()) {
             when (c.type) {
                 "text" -> say(c.speaker, c.text, keep = list.getOrNull(n + 1)?.type == "choice")
-                "choice" -> if (!exec(c.branches.getOrElse(choose(c.options)) { mutableListOf() })) return false
+                "choice" -> if (!exec(c.branches.getOrElse(choose(c.options)) { mutableListOf() }, self)) return false
                 "switch" -> if (c.name.isNotBlank()) switches[c.name] = c.on
                 "if" -> {
                     val ok = if (c.cond == "item") (items[c.name] ?: 0) > 0 else (switches[c.name] == true) == c.on
-                    if (!exec(if (ok) c.then else c.other)) return false
+                    if (!exec(if (ok) c.then else c.other, self)) return false
                 }
                 "transfer" -> {
                     val dark = fade.value >= 1f
@@ -157,6 +160,7 @@ class Game(val p: Project) {
                     delay(120)
                     if (!dark) fade.animateTo(0f, tween(260))
                 }
+                "move" -> moveRoute(c.target, c.route, self)
                 "item" -> if (c.name.isNotBlank()) items[c.name] = max(0, (items[c.name] ?: 0) + c.amount)
                 "wait" -> delay(c.ms.toLong().coerceIn(0, 60000))
                 "fade" -> fade.animateTo(if (c.out) 1f else 0f, tween(450))
@@ -164,6 +168,44 @@ class Game(val p: Project) {
             }
         }
         return true
+    }
+
+    /** 이동 경로: U D L R = 한 칸 걷기, u d l r = 그 방향 보기, . = 잠깐 쉬기. 막히면 그 걸음만 건너뜀. */
+    private suspend fun moveRoute(target: String, route: String, self: GameEvent?) {
+        val ev: GameEvent? = when (target) {
+            "player" -> null
+            "this" -> self
+            else -> target.toIntOrNull()?.let { id -> map.events.firstOrNull { it.id == id } }
+        }
+        if (target != "player" && ev == null) return
+        for (ch in route) {
+            val d = when (ch.uppercaseChar()) { 'D' -> 0; 'L' -> 1; 'R' -> 2; 'U' -> 3; else -> -1 }
+            if (d < 0) { delay(250); continue }
+            val walk = ch.isUpperCase()
+            if (ev == null) {
+                dir = d
+                if (!walk) { delay(120); continue }
+                val nx = px + DX[d]; val ny = py + DY[d]
+                if (blocked(nx, ny)) { delay(150); continue }
+                fx = px; fy = py; px = nx; py = ny; steps++
+                prog.snapTo(0f)
+                prog.animateTo(1f, tween(210, easing = LinearEasing))
+            } else {
+                turned[ev.id] = d
+                if (!walk) { delay(120); continue }
+                val nx = ev.x + DX[d]; val ny = ev.y + DY[d]
+                val solid = (page(ev)?.graphic ?: "none") != "none"
+                val free = map.inside(nx, ny) && !(solid && (blocked(nx, ny) || (nx == px && ny == py)))
+                if (!free) { delay(150); continue }
+                for (k in 1..12) {
+                    val t = k / 12f
+                    evPos[ev.id] = (ev.x + DX[d] * t) to (ev.y + DY[d] * t)
+                    delay(17)
+                }
+                ev.x = nx; ev.y = ny
+                evPos.remove(ev.id)
+            }
+        }
     }
 
     private suspend fun say(s: String, t: String, keep: Boolean) {
@@ -247,7 +289,8 @@ fun PlayScreen(p: Project, onExit: () -> Unit) {
                     m.events.forEach { e ->
                         val pg = game.page(e) ?: return@forEach
                         if (pg.graphic == "none") return@forEach
-                        sprites.add(Triple(e.y.toFloat(), 0f) { Art.sprite(nc, pg.graphic, game.face[e.id] ?: pg.dir, e.x * ts, e.y * ts, ts) })
+                        val (ex, ey) = game.evPos[e.id] ?: (e.x.toFloat() to e.y.toFloat())
+                        sprites.add(Triple(ey, 0f) { Art.sprite(nc, pg.graphic, game.face[e.id] ?: game.turned[e.id] ?: pg.dir, ex * ts, ey * ts, ts) })
                     }
                     val bob = if (game.prog.isRunning && game.steps % 2 == 0) 1 else 0
                     sprites.add(Triple(cy, 1f) { Art.sprite(nc, "hero", game.dir, cx * ts, cy * ts, ts, bob) })

@@ -21,6 +21,8 @@ class Cmd(var type: String) {
     var ms = 500
     var amount = 1
     var out = true         // fade out (true) or in (false)
+    var target = "player"  // move: "player", "this" or an event id
+    var route = ""         // move: U D L R = step, u d l r = turn, . = pause
 
     fun toJson(): JSONObject {
         val o = JSONObject().put("type", type)
@@ -40,6 +42,7 @@ class Cmd(var type: String) {
             "wait" -> o.put("ms", ms)
             "fade" -> o.put("out", out)
             "item" -> o.put("name", name).put("amount", amount)
+            "move" -> o.put("target", target).put("route", route)
         }
         return o
     }
@@ -47,7 +50,7 @@ class Cmd(var type: String) {
     fun copy(): Cmd = from(toJson())
 
     companion object {
-        val TYPES = listOf("text", "choice", "switch", "if", "transfer", "item", "wait", "fade", "end")
+        val TYPES = listOf("text", "choice", "switch", "if", "transfer", "move", "item", "wait", "fade", "end")
 
         fun label(type: String) = when (type) {
             "text" -> "대사"
@@ -55,6 +58,7 @@ class Cmd(var type: String) {
             "switch" -> "스위치"
             "if" -> "조건 분기"
             "transfer" -> "장소 이동"
+            "move" -> "이동 경로"
             "item" -> "아이템"
             "wait" -> "기다리기"
             "fade" -> "화면 어둡게/밝게"
@@ -87,6 +91,8 @@ class Cmd(var type: String) {
             c.ms = o.optInt("ms", 500)
             c.amount = o.optInt("amount", 1)
             c.out = o.optBoolean("out", true)
+            c.target = o.opt("target")?.toString()?.ifBlank { null } ?: "player"
+            c.route = o.optString("route", "").filter { it in "UDLRudlr." }
             return c
         }
 
@@ -105,6 +111,7 @@ class Cmd(var type: String) {
         "switch" -> "스위치 [$name] = ${if (on) "켜기" else "끄기"}"
         "if" -> if (cond == "item") "만약 아이템 [$name] 있으면" else "만약 스위치 [$name] ${if (on) "켜짐" else "꺼짐"}"
         "transfer" -> "이동: ${p?.map(map)?.name ?: "맵 $map"} ($x, $y)"
+        "move" -> "이동 경로 [" + (when (target) { "player" -> "주인공"; "this" -> "이 이벤트"; else -> "이벤트 #$target" }) + "] " + routeText(route)
         "item" -> "아이템 [$name] ${if (amount >= 0) "+$amount" else "$amount"}"
         "wait" -> "기다리기 ${ms}ms"
         "fade" -> if (out) "화면 어둡게" else "화면 밝게"
@@ -112,6 +119,9 @@ class Cmd(var type: String) {
         else -> type
     }
 }
+
+/** "UUL" → "↑↑←", 돌기만 하는 건 ⤴↑ 대신 소문자 그대로, 쉬기 = · */
+fun routeText(r: String) = r.map { when (it) { 'U' -> '↑'; 'D' -> '↓'; 'L' -> '←'; 'R' -> '→'; '.' -> '·'; else -> it } }.joinToString("")
 
 // ---------- events ----------
 val DIRS = listOf("down", "left", "right", "up")
@@ -210,6 +220,9 @@ class GameMap(var id: Int, var name: String, var w: Int, var h: Int) {
 // ---------- project ----------
 class Project(var name: String) {
     var maps = mutableListOf<GameMap>()
+    /** 게임으로 옮길 소설(사용자가 붙여 넣음)과 AI가 세운 제작 계획. */
+    var story = ""
+    var plan = ""
     var startMap = 1
     var startX = 1
     var startY = 1
@@ -231,10 +244,12 @@ class Project(var name: String) {
     fun toJson(): JSONObject = JSONObject().put("name", name)
         .put("start_map", startMap).put("start_x", startX).put("start_y", startY)
         .put("maps", JSONArray().also { a -> maps.forEach { a.put(it.toJson()) } })
+        .put("story", story).put("plan", plan)
 
     companion object {
         fun from(o: JSONObject): Project {
             val p = Project(o.optString("name", "새 게임"))
+            p.story = o.optString("story", ""); p.plan = o.optString("plan", "")
             p.startMap = o.optInt("start_map", 1)
             p.startX = o.optInt("start_x", 1)
             p.startY = o.optInt("start_y", 1)

@@ -30,6 +30,7 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Build
@@ -75,6 +76,7 @@ fun ChatPane(chat: AiChat, mapId: Int, modifier: Modifier, onSettings: () -> Uni
     fun copy(t: String) = clip.setText(androidx.compose.ui.text.AnnotatedString(t))
     var editIdx by remember { mutableStateOf(-1) }
     var editText by remember { mutableStateOf("") }
+    var storyOpen by remember { mutableStateOf(false) }
     @Suppress("UNUSED_VARIABLE") val apiRev = Api.rev + Prompts.rev
     LaunchedEffect(chat.items.size, chat.busy, chat.live.length / 200, chat.liveThink.length / 200) { if (chat.items.isNotEmpty()) list.animateScrollToItem((list.layoutInfo.totalItemsCount - 1).coerceAtLeast(0)) }
     fun send(t: String) {
@@ -82,6 +84,7 @@ fun ChatPane(chat: AiChat, mapId: Int, modifier: Modifier, onSettings: () -> Uni
         input = ""
         scope.launch { chat.send(s, mapId) }
     }
+    if (storyOpen) StoryDialog(chat.doc, onSend = { t -> storyOpen = false; send(t) }) { storyOpen = false }
 
     Column(modifier.imePadding()) {
         Row(Modifier.fillMaxWidth().padding(start = 4.dp, end = 4.dp, top = 6.dp, bottom = 2.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -90,6 +93,7 @@ fun ChatPane(chat: AiChat, mapId: Int, modifier: Modifier, onSettings: () -> Uni
             Text("  AI", fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = K.text)
             Text("  " + (Api.current()?.let { Api.label(it) } ?: "모델 없음") + "  ·  " + Prompts.active().optString("name"),
                 fontSize = 12.sp, color = K.sub, maxLines = 1, modifier = Modifier.weight(1f).clickable { onSettings() })
+            IconBtn(Icons.AutoMirrored.Filled.MenuBook, "소설") { storyOpen = true }
             IconBtn(Icons.Filled.EditNote, "새 대화", enabled = !chat.busy) { chat.clear() }
             IconBtn(Icons.Filled.Settings, "설정") { onSettings() }
         }
@@ -228,4 +232,37 @@ private fun Acts(acts: List<Act>) {
             }
         }
     }
+}
+
+/** 소설 넣기 · 제작 계획 보기. 소설은 게임 파일에 저장되고 AI 요청마다 "소설·계획" 블록으로 같이 가요. */
+@Composable
+private fun StoryDialog(doc: Doc, onSend: (String) -> Unit, onDismiss: () -> Unit) {
+    var story by remember { mutableStateOf(doc.p.story) }
+    var plan by remember { mutableStateOf(doc.p.plan) }
+    var tab by remember { mutableStateOf(0) }
+    fun save() {
+        if (story != doc.p.story || plan != doc.p.plan) { doc.checkpoint(); doc.p.story = story; doc.p.plan = plan; doc.changed() }
+    }
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = { save(); onDismiss() }, containerColor = K.bg,
+        title = { Text("소설로 게임 만들기") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Seg(listOf("소설", "제작 계획"), tab) { tab = it }
+                if (tab == 0) {
+                    Field(story, { story = it }, "소설 붙여 넣기", Modifier.fillMaxWidth().heightIn(min = 220.dp, max = 420.dp), singleLine = false, minLines = 8)
+                    Text("${story.length}자 · 요청마다 같이 보내요(길면 입력 토큰이 많이 들어요).", fontSize = 12.sp, color = K.sub)
+                } else {
+                    Field(plan, { plan = it }, "AI가 세운 계획 (직접 고쳐도 돼요)", Modifier.fillMaxWidth().heightIn(min = 220.dp, max = 420.dp), singleLine = false, minLines = 8)
+                    Text(if (plan.isBlank()) "아직 계획이 없어요. 아래 '계획 세우기'를 눌러 보세요." else "AI가 장을 만들 때마다 맨 아래 '진행' 줄을 고쳐요.", fontSize = 12.sp, color = K.sub)
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Pill("계획 세우기") { save(); onSend("넣어 둔 소설을 읽고 게임 제작 계획을 세워 줘.") }
+                    Pill("다음 장 만들기") { save(); onSend("계획의 다음 장을 만들어 줘.") }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = { save(); onDismiss() }) { Text("저장") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("취소", color = K.sub) } },
+    )
 }

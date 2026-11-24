@@ -228,6 +228,8 @@ private fun CmdDialog(p: Project, c: Cmd, onDone: () -> Unit, onDelete: () -> Un
     var ms by remember { mutableStateOf(c.ms.toString()) }
     var amount by remember { mutableStateOf(c.amount.toString()) }
     var out by remember { mutableStateOf(c.out) }
+    var target by remember { mutableStateOf(c.target) }
+    var route by remember { mutableStateOf(c.route) }
     val switches = remember { p.switches() }
 
     AlertDialog(
@@ -269,6 +271,18 @@ private fun CmdDialog(p: Project, c: Cmd, onDone: () -> Unit, onDelete: () -> Un
                         Field(name, { name = it }, "아이템 이름", Modifier.fillMaxWidth())
                         Field(amount, { amount = it.filter { ch -> ch.isDigit() || ch == '-' }.take(4) }, "개수 (잃으면 -1)", Modifier.fillMaxWidth())
                     }
+                    "move" -> {
+                        val sel = when (target) { "player" -> 0; "this" -> 1; else -> 2 }
+                        Seg(listOf("주인공", "이 이벤트", "다른 이벤트"), sel) { target = when (it) { 0 -> "player"; 1 -> "this"; else -> if (target.toIntOrNull() != null) target else "1" } }
+                        if (sel == 2) Field(target, { target = it.filter(Char::isDigit).take(4).ifEmpty { "" } }, "이벤트 번호 (#)", Modifier.fillMaxWidth())
+                        Field(route, { route = it.filter { ch -> ch in "UDLRudlr." } }, "경로", Modifier.fillMaxWidth())
+                        Text(routeText(route).ifEmpty { "(비어 있음)" }, fontSize = 18.sp, color = K.text)
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            listOf("↑" to "U", "↓" to "D", "←" to "L", "→" to "R", "쉬기" to ".").forEach { (l, ch) -> Pill(l) { route += ch } }
+                            Pill("⌫") { route = route.dropLast(1) }
+                        }
+                        Text("U·D·L·R = 한 칸 걷기, u·d·l·r = 그쪽 보기, . = 잠깐 쉬기. 막힌 칸은 건너뛰어요.", fontSize = 12.sp, color = K.sub)
+                    }
                     "wait" -> Field(ms, { ms = it.filter(Char::isDigit).take(5) }, "밀리초 (1000 = 1초)", Modifier.fillMaxWidth())
                     "fade" -> Seg(listOf("어둡게", "밝게"), if (out) 0 else 1) { out = it == 0 }
                     else -> Text("설정할 게 없어요", color = K.sub)
@@ -285,6 +299,7 @@ private fun CmdDialog(p: Project, c: Cmd, onDone: () -> Unit, onDelete: () -> Un
                 }
                 c.map = mapId; c.x = x.toIntOrNull() ?: 0; c.y = y.toIntOrNull() ?: 0
                 c.ms = ms.toIntOrNull() ?: 500; c.amount = amount.toIntOrNull() ?: 1; c.out = out
+                c.target = target.ifBlank { "player" }; c.route = route
                 onDone()
             }) { Text("확인") }
         },

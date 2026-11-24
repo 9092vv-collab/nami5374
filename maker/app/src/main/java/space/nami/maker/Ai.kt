@@ -103,6 +103,10 @@ object Edits {
             val o = edits.optJSONObject(i) ?: continue
             val op = o.optString("op")
             try {
+                if (op == "set_plan") {
+                    p.plan = o.optString("plan", o.optString("text", "")).trim()
+                    r.done.add("제작 계획 저장"); continue
+                }
                 if (op == "add_map") {
                     val w = o.optInt("w", o.optInt("width", 20)).coerceIn(5, MAX_MAP); val h = o.optInt("h", o.optInt("height", 15)).coerceIn(5, MAX_MAP)
                     val m = GameMap(p.nextMapId(), o.optString("name", "새 맵"), w, h)
@@ -223,7 +227,7 @@ object Edits {
 }
 
 /** Talks to the AI with the map JSON attached; the AI answers with JSON edits (Nami next 작업실 방식). */
-class AiChat(private val ctx: Context, private val doc: Doc) {
+class AiChat(private val ctx: Context, val doc: Doc) {
     val items = mutableStateListOf<ChatItem>()
     var busy by mutableStateOf(false)
     /** Streaming reply/thinking of the current request (empty when "한 번에 불러오기"). */
@@ -453,7 +457,7 @@ class AiChat(private val ctx: Context, private val doc: Doc) {
         for (i in 0 until c.length()) {
             val b = c.getJSONObject(i)
             out.put(when {
-                i in idx -> JSONObject().put("type", "text").put("text", "[예전 맵 생략]")
+                i in idx -> JSONObject().put("type", "text").put("text", "[예전 맵·소설 생략 — 최신 메시지에 있음]")
                 b.optString("type") == "image" -> JSONObject().put("type", "text").put("text", "[예전 그림 생략]")
                 else -> b
             })

@@ -17,9 +17,10 @@ import java.io.File
  */
 object Prompts {
     const val SLOT = "{{slot}}"
-    val TYPE_LABELS = mapOf("text" to "텍스트", "map" to "지금 맵", "command" to "사용자 메시지")
+    val TYPE_LABELS = mapOf("text" to "텍스트", "story" to "소설·계획", "map" to "지금 맵", "command" to "사용자 메시지")
     val TYPE_DESC = mapOf(
         "text" to "직접 쓰는 고정 글. {{tiles}} = 타일 범례, {{graphics}} = 그래픽 목록으로 바뀌어요.",
+        "story" to "이 게임의 소설과 AI가 세운 제작 계획이 {{slot}} 자리에 들어가요. 둘 다 비어 있으면 이 블록은 안 보내요.",
         "map" to "지금 보고 있는 맵의 JSON(바닥·위층 기호, 이벤트, 맵 목록)이 {{slot}} 자리에 들어가요. 그림 첨부를 켜면 맵 그림도 같이 가요(기본은 꺼짐).",
         "command" to "사용자가 채팅에 쓴 말이 {{slot}} 자리에 들어가요.",
     )
@@ -39,8 +40,25 @@ object Prompts {
             // 2 = JSON edits instead of tool calls: keep the old presets (renamed), add and use a new 기본
             presets().forEach { it.put("name", it.optString("name") + " (이전 방식)") }
             val np = newPreset("기본", defaults())
-            root.put("presets", JSONArray(listOf(np) + presets())).put("active", np.getString("id")).put("v", 2)
+            root.put("presets", JSONArray(listOf(np) + presets())).put("active", np.getString("id")).put("v", 3)
             save()
+        } else if (root.optInt("v") < 3) {
+            // 3 = 소설로 게임 만들기: 이전 방식이 아닌 프리셋에 "소설로 게임 만들기"(system)와 "소설·계획"(user, 지금 맵 앞) 블록을 넣음
+            presets().filter { !it.optString("name").endsWith("(이전 방식)") }.forEach { pr ->
+                val l = blocks(pr).toMutableList()
+                l.firstOrNull { it.optString("name") == "이벤트 규칙" }?.let { b ->
+                    val t = b.optString("text")
+                    if ("\"move\"" !in t) b.put("text", t.replace(TRANSFER_LINE, TRANSFER_LINE + "\n" + MOVE_LINE))
+                }
+                if (l.none { it.optString("type") == "story" }) {
+                    val at = l.indexOfFirst { it.optString("type") == "map" }.let { if (it < 0) l.size else it }
+                    l.add(at, storyBlock())
+                    val sysAt = l.indexOfLast { it.optString("role") == "system" } + 1
+                    l.add(sysAt, novelRules())
+                    pr.put("blocks", JSONArray(l))
+                }
+            }
+            root.put("v", 3); save()
         }
     }
 
@@ -80,6 +98,7 @@ run: action(바라보고 말 걸기·조사) | touch(밟으면) | auto(맵에 �
 - {"type":"switch","name":"스위치","on":true}
 - {"type":"if","cond":"switch","name":"스위치","on":true,"then":[...],"else":[...]}  /  {"type":"if","cond":"item","name":"아이템","then":[...],"else":[...]}
 - {"type":"transfer","map":맵 id,"x":0,"y":0}  (장소 이동, 화면이 자동으로 어두워졌다 밝아짐)
+- {"type":"move","target":"player|this|이벤트 id","route":"UULLR"}  (이동 경로: U D L R = 한 칸 걷기, u d l r = 그쪽 보기, . = 잠깐 쉬기. 다 걸을 때까지 기다림)
 - {"type":"item","name":"열쇠","amount":1}  (음수면 잃음)
 - {"type":"wait","ms":500}  /  {"type":"fade","out":true}  /  {"type":"end"}
 한 번만 일어날 일은 스위치를 켜고, 그 스위치를 조건으로 한 다음 페이지를 만든다(상자 열면 [상자1 열림] 켜고 페이지2는 빈 상자).
@@ -103,9 +122,28 @@ op은 위에서부터 순서대로 적용된다. 적용 뒤 앱이 문제(막힌
 - 길이 막혀 못 가는 곳이 생기지 않게, npc가 문이나 길을 막지 않게.
 - 사용자가 맵에 대해 물으면 JSON을 읽고 구체적으로 답한다.
 - reply에는 무엇을 했는지 1~3문장. 사용자는 되돌리기 한 번으로 네 작업 전체를 취소할 수 있다."""),
+        novelRules(),
+        storyBlock(),
         block("map", "user", "지금 맵", "[지금 맵]\n{{slot}}", image = false),
         block("command", "user", "사용자 메시지", "[사용자]\n{{slot}}"),
     )
+
+    private const val TRANSFER_LINE = """- {"type":"transfer","map":맵 id,"x":0,"y":0}  (장소 이동, 화면이 자동으로 어두워졌다 밝아짐)"""
+    private const val MOVE_LINE = """- {"type":"move","target":"player|this|이벤트 id","route":"UULLR"}  (이동 경로: U D L R = 한 칸 걷기, u d l r = 그쪽 보기, . = 잠깐 쉬기. 다 걸을 때까지 기다림)"""
+
+    fun storyBlock() = block("story", "user", "소설·계획", "[소설과 제작 계획]\n{{slot}}")
+
+    fun novelRules() = block("text", "system", "소설로 게임 만들기", """## 소설로 게임 만들기
+사용자가 소설을 넣어 두면 [소설과 제작 계획]으로 함께 온다. 소설을 쯔꾸르 게임(맵, 대사, 이동, 진행)으로 옮긴다.
+1. 계획 먼저: 제작 계획이 비어 있으면 먼저 소설을 읽고 계획을 세워 {"op":"set_plan","plan":"..."}로 저장한다. 맵은 아직 만들지 않는다.
+   계획에 쓸 것: 장소 목록(맵 이름·크기·분위기·연결), 등장인물(그래픽 고르기: {{graphics}}), 장면 순서(장 → 장면 → 장소, 쓰는 스위치 이름), 그리고 맨 아래 "진행: 아직 만든 장 없음".
+2. 장 단위로 만들기: 사용자가 만들라고 하면 계획의 다음 장 하나만 만든다(맵·이벤트·대사·이동 경로·스위치). 만들고 나면 set_plan으로 계획의 "진행" 줄을 고친다(예: "진행: 1장 완료, 다음 2장").
+3. 옮기는 법:
+   - 대사는 소설의 말투를 살려 짧게 나눈다(한 번에 2~3줄). 서술은 이름 없는 대사나 이벤트 지점의 자동 실행으로 보여 준다.
+   - 장면 연출은 move 명령으로 인물을 걷게 하고, wait·fade로 호흡을 준다. 장면이 바뀌면 transfer.
+   - 다음 장면으로 넘어가는 조건은 스위치로 만든다(장면이 끝나면 스위치를 켜고, 다음 장면 이벤트는 그 스위치를 조건으로).
+   - 소설에 없는 사건이나 인물을 지어내지 않는다. 게임에 필요한 연결(문, 길)만 더한다.
+4. 계획을 고치라고 하면 set_plan으로 계획 전체를 다시 쓴다.""")
 
     fun newBlock(type: String) = block(type, if (type == "text") "system" else "user", TYPE_LABELS[type] ?: type, if (type == "text") "" else SLOT, image = false)
 
@@ -180,12 +218,14 @@ op은 위에서부터 순서대로 적용된다. 적용 뒤 앱이 문제(막힌
             val type = b.optString("type"); val t = b.optString("text")
             val text = when (type) {
                 "map" -> slot(t, MapJson.describe(p, m.id))
+                "story" -> if (p.story.isBlank() && p.plan.isBlank()) "" else slot(t,
+                    "## 소설\n" + p.story.ifBlank { "(없음)" } + "\n\n## 제작 계획 (set_plan으로 고침)\n" + p.plan.ifBlank { "(아직 없음)" })
                 "command" -> { hasCommand = true; slot(t, userText) }
                 else -> fill(t)
             }
             if (text.isBlank()) continue
             if (b.optString("role") == "system") { if (sys.isNotEmpty()) sys.append("\n\n"); sys.append(text); continue }
-            if (type == "map") mapIdx.put(content.length())
+            if (type == "map" || type == "story") mapIdx.put(content.length())
             content.put(JSONObject().put("type", "text").put("text", text))
             if (type == "map" && b.optBoolean("image", false)) {
                 mapIdx.put(content.length())
