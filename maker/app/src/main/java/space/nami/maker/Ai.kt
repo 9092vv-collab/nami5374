@@ -28,25 +28,69 @@ object MapJson {
         return o.append("}").toString()
     }
 
-    fun map(p: Project, m: GameMap): String {
+    /** 이보다 칸이 많은 맵은 요약본만 보내고, AI가 {"open":{"area":[x,y,w,h]}}로 필요한 구역을 열어 봄. */
+    const val BIG = 1200
+
+    private fun ch(m: GameMap, x: Int, y: Int, upper: Boolean): Char {
+        val k = m.i(x, y)
+        return if (upper) (if (m.upper[k] == 0) '.' else Tiles.get(m.upper[k]).ch) else Tiles.get(m.ground[k]).ch
+    }
+
+    private fun events(p: Project, l: List<GameEvent>): String =
+        if (l.isEmpty()) "[]" else l.joinToString(",\n", "[\n", "\n]") { eventBrief(p, it) }
+
+    /** 전체 맵, 또는 area(x, y, w, h) 구역만. 좌표는 언제나 원래 맵 기준. */
+    fun map(p: Project, m: GameMap, area: IntArray? = null): String {
+        val x0 = area?.get(0)?.coerceIn(0, m.w - 1) ?: 0
+        val y0 = area?.get(1)?.coerceIn(0, m.h - 1) ?: 0
+        val x1 = if (area == null) m.w else (x0 + area[2]).coerceIn(x0 + 1, m.w)
+        val y1 = if (area == null) m.h else (y0 + area[3]).coerceIn(y0 + 1, m.h)
         val sb = StringBuilder()
-        sb.append("{\"map\":${m.id},\"name\":${q(m.name)},\"w\":${m.w},\"h\":${m.h},\n")
+        sb.append("{\"map\":${m.id},\"name\":${q(m.name)},\"w\":${m.w},\"h\":${m.h},")
+        if (area != null) sb.append("\"area\":[$x0,$y0,${x1 - x0},${y1 - y0}],")
         fun rows(key: String, upper: Boolean) {
-            sb.append(" \"$key\":[\n")
-            for (y in 0 until m.h) {
-                val r = StringBuilder()
-                for (x in 0 until m.w) {
-                    val k = m.i(x, y)
-                    r.append(if (upper) (if (m.upper[k] == 0) '.' else Tiles.get(m.upper[k]).ch) else Tiles.get(m.ground[k]).ch)
-                }
-                sb.append("  \"").append(r).append('"').append(if (y < m.h - 1) ",\n" else "\n")
+            sb.append("\n\"$key\":[\n")
+            for (y in y0 until y1) {
+                sb.append('"')
+                for (x in x0 until x1) sb.append(ch(m, x, y, upper))
+                sb.append('"').append(if (y < y1 - 1) ",\n" else "\n")
             }
-            sb.append(" ],\n")
+            sb.append("],")
         }
         rows("ground", false); rows("upper", true)
-        sb.append(" \"events\":[")
-        m.events.forEachIndexed { i, e -> sb.append(if (i == 0) "\n  " else ",\n  ").append(eventBrief(p, e)) }
-        sb.append(if (m.events.isEmpty()) "]" else "\n ]").append("}")
+        val ev = if (area == null) m.events else m.events.filter { it.x in x0 until x1 && it.y in y0 until y1 }
+        sb.append("\n\"events\":").append(events(p, ev)).append("}")
+        return sb.toString()
+    }
+
+    /** 큰 맵 요약: b×b 칸을 한 글자로(가장 많은 바닥, 위층은 가장 많은 물건). */
+    fun overview(p: Project, m: GameMap): String {
+        val b = maxOf(2, Math.ceil(maxOf(m.w, m.h) / 30.0).toInt())
+        val sb = StringBuilder()
+        sb.append("{\"map\":${m.id},\"name\":${q(m.name)},\"w\":${m.w},\"h\":${m.h},\"summary_block\":$b,")
+        sb.append("\n\"note\":${q("맵이 커서 요약본이다. 한 글자 = ${b}×${b}칸(그 구역에 가장 많은 타일). 요약 글자 (c, r)는 실제 좌표 (c×$b, r×$b)부터. 칠하거나 정확한 위치가 필요하면 edits 없이 {"open":{"area":[x,y,w,h]}}로 그 구역을 먼저 열어 봐라(한 번에 40×40까지, 여러 개면 배열).")},")
+        fun rows(key: String, upper: Boolean) {
+            sb.append("\n\"$key\":[\n")
+            var y = 0
+            while (y < m.h) {
+                sb.append('"')
+                var x = 0
+                while (x < m.w) {
+                    val cnt = HashMap<Char, Int>()
+                    for (yy in y until minOf(y + b, m.h)) for (xx in x until minOf(x + b, m.w)) {
+                        val c = ch(m, xx, yy, upper)
+                        if (!upper || c != '.') cnt[c] = (cnt[c] ?: 0) + 1
+                    }
+                    sb.append(cnt.maxByOrNull { it.value }?.key ?: '.')
+                    x += b
+                }
+                y += b
+                sb.append('"').append(if (y < m.h) ",\n" else "\n")
+            }
+            sb.append("],")
+        }
+        rows("ground", false); rows("upper", true)
+        sb.append("\n\"events\":").append(events(p, m.events)).append("}")
         return sb.toString()
     }
 
@@ -55,7 +99,7 @@ object MapJson {
         val m = p.map(mapId) ?: p.maps[0]
         val maps = p.maps.joinToString(",") { "{\"id\":${it.id},\"name\":${q(it.name)},\"w\":${it.w},\"h\":${it.h}}" }
         val sw = p.switches().joinToString(",") { q(it) }
-        return map(p, m) + "\n" +
+        return (if (m.w * m.h > BIG) overview(p, m) else map(p, m)) + "\n" +
             "{\"start\":{\"map\":${p.startMap},\"x\":${p.startX},\"y\":${p.startY}},\"maps\":[$maps],\"switches\":[$sw]}"
     }
 
@@ -354,6 +398,21 @@ class AiChat(private val ctx: Context, val doc: Doc) {
         }
     }
 
+    /** {"open":{"area":[x,y,w,h]}} / {"open":[{"map":2,"area":[...]}, ...]} → (맵, 구역). 구역은 40×40까지. */
+    private fun areas(o: JSONObject, viewMap: Int): List<Pair<Int, IntArray>> {
+        val v = o.opt("open") ?: return emptyList()
+        val l = when (v) {
+            is JSONObject -> listOf(v)
+            is JSONArray -> (0 until v.length()).mapNotNull { v.optJSONObject(it) }
+            else -> emptyList()
+        }
+        return l.mapNotNull { x ->
+            val a = x.optJSONArray("area") ?: return@mapNotNull null
+            if (a.length() < 4) return@mapNotNull null
+            x.optInt("map", viewMap) to intArrayOf(a.optInt(0), a.optInt(1), a.optInt(2).coerceIn(1, 40), a.optInt(3).coerceIn(1, 40))
+        }
+    }
+
     suspend fun send(text: String, viewMapId: Int) {
         if (busy) return
         if (Api.current() == null) { items.add(ChatItem("error", "설정 › API에서 프로바이더와 모델을 먼저 추가해 주세요")); return }
@@ -393,16 +452,22 @@ class AiChat(private val ctx: Context, val doc: Doc) {
                 val o = parse(answer)
                 if (o == null) { if (answer.isNotBlank()) add("ai", answer.trim()); break }
                 val want = opens(o, viewMapId)
-                if (want.isNotEmpty() && opened < 2 && (o.optJSONArray("edits")?.length() ?: 0) == 0) {
+                val zones = areas(o, viewMapId)
+                if ((want.isNotEmpty() || zones.isNotEmpty()) && opened < 3 && (o.optJSONArray("edits")?.length() ?: 0) == 0) {
                     opened++
-                    val sb = StringBuilder("[요청한 이벤트 내용]\n")
+                    val sb = StringBuilder("[요청한 내용]\n")
                     want.forEach { (mid, eid) ->
                         val e = doc.p.map(mid)?.event(eid)
                         sb.append(if (e == null) "맵 $mid 이벤트 $eid: 없음\n" else "맵 $mid: " + MapJson.eventFull(e) + "\n")
                     }
+                    zones.forEach { (mid, a) ->
+                        val m = doc.p.map(mid)
+                        sb.append(if (m == null) "맵 $mid: 없음\n" else MapJson.map(doc.p, m, a) + "\n")
+                    }
                     sb.append("이제 이 내용을 보고 원래 요청대로 답하라.")
-                    add("tool", "이벤트 ${want.size}개 열어봄")
-                    messages.put(JSONObject().put("role", "user").put("content", JSONArray().put(JSONObject().put("type", "text").put("text", sb.toString()))).put("turn", turn))
+                    add("tool", listOfNotNull(want.size.takeIf { it > 0 }?.let { "이벤트 ${it}개" }, zones.size.takeIf { it > 0 }?.let { "맵 구역 ${it}곳" }).joinToString(", ") + " 열어봄")
+                    // 지난 턴이 되면 생략(필요하면 다시 열면 됨)
+                    messages.put(JSONObject().put("role", "user").put("content", JSONArray().put(JSONObject().put("type", "text").put("text", sb.toString()))).put("dropIdx", JSONArray().put(0)).put("turn", turn))
                     continue
                 }
                 o.optString("reply").trim().takeIf { it.isNotEmpty() }?.let { add("ai", it) }
@@ -452,12 +517,12 @@ class AiChat(private val ctx: Context, val doc: Doc) {
 
     private fun strip(o: JSONObject): JSONObject {
         val c = o.optJSONArray("content") ?: return o
-        val idx = o.optJSONArray("mapIdx")?.let { a -> (0 until a.length()).map { a.optInt(it) }.toSet() } ?: emptySet()
+        val idx = (o.optJSONArray("mapIdx") ?: o.optJSONArray("dropIdx"))?.let { a -> (0 until a.length()).map { a.optInt(it) }.toSet() } ?: emptySet()
         val out = JSONArray()
         for (i in 0 until c.length()) {
             val b = c.getJSONObject(i)
             out.put(when {
-                i in idx -> JSONObject().put("type", "text").put("text", "[예전 맵·소설 생략 — 최신 메시지에 있음]")
+                i in idx -> JSONObject().put("type", "text").put("text", "[예전 자료 생략 — 맵·소설은 최신 메시지에 있음, 이벤트·구역은 필요하면 다시 open]")
                 b.optString("type") == "image" -> JSONObject().put("type", "text").put("text", "[예전 그림 생략]")
                 else -> b
             })
