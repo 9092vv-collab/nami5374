@@ -6,6 +6,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.setValue
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
@@ -281,52 +282,176 @@ object Api {
         return (0 until parts.length()).map { parts.getJSONObject(it) }.filter { !it.optBoolean("thought") }.joinToString("") { it.optString("text") }
     }
 
+    // ---------- model settings (like Nami next: stream, at once, thinking) ----------
+    fun patchModel(id: String, k: String, v: Any?) { model(id)?.let { if (v == null) it.remove(k) else it.put(k, v) }; save() }
+    fun stream(m: JSONObject) = m.optBoolean("stream", true)
+    fun atOnce(m: JSONObject) = m.optBoolean("atOnce", false)
+    fun thinking(m: JSONObject): JSONObject = m.optJSONObject("thinking") ?: JSONObject()
+    fun patchThinking(id: String, k: String, v: Any?) {
+        val m = model(id) ?: return
+        val t = thinking(m); if (v == null) t.remove(k) else t.put(k, v)
+        m.put("thinking", t); save()
+    }
+    val EFFORTS = listOf("minimal", "low", "medium", "high", "xhigh")
+    private fun isOldGemini(id: String) = Regex("gemini-[12](\\.|-|$)", RegexOption.IGNORE_CASE).containsMatchIn(id)
+
     // ---------- one AI turn with tools ----------
-    /** blocks: Anthropic-style content (text / tool_use). raw: Gemini parts to send back as-is (thought signatures). */
-    class Turn(val blocks: JSONArray, val raw: JSONArray?, val wantsTools: Boolean)
+    /** blocks: Anthropic-style content (thinking / text / tool_use). raw: Gemini parts to send back as-is (thought signatures). */
+    class Turn(val blocks: JSONArray, val raw: JSONArray?, val wantsTools: Boolean, val reasoning: String)
+
+    /** Live output while streaming (skipped when "한 번에 불러오기" is on). */
+    class Live(val onText: (String) -> Unit = {}, val onThink: (String) -> Unit = {})
 
     /** [messages] use Anthropic-style blocks; assistant turns from Gemini also carry "gparts". */
-    suspend fun turn(system: String, tools: JSONArray, messages: JSONArray): Turn {
+    suspend fun turn(system: String, tools: JSONArray, messages: JSONArray, live: Live): Turn {
         val m = current() ?: throw ApiError("설정 › API에서 프로바이더와 모델을 먼저 추가해 주세요")
         val p = provider(m.optString("providerId")) ?: throw ApiError("모델에 연결된 프로바이더가 없어요")
         val c = connect(p)
-        val id = m.optString("modelId")
-        return if (c.format == "gemini") geminiTurn(c, id, system, tools, messages) else anthropicTurn(c, id, system, tools, messages)
+        val cb = if (atOnce(m)) Live() else live
+        return if (c.format == "gemini") geminiTurn(c, m, system, tools, messages, cb) else anthropicTurn(c, m, system, tools, messages, cb)
     }
 
-    private suspend fun anthropicTurn(c: Conn, id: String, system: String, tools: JSONArray, messages: JSONArray): Turn {
+    /** POST that reads a server-sent-event stream; onData gets each event's data. */
+    private suspend fun sse(url: String, headers: Map<String, String>, body: String, onData: (String) -> Unit) = withContext(Dispatchers.IO) {
+        val c = URL(url).openConnection() as HttpURLConnection
+        try {
+            c.requestMethod = "POST"; c.connectTimeout = 20_000; c.readTimeout = 180_000; c.doOutput = true
+            c.setRequestProperty("Content-Type", "application/json"); c.setRequestProperty("Accept", "text/event-stream")
+            headers.forEach { (k, v) -> c.setRequestProperty(k, v) }
+            c.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
+            val code = c.responseCode
+            if (code !in 200..299) throw ApiError(explain(code, c.errorStream?.bufferedReader()?.use { it.readText() } ?: ""))
+            c.inputStream.bufferedReader(Charsets.UTF_8).use { rd ->
+                val data = StringBuilder(); var has = false
+                while (true) {
+                    ensureActive()
+                    val line = rd.readLine() ?: break
+                    if (line.isEmpty()) { if (has) onData(data.toString()); data.clear(); has = false; continue }
+                    if (line.startsWith("data:")) { if (has) data.append('\n'); data.append(line.substring(5).removePrefix(" ")); has = true }
+                }
+                if (has) onData(data.toString())
+            }
+        } catch (e: ApiError) { throw e
+        } catch (e: java.net.SocketTimeoutException) { throw ApiError("응답 시간이 초과됐어요 (180초)")
+        } catch (e: java.io.IOException) { throw ApiError("스트림이 끊겼어요: ${e.message ?: e.javaClass.simpleName}")
+        } finally { c.disconnect() }
+    }
+
+    private suspend fun anthropicTurn(c: Conn, m: JSONObject, system: String, tools: JSONArray, messages: JSONArray, live: Live): Turn {
         val clean = JSONArray()
-        for (i in 0 until messages.length()) clean.put(JSONObject(messages.getJSONObject(i).toString()).also { it.remove("gparts") })
-        val body = JSONObject().put("model", id).put("max_tokens", 8000).put("system", system).put("tools", tools).put("messages", clean)
-        val o = JSONObject(http("POST", c.base + "/messages", c.headers, body.toString()))
-        return Turn(o.optJSONArray("content") ?: JSONArray(), null, o.optString("stop_reason") == "tool_use")
+        for (i in 0 until messages.length()) {
+            val o = messages.getJSONObject(i)
+            clean.put(JSONObject().put("role", o.getString("role")).put("content", o.get("content")))
+        }
+        val th = thinking(m)
+        var maxTokens = m.optInt("maxTokens", 0).takeIf { it > 0 } ?: 8000
+        val body = JSONObject().put("model", m.optString("modelId")).put("system", system).put("tools", tools).put("messages", clean)
+        if (th.optBoolean("enabled")) {
+            val budget = maxOf(1024, th.optInt("budget", 0).takeIf { it > 0 } ?: 4000)
+            body.put("thinking", JSONObject().put("type", "enabled").put("budget_tokens", budget))
+            if (maxTokens <= budget) maxTokens = budget + 4000
+        }
+        body.put("max_tokens", maxTokens)
+        if (!stream(m)) {
+            val o = JSONObject(http("POST", c.base + "/messages", c.headers, body.toString()))
+            val a = o.optJSONArray("content") ?: JSONArray()
+            val r = StringBuilder()
+            for (i in 0 until a.length()) a.getJSONObject(i).takeIf { it.optString("type") == "thinking" }?.let { r.append(it.optString("thinking")) }
+            return Turn(a, null, o.optString("stop_reason") == "tool_use", r.toString())
+        }
+        body.put("stream", true)
+        val blocks = sortedMapOf<Int, JSONObject>(); val json = mutableMapOf<Int, StringBuilder>()
+        val reasoning = StringBuilder(); var stop = ""
+        sse(c.base + "/messages", c.headers, body.toString()) { d ->
+            val o = runCatching { JSONObject(d) }.getOrNull() ?: return@sse
+            when (o.optString("type")) {
+                "content_block_start" -> {
+                    val i = o.optInt("index"); val cb = o.getJSONObject("content_block")
+                    when (cb.optString("type")) {
+                        "text" -> cb.put("text", "")
+                        "thinking" -> { cb.put("thinking", ""); cb.put("signature", cb.optString("signature")) }
+                        "tool_use" -> json[i] = StringBuilder()
+                    }
+                    blocks[i] = cb
+                }
+                "content_block_delta" -> {
+                    val i = o.optInt("index"); val dl = o.getJSONObject("delta"); val b = blocks[i] ?: return@sse
+                    when (dl.optString("type")) {
+                        "text_delta" -> { val t = dl.optString("text"); b.put("text", b.optString("text") + t); live.onText(t) }
+                        "thinking_delta" -> { val t = dl.optString("thinking"); b.put("thinking", b.optString("thinking") + t); reasoning.append(t); live.onThink(t) }
+                        "signature_delta" -> b.put("signature", b.optString("signature") + dl.optString("signature"))
+                        "input_json_delta" -> json[i]?.append(dl.optString("partial_json"))
+                    }
+                }
+                "content_block_stop" -> {
+                    val i = o.optInt("index")
+                    json[i]?.let { sb -> blocks[i]?.put("input", runCatching { JSONObject(sb.toString().ifBlank { "{}" }) }.getOrDefault(JSONObject())) }
+                }
+                "message_delta" -> o.optJSONObject("delta")?.optString("stop_reason")?.takeIf { it.isNotBlank() }?.let { stop = it }
+                "error" -> throw ApiError(o.optJSONObject("error")?.optString("message") ?: "Anthropic 스트림 오류")
+            }
+        }
+        val out = JSONArray(); blocks.values.forEach { out.put(it) }
+        return Turn(out, null, stop == "tool_use", reasoning.toString())
     }
 
     private val BLOCKS = setOf("SAFETY", "PROHIBITED_CONTENT", "BLOCKLIST", "SPII", "IMAGE_SAFETY", "RECITATION", "OTHER")
 
-    private suspend fun geminiTurn(c: Conn, id: String, system: String, tools: JSONArray, messages: JSONArray): Turn {
+    private suspend fun geminiTurn(c: Conn, m: JSONObject, system: String, tools: JSONArray, messages: JSONArray, live: Live): Turn {
+        val id = m.optString("modelId")
         val decl = JSONArray()
         for (i in 0 until tools.length()) {
             val t = tools.getJSONObject(i)
             decl.put(JSONObject().put("name", t.getString("name")).put("description", t.optString("description"))
                 .put("parameters", gSchema(t.getJSONObject("input_schema"))))
         }
+        val gc = JSONObject().put("maxOutputTokens", m.optInt("maxTokens", 0).takeIf { it > 0 } ?: 32768)
+        val th = thinking(m)
+        if (th.optBoolean("enabled")) gc.put("thinkingConfig", JSONObject().put("includeThoughts", true).also { t ->
+            val budget = th.optInt("budget", 0)
+            if (isOldGemini(id)) { if (budget > 0) t.put("thinkingBudget", budget) }
+            else {
+                val effort = th.optString("effort").takeIf { it in EFFORTS }
+                    ?: budget.takeIf { it > 0 }?.let { b -> when { b <= 2048 -> "low"; b <= 8192 -> "medium"; else -> "high" } }
+                effort?.let { t.put("thinkingLevel", it) }
+            }
+        })
         val body = JSONObject()
             .put("contents", toGemini(messages))
             .put("systemInstruction", JSONObject().put("parts", JSONArray().put(JSONObject().put("text", system))))
             .put("tools", JSONArray().put(JSONObject().put("functionDeclarations", decl)))
-            .put("generationConfig", JSONObject().put("maxOutputTokens", 32768))
+            .put("generationConfig", gc)
             .put("safetySettings", JSONArray().also { a ->
                 listOf("HARM_CATEGORY_HARASSMENT", "HARM_CATEGORY_HATE_SPEECH", "HARM_CATEGORY_SEXUALLY_EXPLICIT", "HARM_CATEGORY_DANGEROUS_CONTENT")
                     .forEach { a.put(JSONObject().put("category", it).put("threshold", "BLOCK_NONE")) }
             })
-        val o = JSONObject(http("POST", c.base + "/models/${URLEncoder.encode(id, "UTF-8")}:generateContent", c.headers, body.toString()))
-        o.optJSONObject("promptFeedback")?.optString("blockReason")?.takeIf { it.isNotBlank() }?.let { throw ApiError("구글 안전 필터에 막혔어요 (사유: $it)") }
-        val cand = o.optJSONArray("candidates")?.optJSONObject(0)
-        val parts = cand?.optJSONObject("content")?.optJSONArray("parts") ?: JSONArray()
-        val blocks = JSONArray(); var calls = false
-        for (i in 0 until parts.length()) {
-            val pt = parts.getJSONObject(i)
+        val model = URLEncoder.encode(id, "UTF-8")
+        val parts = mutableListOf<JSONObject>()
+        var finish = ""
+        fun take(o: JSONObject) {
+            o.optJSONObject("promptFeedback")?.optString("blockReason")?.takeIf { it.isNotBlank() }?.let { throw ApiError("구글 안전 필터에 막혔어요 (사유: $it)") }
+            o.optJSONObject("error")?.let { throw ApiError(it.optString("message", "Gemini 오류")) }
+            val cand = o.optJSONArray("candidates")?.optJSONObject(0) ?: return
+            cand.optString("finishReason").takeIf { it.isNotBlank() }?.let { finish = it }
+            val ps = cand.optJSONObject("content")?.optJSONArray("parts") ?: return
+            for (i in 0 until ps.length()) {
+                val pt = ps.getJSONObject(i)
+                val txt = if (pt.has("text") && !pt.has("functionCall")) pt.optString("text") else null
+                if (txt != null) { if (pt.optBoolean("thought")) live.onThink(txt) else live.onText(txt) }
+                // glue streamed text pieces back together; a signature on a piece moves onto the joined part
+                val last = parts.lastOrNull()
+                if (txt != null && last != null && last.has("text") && !last.has("functionCall") && last.optBoolean("thought") == pt.optBoolean("thought")) {
+                    last.put("text", last.optString("text") + txt)
+                    pt.optString("thoughtSignature").takeIf { it.isNotBlank() }?.let { last.put("thoughtSignature", it) }
+                } else parts.add(JSONObject(pt.toString()))
+            }
+        }
+        if (stream(m)) sse(c.base + "/models/$model:streamGenerateContent?alt=sse", c.headers, body.toString()) { d ->
+            runCatching { JSONObject(d) }.getOrNull()?.let { take(it) }
+        } else take(JSONObject(http("POST", c.base + "/models/$model:generateContent", c.headers, body.toString())))
+
+        val blocks = JSONArray(); var calls = false; val reasoning = StringBuilder()
+        parts.forEachIndexed { i, pt ->
             val fc = pt.optJSONObject("functionCall")
             when {
                 fc != null -> {
@@ -334,14 +459,13 @@ object Api {
                     blocks.put(JSONObject().put("type", "tool_use").put("id", "g${System.nanoTime().toString(36)}$i")
                         .put("name", fc.optString("name")).put("input", fc.optJSONObject("args") ?: JSONObject()))
                 }
-                pt.optBoolean("thought") -> {}
-                pt.has("text") -> blocks.put(JSONObject().put("type", "text").put("text", pt.optString("text")))
+                pt.optBoolean("thought") -> reasoning.append(pt.optString("text"))
+                pt.has("text") && pt.optString("text").isNotEmpty() -> blocks.put(JSONObject().put("type", "text").put("text", pt.optString("text")))
             }
         }
-        val fr = cand?.optString("finishReason") ?: ""
-        if (blocks.length() == 0 && fr in BLOCKS) throw ApiError("구글 안전 필터에 막혔어요 (사유: $fr)")
-        if (blocks.length() == 0 && fr == "MALFORMED_FUNCTION_CALL") throw ApiError("AI가 도구 호출을 잘못 만들었어요. 다시 시도해 주세요")
-        return Turn(blocks, if (parts.length() > 0) parts else null, calls)
+        if (blocks.length() == 0 && finish in BLOCKS) throw ApiError("구글 안전 필터에 막혔어요 (사유: $finish)")
+        if (blocks.length() == 0 && finish == "MALFORMED_FUNCTION_CALL") throw ApiError("AI가 도구 호출을 잘못 만들었어요. 다시 시도해 주세요")
+        return Turn(blocks, if (parts.isNotEmpty()) JSONArray(parts) else null, calls, reasoning.toString())
     }
 
     /** JSON schema → Gemini schema: upper-case types; arrays of free-form objects become a JSON string. */

@@ -238,6 +238,9 @@ class ChatItem(val role: String, val text: String) // user, ai, tool, error
 class AiChat(private val ctx: Context, private val doc: Doc) {
     val items = mutableStateListOf<ChatItem>()
     var busy by mutableStateOf(false)
+    /** Streaming text/thinking of the current round (empty when "한 번에 불러오기"). */
+    var live by mutableStateOf("")
+    var liveThink by mutableStateOf("")
     var onFocusMap: (Int) -> Unit = {}
     private var messages = JSONArray()
     private val file = Store.chatFile(doc)
@@ -268,13 +271,15 @@ class AiChat(private val ctx: Context, private val doc: Doc) {
         val before = doc.snapshot()
         var edited = false
         try {
-            val m = doc.p.map(viewMapId) ?: doc.p.maps[0]
-            val content = JSONArray()
-                .put(JSONObject().put("type", "text").put("text", "[지금 보고 있는 맵]\n" + MapText.describe(doc.p, m.id) + "\n\n[사용자]\n" + text))
-                .put(image(Shot.base64(doc.p, m)))
-            messages.put(JSONObject().put("role", "user").put("content", content))
+            val built = Prompts.build(doc.p, viewMapId, text)
+            val system = built.system.ifBlank { "너는 게임 제작 앱 Nami Maker의 AI 조수다." }
+            messages.put(JSONObject().put("role", "user").put("content", built.content).put("mapIdx", built.mapIdx))
             for (round in 0 until 40) {
-                val res = Api.turn(Tools.system(), Tools.defs, outgoing())
+                live = ""; liveThink = ""
+                val res = Api.turn(system, Tools.defs, outgoing(),
+                    Api.Live(onText = { t -> live += t }, onThink = { t -> liveThink += t }))
+                live = ""; liveThink = ""
+                if (res.reasoning.isNotBlank()) items.add(ChatItem("think", res.reasoning.trim()))
                 val blocks = res.blocks
                 messages.put(JSONObject().put("role", "assistant").put("content", blocks).also { m -> res.raw?.let { m.put("gparts", it) } })
                 val results = JSONArray()
@@ -299,6 +304,7 @@ class AiChat(private val ctx: Context, private val doc: Doc) {
                 messages.put(JSONObject().put("role", "user").put("content", results))
             }
         } catch (e: Exception) {
+            live = ""; liveThink = ""
             while (messages.length() > mark) messages.remove(messages.length() - 1)
             items.add(ChatItem("error", "오류: " + (e.message ?: e.javaClass.simpleName)))
         }
@@ -333,7 +339,11 @@ class AiChat(private val ctx: Context, private val doc: Doc) {
     }
 
     private fun strip(o: JSONObject): JSONObject {
-        val c = o.optJSONArray("content") ?: return o
+        val c0 = o.optJSONArray("content") ?: return o
+        val idx = o.optJSONArray("mapIdx")?.let { a -> (0 until a.length()).map { a.optInt(it) }.toSet() } ?: emptySet()
+        val c = if (idx.isEmpty()) c0 else JSONArray().also { a ->
+            for (i in 0 until c0.length()) a.put(if (i in idx) JSONObject().put("type", "text").put("text", "[예전 맵 생략]") else c0.get(i))
+        }
         fun fix(a: JSONArray): JSONArray {
             val r = JSONArray()
             for (i in 0 until a.length()) {

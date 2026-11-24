@@ -103,36 +103,18 @@ fun EditorScreen(doc: Doc, chat: AiChat, onBack: () -> Unit, onPlay: () -> Unit)
     var mapSettings by remember { mutableStateOf(false) }
     var settings by remember { mutableStateOf(false) }
 
+    // AI chat: full screen in both layouts, closed only with the back key (or its ← button)
+    androidx.activity.compose.BackHandler(enabled = showChat) { showChat = false }
     BoxWithConstraints(Modifier.fillMaxSize().background(K.bg)) {
         val wide = maxWidth >= 700.dp
-        val chatW = min(maxWidth.value * 0.4f, 460f).dp
-        val pane: @Composable (Modifier) -> Unit = { mod ->
-            EditorPane(
-                doc, map, wide, mod,
-                onBack = onBack, onPlay = onPlay, onChat = { showChat = true },
-                onPickMap = { mapId = it }, onEditEvent = { editEvent = it },
-                onMapSettings = { mapSettings = true }, onSettings = { settings = true },
-            )
-        }
-        if (wide) {
-            Row(Modifier.fillMaxSize()) {
-                pane(Modifier.weight(1f).fillMaxHeight())
-                Box(Modifier.width(1.dp).fillMaxHeight().background(K.line))
-                ChatPane(chat, map.id, Modifier.width(chatW).fillMaxHeight(), onSettings = { settings = true }, onClose = null)
-            }
-        } else {
-            Box(Modifier.fillMaxSize()) {
-                pane(Modifier.fillMaxSize())
-                if (showChat) {
-                    Box(Modifier.fillMaxSize().background(Color(0x55000000)).clickable { showChat = false })
-                    ChatPane(
-                        chat, map.id,
-                        Modifier.align(Alignment.BottomCenter).fillMaxWidth().fillMaxHeight(0.75f)
-                            .clip(RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp)).background(K.bg),
-                        onSettings = { settings = true }, onClose = { showChat = false },
-                    )
-                }
-            }
+        EditorPane(
+            doc, map, wide, Modifier.fillMaxSize(),
+            onBack = onBack, onPlay = onPlay, onChat = { showChat = true },
+            onPickMap = { mapId = it }, onEditEvent = { editEvent = it },
+            onMapSettings = { mapSettings = true }, onSettings = { settings = true },
+        )
+        if (showChat) {
+            ChatPane(chat, map.id, Modifier.fillMaxSize().background(K.bg).pointerInput(Unit) {}, onSettings = { settings = true }, onClose = { showChat = false })
         }
     }
 
@@ -180,7 +162,7 @@ private fun EditorPane(
             IconBtn(Icons.AutoMirrored.Filled.Undo, "되돌리기", enabled = doc.canUndo) { doc.undo() }
             IconBtn(Icons.AutoMirrored.Filled.Redo, "다시 하기", enabled = doc.canRedo) { doc.redo() }
             IconBtn(Icons.Filled.PlayArrow, "테스트 플레이") { onPlay() }
-            if (!wide) IconBtn(Icons.Filled.AutoAwesome, "AI") { onChat() }
+            IconBtn(Icons.Filled.AutoAwesome, "AI") { onChat() }
             IconBtn(Icons.Filled.Settings, "설정") { onSettings() }
         }
         Box(Modifier.weight(1f).fillMaxWidth().background(K.panel)) {

@@ -48,18 +48,30 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import kotlinx.coroutines.launch
+import org.json.JSONObject
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 
 /** API settings like Nami next: providers (Vertex AI, Anthropic) → models, plus which model the AI uses. */
 @Composable
 fun SettingsDialog(onClose: () -> Unit) {
-    var open by remember { mutableStateOf<String?>(null) }
-    Dialog(onDismissRequest = { if (open != null) open = null else onClose() },
+    // route: "" home · "p:<provider>" · "m:<model>" · "ps:<preset>" · "b:<preset>:<block>"
+    val stack = remember { androidx.compose.runtime.mutableStateListOf<String>() }
+    fun go(r: String) { stack.add(r) }
+    fun back() { if (stack.isNotEmpty()) stack.removeAt(stack.size - 1) else onClose() }
+    Dialog(onDismissRequest = { back() },
         properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
         Box(Modifier.fillMaxSize().background(K.bg).safeDrawingPadding().imePadding()) {
-            @Suppress("UNUSED_VARIABLE") val rev = Api.rev
-            val pid = open
-            if (pid != null && Api.provider(pid) != null) ProviderPage(pid, onBack = { open = null })
-            else ApiHome(onClose = onClose, onOpen = { open = it })
+            @Suppress("UNUSED_VARIABLE") val rev = Api.rev + Prompts.rev
+            val r = stack.lastOrNull() ?: ""
+            val parts = r.split(":")
+            when {
+                parts[0] == "p" && Api.provider(parts[1]) != null -> ProviderPage(parts[1], onBack = { back() }, onModel = { go("m:$it") })
+                parts[0] == "m" && Api.model(parts[1]) != null -> ModelPage(parts[1], onBack = { back() })
+                parts[0] == "ps" && Prompts.preset(parts[1]) != null -> PresetPage(parts[1], onBack = { back() }, onBlock = { go("b:${parts[1]}:$it") })
+                parts[0] == "b" && parts.size == 3 && Prompts.preset(parts[1]) != null -> BlockPage(parts[1], parts[2], onBack = { back() })
+                else -> ApiHome(onClose = onClose, onOpen = { go("p:$it") }, onModel = { go("m:$it") }, onPreset = { go("ps:$it") })
+            }
         }
     }
 }
@@ -116,9 +128,12 @@ private fun Radio(on: Boolean) {
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun ApiHome(onClose: () -> Unit, onOpen: (String) -> Unit) {
-    @Suppress("UNUSED_VARIABLE") val rev = Api.rev
+private fun ApiHome(onClose: () -> Unit, onOpen: (String) -> Unit, onModel: (String) -> Unit, onPreset: (String) -> Unit) {
+    @Suppress("UNUSED_VARIABLE") val rev = Api.rev + Prompts.rev
+    val clip = LocalClipboardManager.current
+    var presetMsg by remember { mutableStateOf<Pair<Boolean?, String>>(null to "") }
     var adding by remember { mutableStateOf(false) }
     Column(Modifier.fillMaxSize()) {
         Header("API 설정", back = false, onClick = onClose)
@@ -129,13 +144,44 @@ private fun ApiHome(onClose: () -> Unit, onOpen: (String) -> Unit) {
                 if (models.isEmpty()) Hint("아직 모델이 없어요. 아래에서 프로바이더를 추가하고 모델을 넣어주세요.")
                 val cur = Api.current()?.optString("id")
                 models.forEach { m ->
-                    Card(onClick = { Api.select(m.optString("id")) }) {
+                    val mid = m.optString("id")
+                    Card(onClick = { onModel(mid) }) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Radio(m.optString("id") == cur)
-                            Text("  " + Api.label(m), fontSize = 15.sp, color = K.text)
+                            Box(Modifier.clip(CircleShape).clickable { Api.select(mid) }.padding(4.dp)) { Radio(mid == cur) }
+                            Column(Modifier.weight(1f).padding(start = 8.dp)) {
+                                Text(Api.label(m), fontSize = 15.sp, color = K.text)
+                                Text(modelSummary(m), fontSize = 12.sp, color = K.sub)
+                            }
+                            Text("설정 ›", fontSize = 13.sp, color = K.sub)
                         }
                     }
                 }
+                if (models.isNotEmpty()) Hint("동그라미 = AI가 쓸 모델. 카드를 누르면 스트리밍·추론 설정이에요.")
+                Label("프롬프트 프리셋")
+                val active = Prompts.active().optString("id")
+                Prompts.presets().forEach { ps ->
+                    val id = ps.optString("id")
+                    Card(onClick = { onPreset(id) }) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(Modifier.clip(CircleShape).clickable { Prompts.setActive(id) }.padding(4.dp)) { Radio(id == active) }
+                            Column(Modifier.weight(1f).padding(start = 8.dp)) {
+                                Text(ps.optString("name"), fontSize = 15.sp, color = K.text)
+                                val bl = Prompts.blocks(ps)
+                                Text("블록 ${bl.size}개 · 켜짐 ${bl.count { it.optBoolean("enabled", true) }}개", fontSize = 12.sp, color = K.sub)
+                            }
+                            Text("편집 ›", fontSize = 13.sp, color = K.sub)
+                        }
+                    }
+                }
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Btn("+ 새 프리셋") { onPreset(Prompts.add("프리셋 ${Prompts.presets().size + 1}")) }
+                    Btn("클립보드에서 가져오기") {
+                        val n = Prompts.import(clip.getText()?.text ?: "")
+                        presetMsg = if (n > 0) true to "프리셋 ${n}개를 가져왔어요" else false to "가져올 프리셋을 찾지 못했어요. 내보내기로 복사한 JSON인지 확인해 주세요."
+                    }
+                }
+                Result(presetMsg.first, presetMsg.second)
+                Hint("동그라미 = 지금 쓰는 프리셋. 블록을 위에서 아래로 이어 붙여 AI에게 보내요.")
                 Label("프로바이더")
                 Api.providers().forEach { p ->
                     val pid = p.optString("id")
@@ -168,7 +214,7 @@ private fun ApiHome(onClose: () -> Unit, onOpen: (String) -> Unit) {
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun ProviderPage(pid: String, onBack: () -> Unit) {
+private fun ProviderPage(pid: String, onBack: () -> Unit, onModel: (String) -> Unit) {
     @Suppress("UNUSED_VARIABLE") val rev = Api.rev
     val scope = rememberCoroutineScope()
     val clip = LocalClipboardManager.current
@@ -261,11 +307,14 @@ private fun ProviderPage(pid: String, onBack: () -> Unit) {
                 val cur = Api.current()?.optString("id")
                 Api.modelsOf(pid).forEach { m ->
                     val mid = m.optString("id")
-                    Card(onClick = { Api.select(mid) }) {
+                    Card(onClick = { onModel(mid) }) {
                         Column {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Radio(mid == cur)
-                                Text("  " + m.optString("modelId"), fontSize = 15.sp, color = K.text, modifier = Modifier.weight(1f))
+                                Box(Modifier.clip(CircleShape).clickable { Api.select(mid) }.padding(4.dp)) { Radio(mid == cur) }
+                                Column(Modifier.weight(1f).padding(start = 8.dp)) {
+                                    Text(m.optString("modelId"), fontSize = 15.sp, color = K.text)
+                                    Text(modelSummary(m), fontSize = 12.sp, color = K.sub)
+                                }
                                 Text("테스트", fontSize = 13.sp, color = K.accent, fontWeight = FontWeight.SemiBold,
                                     modifier = Modifier.clip(RoundedCornerShape(50)).clickable {
                                         tests = tests + (mid to (null to "보내는 중…"))
@@ -288,7 +337,7 @@ private fun ProviderPage(pid: String, onBack: () -> Unit) {
                         Pill(s) { Api.addModel(pid, s) }
                     }
                 }
-                Hint("동그라미를 누르면 AI가 그 모델을 써요.")
+                Hint("동그라미 = AI가 쓸 모델. 카드를 누르면 스트리밍·추론 설정이에요.")
 
                 Spacer(Modifier.height(28.dp))
                 Text(if (confirmDel) "정말 지울까요? 한 번 더 누르세요" else "이 프로바이더 지우기", fontSize = 14.sp, color = K.danger,
@@ -302,3 +351,195 @@ private fun ProviderPage(pid: String, onBack: () -> Unit) {
 }
 
 private fun secs(t0: Long) = " · %.1f초".format((System.currentTimeMillis() - t0) / 1000f)
+
+private fun modelSummary(m: JSONObject): String {
+    val th = Api.thinking(m)
+    val a = mutableListOf<String>()
+    a += if (!Api.stream(m)) "한 번에 받기(스트리밍 끔)" else if (Api.atOnce(m)) "스트리밍 · 한 번에 불러오기" else "스트리밍"
+    a += if (th.optBoolean("enabled")) "추론 " + (th.optString("effort").ifBlank { th.optInt("budget", 0).takeIf { it > 0 }?.toString() ?: "켬" }) else "추론 끔"
+    return a.joinToString(" · ")
+}
+
+@Composable
+private fun SwitchRow(title: String, sub: String, on: Boolean, enabled: Boolean = true, onChange: (Boolean) -> Unit) {
+    Card(onClick = if (enabled) ({ onChange(!on) }) else null) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(title, fontSize = 15.sp, color = if (enabled) K.text else K.sub)
+                Text(sub, fontSize = 12.sp, color = K.sub, lineHeight = 17.sp)
+            }
+            androidx.compose.material3.Switch(on, onChange, enabled = enabled,
+                colors = androidx.compose.material3.SwitchDefaults.colors(checkedTrackColor = K.accent, checkedThumbColor = Color.White))
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun ModelPage(mid: String, onBack: () -> Unit) {
+    @Suppress("UNUSED_VARIABLE") val rev = Api.rev
+    val scope = rememberCoroutineScope()
+    val m = Api.model(mid) ?: return
+    val p = Api.provider(m.optString("providerId"))
+    val gemini = p?.optString("preset") == "vertex"
+    val th = Api.thinking(m)
+    var modelId by remember(mid) { mutableStateOf(m.optString("modelId")) }
+    var maxTok by remember(mid) { mutableStateOf(m.optInt("maxTokens", 0).takeIf { it > 0 }?.toString() ?: "") }
+    var budget by remember(mid) { mutableStateOf(th.optInt("budget", 0).takeIf { it > 0 }?.toString() ?: "") }
+    var test by remember(mid) { mutableStateOf<Pair<Boolean?, String>>(null to "") }
+    var confirmDel by remember(mid) { mutableStateOf(false) }
+    Column(Modifier.fillMaxSize()) {
+        Header(m.optString("modelId"), back = true, onClick = onBack)
+        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 18.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Column(Modifier.widthIn(max = 640.dp).fillMaxWidth()) {
+                Text(p?.optString("name") ?: "프로바이더 없음", fontSize = 13.sp, color = K.sub)
+                val cur = Api.current()?.optString("id") == mid
+                Spacer(Modifier.height(8.dp))
+                if (cur) Text("지금 AI가 쓰는 모델이에요", fontSize = 13.sp, color = Color(0xFF2E7D4F))
+                else Btn("이 모델 쓰기", filled = true) { Api.select(mid) }
+
+                Label("모델 ID")
+                Input(modelId, { modelId = it; if (it.isNotBlank()) Api.patchModel(mid, "modelId", it.trim()) }, "모델 ID")
+                Label("최대 출력 토큰")
+                Input(maxTok, { v -> maxTok = v.filter(Char::isDigit).take(6); Api.patchModel(mid, "maxTokens", maxTok.toIntOrNull()) },
+                    if (gemini) "비우면 32768" else "비우면 8000")
+
+                Label("동작")
+                SwitchRow("스트리밍", "답을 받는 대로 화면에 바로 보여줘요.", Api.stream(m)) { Api.patchModel(mid, "stream", it) }
+                SwitchRow("한 번에 불러오기", "서버에선 스트리밍으로 받되, 화면에는 끝난 뒤 한 번에 보여줘요. 폰 부하가 줄어요.",
+                    Api.atOnce(m), enabled = Api.stream(m)) { Api.patchModel(mid, "atOnce", it) }
+                Hint("스트리밍을 끄면 한 번에 받기(답이 다 만들어질 때까지 기다렸다가 받음)예요.")
+                SwitchRow("추론 (thinking)", if (gemini) "Gemini thinkingConfig — 2.x는 토큰 예산, 3 이상은 강도(레벨)" else "Claude thinking — 토큰 예산",
+                    th.optBoolean("enabled")) { Api.patchThinking(mid, "enabled", it) }
+                if (th.optBoolean("enabled")) {
+                    if (gemini) {
+                        Label("추론 강도 (Gemini 3 이상)")
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Pill("미지정", on = th.optString("effort").isBlank()) { Api.patchThinking(mid, "effort", null) }
+                            Api.EFFORTS.forEach { e -> Pill(e, on = th.optString("effort") == e) { Api.patchThinking(mid, "effort", e) } }
+                        }
+                        Hint("미지정이면 모델 기본값(보통 high)이에요. 하이드로겐이 느리면 low나 medium으로 낮춰 보세요. xhigh는 하이드로겐 전용이에요.")
+                    }
+                    Label(if (gemini) "추론 토큰 예산 (Gemini 2.x)" else "추론 토큰 예산")
+                    Input(budget, { v -> budget = v.filter(Char::isDigit).take(6); Api.patchThinking(mid, "budget", budget.toIntOrNull()) },
+                        if (gemini) "비우면 모델 기본값" else "비우면 4000 (최소 1024)")
+                    Hint("추론 과정은 채팅에서 '생각 보기'로 펼쳐 볼 수 있어요.")
+                } else if (gemini) Hint("끄면 생각 설정을 보내지 않아요(모델 기본값). Gemini 3 이상은 완전히 끌 수 없어요.")
+
+                Label("테스트")
+                Btn("연결 테스트") {
+                    test = null to "보내는 중…"
+                    scope.launch {
+                        val t0 = System.currentTimeMillis()
+                        test = try { true to ("응답: " + Api.testModel(mid) + secs(t0)) } catch (e: Exception) { false to ((e.message ?: "실패") + secs(t0)) }
+                    }
+                }
+                Result(test.first, test.second)
+
+                Spacer(Modifier.height(28.dp))
+                Text(if (confirmDel) "정말 지울까요? 한 번 더 누르세요" else "이 모델 지우기", fontSize = 14.sp, color = K.danger,
+                    modifier = Modifier.clip(RoundedCornerShape(50)).clickable { if (!confirmDel) confirmDel = true else { Api.removeModel(mid); onBack() } }
+                        .padding(horizontal = 6.dp, vertical = 8.dp))
+                Spacer(Modifier.height(40.dp))
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun PresetPage(pid: String, onBack: () -> Unit, onBlock: (String) -> Unit) {
+    @Suppress("UNUSED_VARIABLE") val rev = Prompts.rev
+    val clip = LocalClipboardManager.current
+    val ps = Prompts.preset(pid) ?: return
+    var name by remember(pid) { mutableStateOf(ps.optString("name")) }
+    var adding by remember(pid) { mutableStateOf(false) }
+    var msg by remember(pid) { mutableStateOf<Pair<Boolean?, String>>(null to "") }
+    var confirm by remember(pid) { mutableStateOf("") }
+    Column(Modifier.fillMaxSize()) {
+        Header(ps.optString("name"), back = true, onClick = onBack)
+        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 18.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Column(Modifier.widthIn(max = 640.dp).fillMaxWidth()) {
+                if (Prompts.active().optString("id") == pid) Text("지금 쓰는 프리셋이에요", fontSize = 13.sp, color = Color(0xFF2E7D4F))
+                else Btn("이 프리셋 쓰기", filled = true) { Prompts.setActive(pid) }
+                Label("이름")
+                Input(name, { name = it; if (it.isNotBlank()) Prompts.rename(pid, it.trim()) }, "프리셋 이름")
+                Label("블록 (위에서 아래 순서로 보내요)")
+                val bl = Prompts.blocks(ps)
+                bl.forEachIndexed { i, b ->
+                    val bid = b.optString("id")
+                    Card(onClick = { onBlock(bid) }) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            androidx.compose.material3.Checkbox(b.optBoolean("enabled", true), { Prompts.patchBlock(pid, bid, "enabled", it) },
+                                colors = androidx.compose.material3.CheckboxDefaults.colors(checkedColor = K.accent))
+                            Column(Modifier.weight(1f)) {
+                                Text(b.optString("name").ifBlank { Prompts.TYPE_LABELS[b.optString("type")] ?: "블록" }, fontSize = 15.sp,
+                                    color = if (b.optBoolean("enabled", true)) K.text else K.sub)
+                                Text((Prompts.TYPE_LABELS[b.optString("type")] ?: "") + " · " + (if (b.optString("role") == "user") "사용자 메시지에" else "시스템 프롬프트에") +
+                                    (if (b.optString("type") == "map" && b.optBoolean("image", true)) " · 그림 첨부" else ""), fontSize = 12.sp, color = K.sub)
+                            }
+                            if (i > 0) IconBtn(androidx.compose.material.icons.Icons.Filled.KeyboardArrowUp, "위로") { Prompts.move(pid, bid, -1) }
+                            if (i < bl.size - 1) IconBtn(androidx.compose.material.icons.Icons.Filled.KeyboardArrowDown, "아래로") { Prompts.move(pid, bid, 1) }
+                        }
+                    }
+                }
+                if (!adding) Btn("+ 블록 추가") { adding = true }
+                else FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Prompts.TYPE_LABELS.forEach { (t, l) -> Pill(l) { adding = false; onBlock(Prompts.addBlock(pid, t)) } }
+                    Pill("취소") { adding = false }
+                }
+                Label("관리")
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Btn("클립보드로 내보내기") { clip.setText(androidx.compose.ui.text.AnnotatedString(Prompts.export(ps))); msg = true to "프리셋을 클립보드에 복사했어요" }
+                    Btn("복제") { Prompts.copy(pid)?.let { msg = true to "사본을 만들었어요" } }
+                    Btn(if (confirm == "reset") "정말 되돌릴까요?" else "기본값으로 되돌리기") {
+                        if (confirm != "reset") confirm = "reset" else { Prompts.reset(pid); confirm = ""; msg = true to "기본 블록으로 되돌렸어요" }
+                    }
+                    if (Prompts.presets().size > 1) Btn(if (confirm == "del") "정말 지울까요?" else "프리셋 지우기") {
+                        if (confirm != "del") confirm = "del" else { Prompts.remove(pid); onBack() }
+                    }
+                }
+                Result(msg.first, msg.second)
+                Spacer(Modifier.height(40.dp))
+            }
+        }
+    }
+}
+
+@Composable
+private fun BlockPage(pid: String, bid: String, onBack: () -> Unit) {
+    @Suppress("UNUSED_VARIABLE") val rev = Prompts.rev
+    val ps = Prompts.preset(pid) ?: return
+    val b = Prompts.blocks(ps).firstOrNull { it.optString("id") == bid } ?: return
+    val type = b.optString("type")
+    var name by remember(bid) { mutableStateOf(b.optString("name")) }
+    var text by remember(bid) { mutableStateOf(b.optString("text")) }
+    var confirmDel by remember(bid) { mutableStateOf(false) }
+    Column(Modifier.fillMaxSize()) {
+        Header(b.optString("name").ifBlank { "블록" }, back = true, onClick = onBack)
+        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 18.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Column(Modifier.widthIn(max = 640.dp).fillMaxWidth()) {
+                Text((Prompts.TYPE_LABELS[type] ?: type) + " — " + (Prompts.TYPE_DESC[type] ?: ""), fontSize = 13.sp, color = K.sub, lineHeight = 18.sp)
+                SwitchRow("켜기", "끄면 이 블록은 보내지 않아요.", b.optBoolean("enabled", true)) { Prompts.patchBlock(pid, bid, "enabled", it) }
+                Label("이름")
+                Input(name, { name = it; Prompts.patchBlock(pid, bid, "name", it) }, "블록 이름")
+                Label("어디에 넣을까")
+                Seg(listOf("시스템 프롬프트", "사용자 메시지"), if (b.optString("role") == "user") 1 else 0) { Prompts.patchBlock(pid, bid, "role", if (it == 1) "user" else "system") }
+                Hint("시스템 프롬프트 블록은 이어 붙여 AI의 기본 지시가 되고, 사용자 메시지 블록은 매번 보내는 메시지에 순서대로 들어가요.")
+                if (type == "map") SwitchRow("맵 그림 첨부", "글자 지도와 함께 맵 그림(PNG)도 보내요. 끄면 토큰이 줄어요.", b.optBoolean("image", true)) { Prompts.patchBlock(pid, bid, "image", it) }
+                Label("내용")
+                OutlinedTextField(text, { text = it; Prompts.patchBlock(pid, bid, "text", it) }, minLines = 8,
+                    modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp),
+                    textStyle = androidx.compose.ui.text.TextStyle(fontSize = 14.sp, color = K.text, lineHeight = 20.sp),
+                    colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = K.accent, unfocusedBorderColor = K.line, focusedContainerColor = K.card, unfocusedContainerColor = K.card))
+                if (type != "text") Hint("{{slot}} 자리에 내용이 들어가요. 없으면 글 뒤에 붙여요.")
+                else Hint("{{tiles}} = 타일 범례, {{graphics}} = 그래픽 목록")
+                Spacer(Modifier.height(28.dp))
+                Text(if (confirmDel) "정말 지울까요? 한 번 더 누르세요" else "이 블록 지우기", fontSize = 14.sp, color = K.danger,
+                    modifier = Modifier.clip(RoundedCornerShape(50)).clickable { if (!confirmDel) confirmDel = true else { Prompts.removeBlock(pid, bid); onBack() } }
+                        .padding(horizontal = 6.dp, vertical = 8.dp))
+                Spacer(Modifier.height(40.dp))
+            }
+        }
+    }
+}

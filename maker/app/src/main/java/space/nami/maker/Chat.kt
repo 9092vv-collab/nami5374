@@ -22,6 +22,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Build
@@ -59,7 +60,8 @@ fun ChatPane(chat: AiChat, mapId: Int, modifier: Modifier, onSettings: () -> Uni
     val scope = rememberCoroutineScope()
     var input by remember { mutableStateOf("") }
     val list = rememberLazyListState()
-    LaunchedEffect(chat.items.size, chat.busy) { if (chat.items.isNotEmpty()) list.animateScrollToItem((chat.items.size + (if (chat.busy) 1 else 0) - 1).coerceAtLeast(0)) }
+    @Suppress("UNUSED_VARIABLE") val apiRev = Api.rev + Prompts.rev
+    LaunchedEffect(chat.items.size, chat.busy, chat.live.length / 200, chat.liveThink.length / 200) { if (chat.items.isNotEmpty()) list.animateScrollToItem((list.layoutInfo.totalItemsCount - 1).coerceAtLeast(0)) }
     fun send(t: String) {
         val s = t.trim(); if (s.isEmpty() || chat.busy) return
         input = ""
@@ -67,12 +69,14 @@ fun ChatPane(chat: AiChat, mapId: Int, modifier: Modifier, onSettings: () -> Uni
     }
 
     Column(modifier.imePadding()) {
-        Row(Modifier.fillMaxWidth().padding(start = 14.dp, end = 4.dp, top = 6.dp, bottom = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.fillMaxWidth().padding(start = 4.dp, end = 4.dp, top = 6.dp, bottom = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+            if (onClose != null) IconBtn(Icons.AutoMirrored.Filled.ArrowBack, "닫기") { onClose() }
             Icon(Icons.Filled.AutoAwesome, null, tint = K.accent, modifier = Modifier.size(18.dp))
             Text("  AI", fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = K.text)
-            Spacer(Modifier.weight(1f))
+            Text("  " + (Api.current()?.let { Api.label(it) } ?: "모델 없음") + "  ·  " + Prompts.active().optString("name"),
+                fontSize = 12.sp, color = K.sub, maxLines = 1, modifier = Modifier.weight(1f).clickable { onSettings() })
             IconBtn(Icons.Filled.EditNote, "새 대화", enabled = !chat.busy) { chat.clear() }
-            if (onClose != null) IconBtn(Icons.Filled.Close, "닫기") { onClose() } else IconBtn(Icons.Filled.Settings, "설정") { onSettings() }
+            IconBtn(Icons.Filled.Settings, "설정") { onSettings() }
         }
         LazyColumn(Modifier.weight(1f).fillMaxWidth(), state = list, contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 14.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -98,6 +102,7 @@ fun ChatPane(chat: AiChat, mapId: Int, modifier: Modifier, onSettings: () -> Uni
                             .clip(RoundedCornerShape(18.dp)).background(K.bubble).padding(horizontal = 14.dp, vertical = 10.dp))
                     }
                     "ai" -> Text(it.text, fontSize = 15.sp, color = K.text, lineHeight = 22.sp, modifier = Modifier.padding(end = 12.dp))
+                    "think" -> ThinkCard(it.text, live = false)
                     "tool" -> Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Filled.Build, null, tint = K.sub, modifier = Modifier.size(13.dp))
                         Text("  " + it.text, fontSize = 12.sp, color = K.sub)
@@ -106,6 +111,8 @@ fun ChatPane(chat: AiChat, mapId: Int, modifier: Modifier, onSettings: () -> Uni
                         .background(Color(0xFFFBE9E7)).padding(horizontal = 12.dp, vertical = 8.dp))
                 }
             }
+            if (chat.busy && chat.liveThink.isNotEmpty()) item { ThinkCard(chat.liveThink, live = true) }
+            if (chat.busy && chat.live.isNotEmpty()) item { Text(chat.live, fontSize = 15.sp, color = K.text, lineHeight = 22.sp, modifier = Modifier.padding(end = 12.dp)) }
             if (chat.busy) item {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     CircularProgressIndicator(Modifier.size(16.dp), color = K.accent, strokeWidth = 2.dp)
@@ -132,3 +139,12 @@ fun ChatPane(chat: AiChat, mapId: Int, modifier: Modifier, onSettings: () -> Uni
     }
 }
 
+
+@Composable
+private fun ThinkCard(text: String, live: Boolean) {
+    var open by remember { mutableStateOf(false) }
+    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(K.panel).clickable { open = !open }.padding(horizontal = 12.dp, vertical = 8.dp)) {
+        Text(if (live) "생각하는 중…" else if (open) "생각 접기" else "생각 보기", fontSize = 12.sp, color = K.sub, fontWeight = FontWeight.SemiBold)
+        if (open || live) Text(if (open) text else text.takeLast(240), fontSize = 12.sp, color = K.sub, lineHeight = 17.sp, modifier = Modifier.padding(top = 4.dp))
+    }
+}
