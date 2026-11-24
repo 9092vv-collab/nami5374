@@ -229,7 +229,9 @@ class Game(val p: Project) {
                 if (!walk) { delay(120); continue }
                 val nx = ev.x + DX[d]; val ny = ev.y + DY[d]
                 val solid = (page(ev)?.graphic ?: "none") != "none"
-                val free = map.inside(nx, ny) && !(solid && (blocked(nx, ny) || (nx == px && ny == py)))
+                // 이벤트끼리는 한 칸에 겹치지 않음
+                val free = map.inside(nx, ny) && map.events.none { it !== ev && it.x == nx && it.y == ny } &&
+                    !(solid && (blocked(nx, ny) || (nx == px && ny == py)))
                 if (!free) { delay(150); continue }
                 for (k in 1..12) {
                     val t = k / 12f

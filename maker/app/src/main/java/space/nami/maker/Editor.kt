@@ -479,6 +479,18 @@ private fun EventsPage(doc: Doc, map: GameMap, modifier: Modifier, onPickMap: (I
         androidx.compose.foundation.lazy.LazyRow(contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             items(doc.p.maps.size) { i -> val m = doc.p.maps[i]; Pill(m.name, on = m.id == map.id) { onPickMap(m.id) } }
         }
+        var heroPick by remember { mutableStateOf(false) }
+        if (heroPick) GraphicPicker(doc.p.hero, 0, onPick = { g -> if (g != "none") { doc.checkpoint(); doc.p.hero = g; doc.changed() }; heroPick = false }) { heroPick = false }
+        // 조작하는 캐릭터(주인공): 게임 전체에서 하나
+        Row(Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 10.dp).clip(androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
+            .background(K.panel).clickable { heroPick = true }.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+            androidx.compose.foundation.Canvas(Modifier.size(40.dp)) { drawIntoCanvas { c -> Art.sprite(c.art(), doc.p.hero, 0, 0f, 0f, size.width) } }
+            Column(Modifier.weight(1f).padding(start = 10.dp)) {
+                Text("주인공 (조작하는 캐릭터)", fontSize = 15.sp, color = K.text)
+                Text(Sprites.name(doc.p.hero) + " · 시작: " + (doc.p.map(doc.p.startMap)?.name ?: "") + " (${doc.p.startX}, ${doc.p.startY})", fontSize = 12.sp, color = K.sub)
+            }
+            Text("바꾸기 ›", fontSize = 13.sp, color = K.sub)
+        }
         if (map.events.isEmpty()) Text("이 맵에는 이벤트가 없어요. 맵·작업실 탭에서 이벤트 도구로 칸을 누르거나 AI에게 부탁해 보세요.",
             fontSize = 13.sp, color = K.sub, modifier = Modifier.padding(18.dp))
         androidx.compose.foundation.lazy.LazyColumn(Modifier.fillMaxSize(), contentPadding = androidx.compose.foundation.layout.PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
