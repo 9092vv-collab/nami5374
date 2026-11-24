@@ -32,7 +32,15 @@ object Chars {
     fun example(): ByteArray? = exampleFile?.takeIf { it.exists() }?.readBytes()
     fun setExample(b: ByteArray?) { exampleFile?.let { if (b == null) it.delete() else it.writeBytes(b) }; rev++ }
 
+    /** 캐릭터를 타일에 비해 얼마나 크게 그릴지(%). 발은 칸 아래 가운데에 맞춤. */
+    private var prefFile: File? = null
+    var scale = 80
+        private set
+    fun setScale(v: Int) { scale = v.coerceIn(50, 120); runCatching { prefFile?.writeText(org.json.JSONObject().put("scale", scale).toString()) }; rev++ }
+
     fun init(ctx: Context) {
+        prefFile = File(ctx.filesDir, "chars_prefs.json")
+        scale = runCatching { org.json.JSONObject(prefFile!!.readText()).optInt("scale", 80) }.getOrDefault(80).coerceIn(50, 120)
         exampleFile = File(ctx.filesDir, "sheet_example.img")
         dir = File(ctx.filesDir, "chars").apply { mkdirs() }
         refresh()
@@ -270,8 +278,10 @@ object Chars {
     fun draw(cv: Canvas, id: String, dir: Int, frame: Int, x0: Float, y0: Float, s: Float): Boolean {
         val l = load(id) ?: return false
         val bm = l[(dir.coerceIn(0, 3)) * 3 + frame.coerceIn(0, 2)]
-        val h = s * bm.height / bm.width
-        rf.set(x0, y0 + s - h, x0 + s, y0 + s)
+        val w = s * scale / 100f
+        val h = w * bm.height / bm.width
+        val left = x0 + (s - w) / 2f
+        rf.set(left, y0 + s - h, left + w, y0 + s)
         cv.drawBitmap(bm, null, rf, paint)
         return true
     }

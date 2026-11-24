@@ -669,6 +669,11 @@ fun ImagePage(modifier: Modifier = Modifier) {
         Spacer(Modifier.height(6.dp))
         Btn(if (genBusy) "만드는 중…" else "레퍼런스 고르고 만들기", filled = true, enabled = !genBusy) { refPick() }
         Result(genMsg.first, genMsg.second)
+        Label("캐릭터 크기")
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            listOf(60, 70, 80, 90, 100).forEach { v -> Pill("$v%", on = Chars.scale == v) { Chars.setScale(v) } }
+        }
+        Hint("타일 한 칸에 비해 캐릭터를 얼마나 크게 그릴지예요. 발은 칸 아래 가운데에 맞춰요. 모든 캐릭터에 같이 적용돼요.")
         Label("시트 불러오기")
         SwitchRow("AI 그림 다듬기", "흰 배경을 투명하게 지우고, 큰 그림은 한 칸 48픽셀 도트로 줄여요. 제미니 같은 AI가 만든 시트에 켜세요.", tidy) { tidy = it }
         SwitchRow("뒷모습 하나로", "맨 아랫줄(뒷모습) 가운데 칸을 세 칸 모두에 써요. 뒷모습이 들쭉날쭉할 때.", oneBack) { oneBack = it }
