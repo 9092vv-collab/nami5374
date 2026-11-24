@@ -51,7 +51,13 @@ class Doc(val file: File, var p: Project) {
 
     fun save() {
         val tmp = File(file.path + ".tmp")
-        tmp.writeText(snapshot()); tmp.renameTo(file)
+        tmp.writeText(snapshot())
+        // 윈도우에서는 File.renameTo가 있는 파일을 덮어쓰지 못해서(실패해도 조용히 false) 저장이 안 되던 문제 → 덮어쓰기로 옮김
+        try {
+            java.nio.file.Files.move(tmp.toPath(), file.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING, java.nio.file.StandardCopyOption.ATOMIC_MOVE)
+        } catch (e: Exception) {
+            java.nio.file.Files.move(tmp.toPath(), file.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+        }
     }
 }
 
@@ -60,7 +66,17 @@ object Store {
 
     class Entry(val file: File, val name: String, val modified: Long)
 
-    fun list(ctx: Context): List<Entry> = (dir(ctx).listFiles() ?: emptyArray())
+    /** 예전 PC판에서 못 옮기고 남은 .tmp(마지막으로 저장하려던 내용)가 더 새것이면 되살림. */
+    private fun recover(d: File) {
+        d.listFiles { f -> f.name.endsWith(".json.tmp") }?.forEach { t ->
+            val f = File(t.path.removeSuffix(".tmp"))
+            if (runCatching { JSONObject(t.readText()) }.isSuccess && (!f.exists() || t.lastModified() > f.lastModified()))
+                runCatching { java.nio.file.Files.move(t.toPath(), f.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING) }
+            else t.delete()
+        }
+    }
+
+    fun list(ctx: Context): List<Entry> = (dir(ctx).also { recover(it) }.listFiles() ?: emptyArray())
         .filter { it.name.endsWith(".json") && !it.name.endsWith(".chat.json") }
         .mapNotNull { f ->
             runCatching { Entry(f, JSONObject(f.readText()).optString("name", "게임"), f.lastModified()) }.getOrNull()
