@@ -70,7 +70,8 @@ object Chars {
             }
             return 8
         }
-        if (w % 3 != 0 || h % 4 != 0 || w < 24) return 0
+        if (w < 24 || h < 32) return 0
+        if ((w % 3 != 0 || h % 4 != 0) && !tidy) return 0
         val r = (w / 3f) / (h / 4f)
         if (r < 0.5f || r > 2f) return 0
         val out = if (tidy || oneBack) png(process(b, tidy, oneBack)) else bytes

@@ -546,6 +546,13 @@ private fun BlockPage(pid: String, bid: String, onBack: () -> Unit) {
     }
 }
 
+private const val SHEET_PROMPT = "Turn the character in this image into an RPG Maker MV style pixel-art walking sprite sheet. " +
+    "Layout: exactly 3 columns and 4 rows of equal square cells on a plain pure white background, no grid lines, no text, no shadows. " +
+    "Rows from top to bottom: facing down (front view), facing left, facing right, facing up (back view). " +
+    "Columns: walking frame with left foot forward, standing, walking frame with right foot forward. " +
+    "Chibi proportions about 2.5 heads tall, full body inside every cell, same size and position in each cell, clean dark outlines. " +
+    "Keep the hair style, hair color, eye color and outfit of the reference."
+
 /** 오른쪽 '이미지' 탭: 그림 받기 링크, 캐릭터 그림 불러오기·다듬기·목록. */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -579,6 +586,32 @@ fun ImagePage(modifier: Modifier = Modifier) {
             val n = runCatching { Chars.import(name, bytes, tidy, oneBack) }.getOrDefault(0)
             charMsg = if (n > 0) true to "캐릭터 ${n}명을 넣었어요" else false to "넣을 캐릭터 그림을 못 찾았어요. 걷기 시트(3칸 × 4줄) PNG나 그걸 담은 zip인지 확인해 주세요."
         }
+        Label("레퍼런스로 만들기")
+        Hint("NAI 등에서 뽑은 캐릭터 그림 한 장을 고르면, 제미니 이미지 모델이 걷기 시트(3칸 × 4줄)로 바꿔 줘요. 다듬기와 뒷모습 하나로를 거쳐 바로 캐릭터로 들어가요.")
+        val scope = rememberCoroutineScope()
+        var refName by remember { mutableStateOf("") }
+        var imgModel by remember { mutableStateOf(Api.imageModel()) }
+        var genBusy by remember { mutableStateOf(false) }
+        var genMsg by remember { mutableStateOf<Pair<Boolean?, String>>(null to "") }
+        Input(refName, { refName = it }, "캐릭터 이름 (예: 나, 클로드)")
+        Spacer(Modifier.height(6.dp))
+        Input(imgModel, { imgModel = it; Api.setImageModel(it) }, "이미지 모델 ID")
+        Spacer(Modifier.height(6.dp))
+        val refPick = rememberFilePicker { fname, bytes ->
+            val nm = refName.trim().ifEmpty { fname.substringBeforeLast('.') }
+            genBusy = true; genMsg = null to "만드는 중… (30초~1분쯤 걸려요)"
+            scope.launch {
+                genMsg = runCatching {
+                    val out = Api.image(bytes, SHEET_PROMPT, imgModel.ifBlank { "gemini-2.5-flash-image" })
+                    val n = Chars.import("$nm.png", out, tidy = true, oneBack = true)
+                    if (n > 0) true to "'$nm' 캐릭터를 만들었어요. 마음에 안 들면 지우고 다시 눌러 보세요." else false to "그림은 받았는데 걷기 시트 모양이 아니었어요. 다시 눌러 보세요."
+                }.getOrElse { false to (it.message ?: "실패했어요") }
+                genBusy = false
+            }
+        }
+        Btn(if (genBusy) "만드는 중…" else "레퍼런스 고르고 만들기", filled = true, enabled = !genBusy) { refPick() }
+        Result(genMsg.first, genMsg.second)
+        Label("시트 불러오기")
         SwitchRow("AI 그림 다듬기", "흰 배경을 투명하게 지우고, 큰 그림은 한 칸 48픽셀 도트로 줄여요. 제미니 같은 AI가 만든 시트에 켜세요.", tidy) { tidy = it }
         SwitchRow("뒷모습 하나로", "맨 아랫줄(뒷모습) 가운데 칸을 세 칸 모두에 써요. 뒷모습이 들쭉날쭉할 때.", oneBack) { oneBack = it }
         Btn("zip·PNG 불러오기", filled = true) { pick() }

@@ -232,6 +232,41 @@ object Api {
         }
     }
 
+    // ---------- image generation (Vertex Gemini image model) ----------
+    /** 레퍼런스 그림 + 지시문 → 만든 그림(PNG 등) 바이트. Vertex AI 프로바이더를 씀. */
+    suspend fun image(ref: ByteArray, prompt: String, modelId: String): ByteArray {
+        val p = providers().firstOrNull { it.optString("preset") == "vertex" }
+            ?: throw ApiError("그림 만들기는 Vertex AI 프로바이더가 필요해요. 설정 › API에서 추가해 주세요.")
+        val c = connect(p)
+        val mime = when {
+            ref.size > 3 && ref[0] == 0x89.toByte() && ref[1] == 'P'.code.toByte() -> "image/png"
+            ref.size > 2 && ref[0] == 0xFF.toByte() && ref[1] == 0xD8.toByte() -> "image/jpeg"
+            ref.size > 12 && String(ref, 8, 4, Charsets.US_ASCII) == "WEBP" -> "image/webp"
+            else -> "image/png"
+        }
+        val parts = JSONArray()
+            .put(JSONObject().put("inlineData", JSONObject().put("mimeType", mime).put("data", Base64.encodeToString(ref, Base64.NO_WRAP))))
+            .put(JSONObject().put("text", prompt))
+        fun body(aspect: Boolean) = JSONObject()
+            .put("contents", JSONArray().put(JSONObject().put("role", "user").put("parts", parts)))
+            .put("generationConfig", JSONObject().put("responseModalities", JSONArray().put("TEXT").put("IMAGE"))
+                .also { if (aspect) it.put("imageConfig", JSONObject().put("aspectRatio", "3:4")) })
+        val url = c.base + "/models/${URLEncoder.encode(modelId.trim(), "UTF-8")}:generateContent"
+        val o = JSONObject(try { http("POST", url, c.headers, body(true).toString(), 240_000) } catch (e: ApiError) {
+            // 비율 설정을 모르는 모델이면 빼고 한 번 더
+            if (Regex("imageConfig|aspect", RegexOption.IGNORE_CASE).containsMatchIn(e.message ?: "")) http("POST", url, c.headers, body(false).toString(), 240_000) else throw e
+        })
+        val cand = o.optJSONArray("candidates")?.optJSONObject(0)
+        val ps = cand?.optJSONObject("content")?.optJSONArray("parts") ?: JSONArray()
+        for (i in 0 until ps.length()) {
+            val d = ps.getJSONObject(i).optJSONObject("inlineData") ?: continue
+            return Base64.decode(d.getString("data"), Base64.DEFAULT)
+        }
+        val why = cand?.optString("finishReason")?.takeIf { it.isNotBlank() } ?: o.optJSONObject("promptFeedback")?.optString("blockReason")
+        val said = (0 until ps.length()).joinToString("") { ps.getJSONObject(it).optString("text") }.trim().take(200)
+        throw ApiError("그림을 못 받았어요" + (if (!why.isNullOrBlank()) " (사유: $why)" else "") + (if (said.isNotEmpty()) ": $said" else ""))
+    }
+
     // ---------- connection check / model test ----------
     suspend fun check(pid: String): String {
         val p = provider(pid) ?: throw ApiError("프로바이더가 없어요")
@@ -283,6 +318,8 @@ object Api {
     }
 
     // ---------- model settings (like Nami next: stream, at once, thinking) ----------
+    fun imageModel(): String = root.optString("imageModel", "gemini-2.5-flash-image")
+    fun setImageModel(v: String) { root.put("imageModel", v.trim()); file?.writeText(root.toString()) }
     fun patchModel(id: String, k: String, v: Any?) { model(id)?.let { if (v == null) it.remove(k) else it.put(k, v) }; save() }
     fun stream(m: JSONObject) = m.optBoolean("stream", true)
     fun atOnce(m: JSONObject) = m.optBoolean("atOnce", false)
