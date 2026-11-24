@@ -63,7 +63,8 @@ object MapJson {
     fun eventFull(e: GameEvent): String = e.toJson().put("kind", kind(e)).toString()
 }
 
-class ChatItem(val role: String, val text: String) // user, ai, think, tool, warn, error
+/** turn = which send it belongs to (0 for chats saved before 0.4.2). */
+class ChatItem(val role: String, val text: String, val turn: Long = 0) // user, ai, think, tool, warn, error
 
 /** Turns the AI's JSON answer into changes (one undo step for the whole answer). */
 object Edits {
@@ -232,6 +233,8 @@ class AiChat(private val ctx: Context, private val doc: Doc) {
     private var messages = JSONArray()
     private var note = ""   // problems found after the last edits, sent with the next message
     private val file = Store.chatFile(doc)
+    /** Game state before the last turn's edits (for reroll), null if that turn changed nothing. Declared before init (init sets it). */
+    private var lastBefore: String? = null
 
     init {
         runCatching {
@@ -239,17 +242,79 @@ class AiChat(private val ctx: Context, private val doc: Doc) {
                 val o = JSONObject(file.readText())
                 // version 2 = JSON edits; older chats used tool calls, which this history can't replay
                 if (o.optInt("v") >= 2) { messages = o.optJSONArray("messages") ?: JSONArray(); note = o.optString("note") }
-                o.optJSONArray("items")?.let { a -> for (i in 0 until a.length()) a.getJSONObject(i).let { items.add(ChatItem(it.getString("r"), it.getString("t"))) } }
+                o.optJSONArray("items")?.let { a -> for (i in 0 until a.length()) a.getJSONObject(i).let { items.add(ChatItem(it.getString("r"), it.getString("t"), it.optLong("n"))) } }
+                lastBefore = o.optString("lastBefore").ifBlank { null }
             }
         }
     }
 
     private fun save() = runCatching {
-        val a = JSONArray(); items.forEach { a.put(JSONObject().put("r", it.role).put("t", it.text)) }
-        file.writeText(JSONObject().put("v", 2).put("messages", messages).put("items", a).put("note", note).toString())
+        val a = JSONArray(); items.forEach { a.put(JSONObject().put("r", it.role).put("t", it.text).put("n", it.turn)) }
+        file.writeText(JSONObject().put("v", 2).put("messages", messages).put("items", a).put("note", note)
+            .also { o -> lastBefore?.let { o.put("lastBefore", it) } }.toString())
     }
 
-    fun clear() { items.clear(); messages = JSONArray(); note = ""; save() }
+    fun clear() { items.clear(); messages = JSONArray(); note = ""; lastBefore = null; save() }
+
+    fun lastTurn(): Long? = items.lastOrNull { it.role == "user" }?.turn?.takeIf { it != 0L }
+
+    private fun msgTurn(i: Int) = messages.getJSONObject(i).optLong("turn")
+    private fun removeMessages(keep: (JSONObject) -> Boolean) {
+        val out = JSONArray(); for (i in 0 until messages.length()) messages.getJSONObject(i).let { if (keep(it)) out.put(it) }
+        messages = out
+    }
+
+    /** 지우기 on a user message: the whole turn goes (map changes stay — undo for those). */
+    fun deleteTurn(t: Long) {
+        if (busy || t == 0L) return
+        items.removeAll { it.turn == t }
+        removeMessages { it.optLong("turn") != t }
+        if (lastTurn() == null || t >= (lastTurn() ?: 0)) lastBefore = null
+        save()
+    }
+
+    /** 지우기 on an AI reply: that turn's answer goes, the question stays. */
+    fun deleteAnswer(t: Long) {
+        if (busy || t == 0L) return
+        items.removeAll { it.turn == t && it.role != "user" }
+        removeMessages { it.optLong("turn") != t || isPlainUser(it) }
+        save()
+    }
+
+    /** 편집 on an AI reply: changes what it said (in the chat and in what the AI remembers). */
+    fun editAnswer(index: Int, text: String) {
+        val it0 = items.getOrNull(index) ?: return
+        items[index] = ChatItem(it0.role, text, it0.turn)
+        for (i in 0 until messages.length()) {
+            val m = messages.getJSONObject(i)
+            if (m.optLong("turn") != it0.turn || m.optString("role") != "assistant") continue
+            val c = m.optJSONArray("content")?.optJSONObject(0) ?: continue
+            val o = parse(c.optString("text"))
+            if (o != null && o.has("reply") && o.optString("reply").trim() == it0.text) { o.put("reply", text); c.put("text", o.toString()); m.remove("gparts") }
+            else if (o == null && c.optString("text").trim() == it0.text) { c.put("text", text); m.remove("gparts") }
+        }
+        save()
+    }
+
+    /** 편집 on a user message: like Claude — that turn and everything after it go, then the new text is sent. */
+    suspend fun editAndResend(t: Long, text: String, viewMapId: Int) {
+        if (busy || t == 0L) return
+        items.removeAll { it.turn >= t }
+        removeMessages { it.optLong("turn") < t }
+        lastBefore = null
+        send(text, viewMapId)
+    }
+
+    /** 리롤: the last answer again. Its map changes are undone first (as one undo step). */
+    suspend fun reroll(viewMapId: Int) {
+        val t = lastTurn() ?: return
+        if (busy) return
+        lastBefore?.let { b -> doc.checkpoint(); doc.restore(b); doc.changed() }
+        lastBefore = null
+        items.removeAll { it.turn == t && it.role != "user" }
+        removeMessages { it.optLong("turn") != t || isPlainUser(it) }
+        run(t, viewMapId)
+    }
 
     /** The "reply" so far, pulled out of a JSON answer that is still streaming. */
     private fun replySoFar(raw: String): String {
@@ -288,18 +353,26 @@ class AiChat(private val ctx: Context, private val doc: Doc) {
     suspend fun send(text: String, viewMapId: Int) {
         if (busy) return
         if (Api.current() == null) { items.add(ChatItem("error", "설정 › API에서 프로바이더와 모델을 먼저 추가해 주세요")); return }
+        val turn = System.currentTimeMillis()
+        items.add(ChatItem("user", text, turn))
+        val userText = if (note.isNotBlank()) "[지난 작업 뒤 앱이 찾은 문제]\n$note\n\n$text" else text
+        val built = Prompts.build(doc.p, viewMapId, userText)
+        messages.put(JSONObject().put("role", "user").put("content", built.content).put("mapIdx", built.mapIdx).put("turn", turn))
+        note = ""
+        lastBefore = null
+        run(turn, viewMapId)
+    }
+
+    /** Asks the AI for the turn whose user message is already in the history, and applies its answer. */
+    private suspend fun run(turn: Long, viewMapId: Int) {
+        if (Api.current() == null) { items.add(ChatItem("error", "설정 › API에서 프로바이더와 모델을 먼저 추가해 주세요", turn)); save(); return }
         busy = true
-        items.add(ChatItem("user", text))
         val mark = messages.length()
-        val keepNote = note
         val before = doc.snapshot()
         var edited = false
+        fun add(role: String, text: String) = items.add(ChatItem(role, text, turn))
         try {
-            val userText = if (note.isNotBlank()) "[지난 작업 뒤 앱이 찾은 문제]\n$note\n\n$text" else text
-            val built = Prompts.build(doc.p, viewMapId, userText)
-            val system = built.system.ifBlank { "너는 게임 제작 앱 Nami Maker의 AI 조수다. JSON으로 답하라." }
-            messages.put(JSONObject().put("role", "user").put("content", built.content).put("mapIdx", built.mapIdx))
-            note = ""
+            val system = Prompts.build(doc.p, viewMapId, "").system.ifBlank { "너는 게임 제작 앱 Nami Maker의 AI 조수다. JSON으로 답하라." }
             var opened = 0
             while (true) {
                 live = ""; liveThink = ""
@@ -308,13 +381,13 @@ class AiChat(private val ctx: Context, private val doc: Doc) {
                     onText = { t -> raw.append(t); live = replySoFar(raw.toString()) },
                     onThink = { t -> liveThink += t }), json = true)
                 live = ""; liveThink = ""
-                if (res.reasoning.isNotBlank()) items.add(ChatItem("think", res.reasoning.trim()))
+                if (res.reasoning.isNotBlank()) add("think", res.reasoning.trim())
                 val answer = (0 until res.blocks.length()).map { res.blocks.getJSONObject(it) }
                     .filter { it.optString("type") == "text" }.joinToString("") { it.optString("text") }
                 messages.put(JSONObject().put("role", "assistant").put("content", JSONArray().put(JSONObject().put("type", "text").put("text", answer.ifBlank { "{}" })))
-                    .also { m -> res.raw?.let { m.put("gparts", it) } })
+                    .put("turn", turn).also { m -> res.raw?.let { m.put("gparts", it) } })
                 val o = parse(answer)
-                if (o == null) { if (answer.isNotBlank()) items.add(ChatItem("ai", answer.trim())); break }
+                if (o == null) { if (answer.isNotBlank()) add("ai", answer.trim()); break }
                 val want = opens(o, viewMapId)
                 if (want.isNotEmpty() && opened < 2 && (o.optJSONArray("edits")?.length() ?: 0) == 0) {
                     opened++
@@ -324,33 +397,33 @@ class AiChat(private val ctx: Context, private val doc: Doc) {
                         sb.append(if (e == null) "맵 $mid 이벤트 $eid: 없음\n" else "맵 $mid: " + MapJson.eventFull(e) + "\n")
                     }
                     sb.append("이제 이 내용을 보고 원래 요청대로 답하라.")
-                    items.add(ChatItem("tool", "이벤트 ${want.size}개 열어봄"))
-                    messages.put(JSONObject().put("role", "user").put("content", JSONArray().put(JSONObject().put("type", "text").put("text", sb.toString()))))
+                    add("tool", "이벤트 ${want.size}개 열어봄")
+                    messages.put(JSONObject().put("role", "user").put("content", JSONArray().put(JSONObject().put("type", "text").put("text", sb.toString()))).put("turn", turn))
                     continue
                 }
-                o.optString("reply").trim().takeIf { it.isNotEmpty() }?.let { items.add(ChatItem("ai", it)) }
+                o.optString("reply").trim().takeIf { it.isNotEmpty() }?.let { add("ai", it) }
                 val edits = o.optJSONArray("edits")
                 if (edits != null && edits.length() > 0) {
                     val r = Edits.apply(doc, viewMapId, edits)
                     if (r.done.isNotEmpty()) { edited = true; doc.changed() }
-                    r.done.forEach { items.add(ChatItem("tool", it)) }
-                    r.failed.forEach { items.add(ChatItem("warn", it)) }
+                    r.done.forEach { add("tool", it) }
+                    r.failed.forEach { add("warn", it) }
                     r.focus?.let { onFocusMap(it) }
                     val problems = r.failed.map { "적용 못 함: $it" } + Edits.check(doc.p)
                     if (problems.isNotEmpty()) {
                         note = problems.joinToString("\n")
-                        items.add(ChatItem("warn", "확인할 것: " + problems.joinToString(" / ")))
+                        add("warn", "확인할 것: " + problems.joinToString(" / "))
                     }
                 }
                 break
             }
         } catch (e: Exception) {
             live = ""; liveThink = ""
-            note = keepNote
+            // keep the user's message so 리롤 can try again
             while (messages.length() > mark) messages.remove(messages.length() - 1)
-            items.add(ChatItem("error", "오류: " + (e.message ?: e.javaClass.simpleName)))
+            add("error", "오류: " + (e.message ?: e.javaClass.simpleName))
         }
-        if (edited) doc.pushUndo(before)
+        if (edited) { doc.pushUndo(before); lastBefore = before }
         busy = false
         save()
     }

@@ -338,10 +338,15 @@ object Api {
     }
 
     private suspend fun anthropicTurn(c: Conn, m: JSONObject, system: String, tools: JSONArray?, messages: JSONArray, live: Live): Turn {
+        // role + content only; back-to-back messages of the same role (after a deleted answer) are merged
         val clean = JSONArray()
         for (i in 0 until messages.length()) {
             val o = messages.getJSONObject(i)
-            clean.put(JSONObject().put("role", o.getString("role")).put("content", o.get("content")))
+            val role = o.getString("role")
+            val content = o.optJSONArray("content") ?: JSONArray().put(JSONObject().put("type", "text").put("text", o.optString("content")))
+            val last = if (clean.length() > 0) clean.getJSONObject(clean.length() - 1) else null
+            if (last != null && last.getString("role") == role) { val lc = last.getJSONArray("content"); for (k in 0 until content.length()) lc.put(content.get(k)) }
+            else clean.put(JSONObject().put("role", role).put("content", JSONArray(content.toString())))
         }
         val th = thinking(m)
         var maxTokens = m.optInt("maxTokens", 0).takeIf { it > 0 } ?: 8000

@@ -101,6 +101,7 @@ fun EventEditor(doc: Doc, map: GameMap, ev: GameEvent, onClose: () -> Unit) {
                 }
                 LazyColumn(Modifier.fillMaxSize(), contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp, vertical = 4.dp)) {
                     item {
+                        tick // lazy items skip recomposition unless they read the state that changed
                         Field(name, { name = it }, "이름", Modifier.fillMaxWidth())
                         Spacer(Modifier.padding(6.dp))
                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -114,6 +115,7 @@ fun EventEditor(doc: Doc, map: GameMap, ev: GameEvent, onClose: () -> Unit) {
                         Section("그래픽")
                         LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             items(Sprites.ids) { g ->
+                                tick
                                 val sel = pg.graphic == g
                                 Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(60.dp).clickable { pg.graphic = g; tick++ }) {
                                     Canvas(Modifier.size(52.dp).clip(RoundedCornerShape(10.dp)).background(K.panel)
@@ -146,6 +148,7 @@ fun EventEditor(doc: Doc, map: GameMap, ev: GameEvent, onClose: () -> Unit) {
                     }
                     val lines = mutableListOf<Line>().also { flatten(pg.commands, 0, it) }
                     items(lines.size) { k ->
+                        tick
                         when (val l = lines[k]) {
                             is Line.C -> {
                                 val c = l.list[l.i]

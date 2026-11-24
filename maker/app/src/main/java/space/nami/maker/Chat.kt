@@ -34,6 +34,10 @@ import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.DeleteOutline
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.EditNote
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
@@ -67,6 +71,10 @@ fun ChatPane(chat: AiChat, mapId: Int, modifier: Modifier, onSettings: () -> Uni
     val scope = rememberCoroutineScope()
     var input by remember { mutableStateOf("") }
     val list = rememberLazyListState()
+    val clip = androidx.compose.ui.platform.LocalClipboardManager.current
+    fun copy(t: String) = clip.setText(androidx.compose.ui.text.AnnotatedString(t))
+    var editIdx by remember { mutableStateOf(-1) }
+    var editText by remember { mutableStateOf("") }
     @Suppress("UNUSED_VARIABLE") val apiRev = Api.rev + Prompts.rev
     LaunchedEffect(chat.items.size, chat.busy, chat.live.length / 200, chat.liveThink.length / 200) { if (chat.items.isNotEmpty()) list.animateScrollToItem((list.layoutInfo.totalItemsCount - 1).coerceAtLeast(0)) }
     fun send(t: String) {
@@ -102,13 +110,54 @@ fun ChatPane(chat: AiChat, mapId: Int, modifier: Modifier, onSettings: () -> Uni
                     }
                 }
             }
-            itemsIndexed(chat.items) { _, it ->
-                when (it.role) {
-                    "user" -> Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
-                        Text(it.text, fontSize = 15.sp, color = K.text, modifier = Modifier.widthIn(max = 320.dp)
-                            .clip(RoundedCornerShape(18.dp)).background(K.bubble).padding(horizontal = 14.dp, vertical = 10.dp))
+            itemsIndexed(chat.items) { idx, it ->
+                val last = it.turn != 0L && it.turn == chat.lastTurn()
+                if (editIdx == idx) {
+                    // 편집: user message = send again (later turns go), AI reply = just change the text
+                    Column(Modifier.fillMaxWidth()) {
+                        androidx.compose.material3.OutlinedTextField(editText, { editText = it }, modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(14.dp), textStyle = TextStyle(fontSize = 15.sp, color = K.text),
+                            colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(focusedBorderColor = K.accent, unfocusedBorderColor = K.line))
+                        Row(Modifier.fillMaxWidth().padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)) {
+                            Text("취소", fontSize = 14.sp, color = K.sub, modifier = Modifier.clip(RoundedCornerShape(50)).clickable { editIdx = -1 }.padding(horizontal = 14.dp, vertical = 8.dp))
+                            Text(if (it.role == "user") "다시 보내기" else "저장", fontSize = 14.sp, color = Color.White, fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.clip(RoundedCornerShape(50)).background(K.accent).clickable {
+                                    val t = editText.trim(); val item = it; editIdx = -1
+                                    if (t.isNotEmpty()) {
+                                        if (item.role == "user") scope.launch { chat.editAndResend(item.turn, t, mapId) } else chat.editAnswer(idx, t)
+                                    }
+                                }.padding(horizontal = 14.dp, vertical = 8.dp))
+                        }
+                        if (it.role == "user") Text("이 메시지부터 뒤의 대화는 지워지고 새로 보내요. 맵에 적용된 건 그대로예요(되돌리기로 취소).",
+                            fontSize = 11.sp, color = K.sub, modifier = Modifier.padding(top = 4.dp))
                     }
-                    "ai" -> SelectionContainer { Text(it.text, fontSize = 15.sp, color = K.text, lineHeight = 22.sp, modifier = Modifier.padding(end = 12.dp)) }
+                    return@itemsIndexed
+                }
+                when (it.role) {
+                    "user" -> Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.End) {
+                        SelectionContainer {
+                            Text(it.text, fontSize = 15.sp, color = K.text, modifier = Modifier.widthIn(max = 320.dp)
+                                .clip(RoundedCornerShape(18.dp)).background(K.bubble).padding(horizontal = 14.dp, vertical = 10.dp))
+                        }
+                        Acts(
+                            listOf(Act(Icons.Filled.ContentCopy, "복사") { copy(it.text) }) +
+                                if (it.turn != 0L && !chat.busy) listOf(
+                                    Act(Icons.Filled.Edit, "편집") { editIdx = idx; editText = it.text },
+                                    Act(Icons.Filled.DeleteOutline, "지우기") { chat.deleteTurn(it.turn) },
+                                ) else emptyList()
+                        )
+                    }
+                    "ai" -> Column(Modifier.fillMaxWidth()) {
+                        SelectionContainer { Text(it.text, fontSize = 15.sp, color = K.text, lineHeight = 22.sp, modifier = Modifier.padding(end = 12.dp)) }
+                        Acts(
+                            listOf(Act(Icons.Filled.ContentCopy, "복사") { copy(it.text) }) +
+                                (if (it.turn != 0L && !chat.busy) listOf(
+                                    Act(Icons.Filled.Edit, "편집") { editIdx = idx; editText = it.text },
+                                    Act(Icons.Filled.DeleteOutline, "지우기") { chat.deleteAnswer(it.turn) },
+                                ) else emptyList()) +
+                                (if (last && !chat.busy) listOf(Act(Icons.Filled.Refresh, "리롤") { scope.launch { chat.reroll(mapId) } }) else emptyList())
+                        )
+                    }
                     "think" -> ThinkCard(it.text, live = false)
                     "warn" -> SelectionContainer { Text(it.text, fontSize = 13.sp, color = Color(0xFF8A5A00), lineHeight = 18.sp, modifier = Modifier.clip(RoundedCornerShape(10.dp))
                         .background(Color(0xFFFFF4DC)).padding(horizontal = 12.dp, vertical = 8.dp)) }
@@ -116,8 +165,12 @@ fun ChatPane(chat: AiChat, mapId: Int, modifier: Modifier, onSettings: () -> Uni
                         Icon(Icons.Filled.Build, null, tint = K.sub, modifier = Modifier.size(13.dp))
                         Text("  " + it.text, fontSize = 12.sp, color = K.sub)
                     }
-                    else -> SelectionContainer { Text(it.text, fontSize = 13.sp, color = K.danger, modifier = Modifier.clip(RoundedCornerShape(10.dp))
-                        .background(Color(0xFFFBE9E7)).padding(horizontal = 12.dp, vertical = 8.dp)) }
+                    else -> Column {
+                        SelectionContainer { Text(it.text, fontSize = 13.sp, color = K.danger, modifier = Modifier.clip(RoundedCornerShape(10.dp))
+                            .background(Color(0xFFFBE9E7)).padding(horizontal = 12.dp, vertical = 8.dp)) }
+                        Acts(listOf(Act(Icons.Filled.ContentCopy, "복사") { copy(it.text) }) +
+                            (if (last && !chat.busy) listOf(Act(Icons.Filled.Refresh, "다시 시도") { scope.launch { chat.reroll(mapId) } }) else emptyList()))
+                    }
                 }
             }
             if (chat.busy && chat.liveThink.isNotEmpty()) item { ThinkCard(chat.liveThink, live = true) }
@@ -160,5 +213,19 @@ private fun ThinkCard(text: String, live: Boolean) {
     Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(K.panel).clickable { open = !open }.padding(horizontal = 12.dp, vertical = 8.dp)) {
         Text(if (live) "생각하는 중…" else if (open) "생각 접기" else "생각 보기", fontSize = 12.sp, color = K.sub, fontWeight = FontWeight.SemiBold)
         if (open || live) Text(if (open) text else text.takeLast(240), fontSize = 12.sp, color = K.sub, lineHeight = 17.sp, modifier = Modifier.padding(top = 4.dp))
+    }
+}
+
+private class Act(val icon: androidx.compose.ui.graphics.vector.ImageVector, val label: String, val onClick: () -> Unit)
+
+/** Small buttons under a chat message (복사 · 편집 · 지우기 · 리롤). */
+@Composable
+private fun Acts(acts: List<Act>) {
+    Row(Modifier.padding(top = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+        acts.forEach { a ->
+            Box(Modifier.size(32.dp).clip(CircleShape).clickable(onClick = a.onClick), contentAlignment = Alignment.Center) {
+                Icon(a.icon, a.label, tint = K.sub, modifier = Modifier.size(17.dp))
+            }
+        }
     }
 }
