@@ -418,6 +418,8 @@ private fun ModelPage(mid: String, onBack: () -> Unit) {
                 SwitchRow("한 번에 불러오기", "서버에선 스트리밍으로 받되, 화면에는 끝난 뒤 한 번에 보여줘요. 폰 부하가 줄어요.",
                     Api.atOnce(m), enabled = Api.stream(m)) { Api.patchModel(mid, "atOnce", it) }
                 Hint("스트리밍을 끄면 한 번에 받기(답이 다 만들어질 때까지 기다렸다가 받음)예요.")
+                if (gemini) SwitchRow("JSON 강제", "답을 꼭 JSON 형식으로만 받아요. 평소엔 꺼 두고, 이 모델이 형식을 자꾸 틀릴 때만 켜세요. 프리필을 쓰면 켜 둬도 꺼져요.",
+                    Api.jsonMode(m)) { Api.patchModel(mid, "jsonMode", it) }
                 SwitchRow("추론 (thinking)", if (gemini) "Gemini thinkingConfig — 2.x는 토큰 예산, 3 이상은 강도(레벨)" else "Claude thinking — 토큰 예산",
                     th.optBoolean("enabled")) { Api.patchThinking(mid, "enabled", it) }
                 if (th.optBoolean("enabled")) {
@@ -534,7 +536,7 @@ private fun BlockPage(pid: String, bid: String, onBack: () -> Unit) {
                 SwitchRow("켜기", "끄면 이 블록은 보내지 않아요.", b.optBoolean("enabled", true)) { Prompts.patchBlock(pid, bid, "enabled", it) }
                 Label("이름")
                 Input(name, { name = it; Prompts.patchBlock(pid, bid, "name", it) }, "블록 이름")
-                if (type == "prefill") Hint("AI 답의 첫머리로 들어가요. 블록 순서와 상관없이 맨 끝(AI 차례)에 붙어요. 프리필을 쓰면 제미니의 JSON 강제 모드는 꺼져요. 클로드는 추론(thinking)을 켜면 프리필을 받지 않아요.")
+                if (type == "prefill") Hint("AI 답의 첫머리로 들어가요. 블록 순서와 상관없이 맨 끝(AI 차례)에 붙어요. 프리필을 쓰면 모델 설정의 JSON 강제가 켜져 있어도 꺼져요. 클로드는 추론(thinking)을 켜면 프리필을 받지 않아요.")
                 else {
                 Label("어디에 넣을까")
                 Seg(listOf("시스템 프롬프트", "사용자 메시지"), if (b.optString("role") == "user") 1 else 0) { Prompts.patchBlock(pid, bid, "role", if (it == 1) "user" else "system") }

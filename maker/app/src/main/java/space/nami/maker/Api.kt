@@ -323,6 +323,8 @@ object Api {
     fun patchModel(id: String, k: String, v: Any?) { model(id)?.let { if (v == null) it.remove(k) else it.put(k, v) }; save() }
     fun stream(m: JSONObject) = m.optBoolean("stream", true)
     fun atOnce(m: JSONObject) = m.optBoolean("atOnce", false)
+    /** 제미니 JSON 강제(responseMimeType). 기본 꺼짐 — next처럼 프롬프트로만 JSON을 받음. */
+    fun jsonMode(m: JSONObject) = m.optBoolean("jsonMode", false)
     fun thinking(m: JSONObject): JSONObject = m.optJSONObject("thinking") ?: JSONObject()
     fun patchThinking(id: String, k: String, v: Any?) {
         val m = model(id) ?: return

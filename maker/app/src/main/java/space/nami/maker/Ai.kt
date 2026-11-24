@@ -452,7 +452,7 @@ class AiChat(private val ctx: Context, val doc: Doc) {
                 if (prefill.isNotEmpty()) out.put(JSONObject().put("role", "assistant").put("content", JSONArray().put(JSONObject().put("type", "text").put("text", prefill))))
                 val res = Api.turn(system, null, out, Api.Live(
                     onText = { t -> raw.append(t); live = replySoFar(raw.toString()) },
-                    onThink = { t -> liveThink += t }), json = prefill.isEmpty())
+                    onThink = { t -> liveThink += t }), json = prefill.isEmpty() && Api.current()?.let { Api.jsonMode(it) } == true)
                 live = ""; liveThink = ""
                 if (res.reasoning.isNotBlank()) add("think", res.reasoning.trim())
                 val answer = prefill + (0 until res.blocks.length()).map { res.blocks.getJSONObject(it) }
