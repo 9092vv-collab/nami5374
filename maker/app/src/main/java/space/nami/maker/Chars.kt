@@ -59,6 +59,16 @@ object Chars {
         return n
     }
 
+    /** AI에 보낼 그림이 크면(1.5MB 넘음) 긴 변 1536픽셀로 줄여 보냄. 요청이 무거워지거나 한도(파일당 7MB)에 걸리지 않게. */
+    fun shrinkRef(bytes: ByteArray, maxSide: Int = 1536): ByteArray {
+        if (bytes.size < 1_500_000) return bytes
+        val b = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return bytes
+        val m = maxOf(b.width, b.height)
+        if (m <= maxSide) return bytes
+        val k = maxSide.toFloat() / m
+        return runCatching { png(Bitmap.createScaledBitmap(b, (b.width * k).toInt().coerceAtLeast(1), (b.height * k).toInt().coerceAtLeast(1), true)) }.getOrDefault(bytes)
+    }
+
     private fun png(b: Bitmap): ByteArray = ByteArrayOutputStream().also { b.compress(Bitmap.CompressFormat.PNG, 100, it) }.toByteArray()
 
     /** PNG 한 장을 넣음. 넣은 캐릭터 수(시트 모양이 아니면 0). */
