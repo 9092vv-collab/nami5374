@@ -7,6 +7,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -77,6 +78,7 @@ private fun flatten(list: MutableList<Cmd>, depth: Int, out: MutableList<Line>) 
 fun EventEditor(doc: Doc, map: GameMap, ev: GameEvent, onClose: () -> Unit) {
     remember(ev.id) { doc.checkpoint(); 0 }
     var tick by remember { mutableIntStateOf(0) }
+    var picking by remember { mutableStateOf(false) }
     var page by remember { mutableIntStateOf(0) }
     var name by remember { mutableStateOf(ev.name) }
     var editing by remember { mutableStateOf<Pair<MutableList<Cmd>, Int>?>(null) }
@@ -85,6 +87,7 @@ fun EventEditor(doc: Doc, map: GameMap, ev: GameEvent, onClose: () -> Unit) {
     fun close() { ev.name = name.ifBlank { ev.name }; doc.dropIfSame(); doc.changed(); onClose() }
     if (page >= ev.pages.size) page = ev.pages.size - 1
     val pg = ev.pages[page]
+    if (picking) GraphicPicker(pg.graphic, pg.dir, onPick = { pg.graphic = it; picking = false; tick++ }) { picking = false }
 
     Dialog(onDismissRequest = { close() }, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
         Box(Modifier.fillMaxSize().background(K.bg).safeDrawingPadding().imePadding()) {
@@ -113,18 +116,15 @@ fun EventEditor(doc: Doc, map: GameMap, ev: GameEvent, onClose: () -> Unit) {
                         }
                         Spacer(Modifier.padding(6.dp))
                         Section("그래픽")
-                        LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            items(Sprites.ids) { g ->
-                                tick
-                                val sel = pg.graphic == g
-                                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(60.dp).clickable { pg.graphic = g; tick++ }) {
-                                    Canvas(Modifier.size(52.dp).clip(RoundedCornerShape(10.dp)).background(K.panel)
-                                        .border(if (sel) 2.5.dp else 1.dp, if (sel) K.accent else K.line, RoundedCornerShape(10.dp))) {
-                                        drawIntoCanvas { c -> Art.sprite(c.art(), g, pg.dir, 0f, 0f, size.width) }
-                                    }
-                                    Text(Sprites.name(g), fontSize = 11.sp, color = K.sub, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                }
+                        // 그래픽: 지금 것만 보여 주고, 누르면 검색되는 고르기 창
+                        Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(K.panel).clickable { picking = true }.padding(8.dp),
+                            verticalAlignment = Alignment.CenterVertically) {
+                            tick
+                            Canvas(Modifier.size(52.dp).clip(RoundedCornerShape(10.dp)).background(K.bg)) {
+                                drawIntoCanvas { c -> Art.sprite(c.art(), pg.graphic, pg.dir, 0f, 0f, size.width) }
                             }
+                            Text(Sprites.name(pg.graphic), fontSize = 15.sp, color = K.text, modifier = Modifier.weight(1f).padding(start = 12.dp))
+                            Text("바꾸기 ›", fontSize = 13.sp, color = K.sub)
                         }
                         Spacer(Modifier.padding(4.dp))
                         Section("방향")
@@ -322,4 +322,43 @@ private fun CmdDialog(p: Project, c: Cmd, onDone: () -> Unit, onDelete: () -> Un
             }
         },
     )
+}
+
+/** 그래픽 고르기 창: 이름으로 검색, 격자로 보기. */
+@Composable
+fun GraphicPicker(current: String, dir: Int, onPick: (String) -> Unit, onDismiss: () -> Unit) {
+    var q by remember { mutableStateOf("") }
+    @Suppress("UNUSED_VARIABLE") val crev = Chars.rev
+    val all = Sprites.ids
+    val list = if (q.isBlank()) all else all.filter { Sprites.name(it).contains(q.trim(), ignoreCase = true) || it.contains(q.trim(), ignoreCase = true) }
+    androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss, properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)) {
+        Column(Modifier.fillMaxWidth(0.94f).fillMaxHeight(0.86f).clip(RoundedCornerShape(18.dp)).background(K.bg).padding(14.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("그래픽 고르기", fontSize = 17.sp, color = K.text, modifier = Modifier.weight(1f))
+                Text("${list.size}개", fontSize = 12.sp, color = K.sub)
+            }
+            Spacer(Modifier.padding(4.dp))
+            Field(q, { q = it }, "검색 (예: cat, 고양이, Male)", Modifier.fillMaxWidth())
+            Spacer(Modifier.padding(4.dp))
+            androidx.compose.foundation.lazy.grid.LazyVerticalGrid(
+                columns = androidx.compose.foundation.lazy.grid.GridCells.Adaptive(76.dp), modifier = Modifier.weight(1f),
+                horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                items(list.size) { i ->
+                    val g = list[i]
+                    val sel = g == current
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.clip(RoundedCornerShape(10.dp)).clickable { onPick(g) }.padding(2.dp)) {
+                        Canvas(Modifier.size(60.dp).clip(RoundedCornerShape(10.dp)).background(K.panel)
+                            .border(if (sel) 2.5.dp else 1.dp, if (sel) K.accent else K.line, RoundedCornerShape(10.dp))) {
+                            drawIntoCanvas { c -> Art.sprite(c.art(), g, dir, size.width * 0.1f, size.height * 0.1f, size.width * 0.8f) }
+                        }
+                        Text(Sprites.name(g), fontSize = 11.sp, color = K.sub, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                }
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                androidx.compose.material3.TextButton(onClick = onDismiss) { Text("닫기", color = K.sub) }
+            }
+        }
+    }
 }
