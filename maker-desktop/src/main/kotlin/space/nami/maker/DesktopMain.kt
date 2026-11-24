@@ -26,6 +26,7 @@ object DesktopBack {
 }
 
 fun main() {
+    Plat.desktop = true
     Api.init(DesktopApp.ctx)
     Prompts.init(DesktopApp.ctx)
     application {

@@ -21,6 +21,13 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isShiftPressed
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ArrowUpward
@@ -101,14 +108,14 @@ fun ChatPane(chat: AiChat, mapId: Int, modifier: Modifier, onSettings: () -> Uni
                         Text(it.text, fontSize = 15.sp, color = K.text, modifier = Modifier.widthIn(max = 320.dp)
                             .clip(RoundedCornerShape(18.dp)).background(K.bubble).padding(horizontal = 14.dp, vertical = 10.dp))
                     }
-                    "ai" -> Text(it.text, fontSize = 15.sp, color = K.text, lineHeight = 22.sp, modifier = Modifier.padding(end = 12.dp))
+                    "ai" -> SelectionContainer { Text(it.text, fontSize = 15.sp, color = K.text, lineHeight = 22.sp, modifier = Modifier.padding(end = 12.dp)) }
                     "think" -> ThinkCard(it.text, live = false)
                     "tool" -> Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Filled.Build, null, tint = K.sub, modifier = Modifier.size(13.dp))
                         Text("  " + it.text, fontSize = 12.sp, color = K.sub)
                     }
-                    else -> Text(it.text, fontSize = 13.sp, color = K.danger, modifier = Modifier.clip(RoundedCornerShape(10.dp))
-                        .background(Color(0xFFFBE9E7)).padding(horizontal = 12.dp, vertical = 8.dp))
+                    else -> SelectionContainer { Text(it.text, fontSize = 13.sp, color = K.danger, modifier = Modifier.clip(RoundedCornerShape(10.dp))
+                        .background(Color(0xFFFBE9E7)).padding(horizontal = 12.dp, vertical = 8.dp)) }
                 }
             }
             if (chat.busy && chat.liveThink.isNotEmpty()) item { ThinkCard(chat.liveThink, live = true) }
@@ -127,7 +134,12 @@ fun ChatPane(chat: AiChat, mapId: Int, modifier: Modifier, onSettings: () -> Uni
         ) {
             Box(Modifier.weight(1f).padding(vertical = 6.dp)) {
                 if (input.isEmpty()) Text("AI에게 부탁하기", fontSize = 15.sp, color = K.sub)
-                BasicTextField(input, { input = it }, Modifier.fillMaxWidth().heightIn(max = 140.dp),
+                BasicTextField(input, { input = it }, Modifier.fillMaxWidth().heightIn(max = 140.dp).onPreviewKeyEvent { e ->
+                        // PC: Enter = 보내기, Shift+Enter = 줄바꿈. 한글 조합이 먼저 끝나도록 잠깐 기다렸다가 보냄 (Nami next PC판과 같음)
+                        if (!Plat.desktop || e.key != Key.Enter || e.isShiftPressed) return@onPreviewKeyEvent false
+                        if (e.type == KeyEventType.KeyDown) scope.launch { kotlinx.coroutines.delay(40); send(input) }
+                        true
+                    },
                     textStyle = TextStyle(fontSize = 15.sp, color = K.text), cursorBrush = SolidColor(K.accent))
             }
             val can = input.isNotBlank() && !chat.busy

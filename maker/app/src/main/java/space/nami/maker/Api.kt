@@ -417,7 +417,7 @@ object Api {
             }
         })
         val body = JSONObject()
-            .put("contents", toGemini(messages))
+            .put("contents", toGemini(messages, modern = !isOldGemini(id)))
             .put("systemInstruction", JSONObject().put("parts", JSONArray().put(JSONObject().put("text", system))))
             .put("tools", JSONArray().put(JSONObject().put("functionDeclarations", decl)))
             .put("generationConfig", gc)
@@ -487,7 +487,12 @@ object Api {
         return o
     }
 
-    private fun toGemini(messages: JSONArray): JSONArray {
+    /**
+     * modern (Gemini 3+): function calls need a thought signature — turns we didn't get from Gemini (no gparts) get the
+     * documented placeholder; tool-result pictures go inside functionResponse.parts. Older models: pictures in tool
+     * results are left out (mixing them next to functionResponse can be refused with 400).
+     */
+    private fun toGemini(messages: JSONArray, modern: Boolean): JSONArray {
         val names = mutableMapOf<String, String>()
         val out = mutableListOf<Pair<String, JSONArray>>()
         fun add(role: String, parts: JSONArray) {
@@ -505,7 +510,8 @@ object Api {
                     blocks.forEach { b ->
                         when (b.optString("type")) {
                             "text" -> a.put(JSONObject().put("text", b.optString("text")))
-                            "tool_use" -> a.put(JSONObject().put("functionCall", JSONObject().put("name", b.optString("name")).put("args", b.optJSONObject("input") ?: JSONObject())))
+                            "tool_use" -> a.put(JSONObject().put("functionCall", JSONObject().put("name", b.optString("name")).put("args", b.optJSONObject("input") ?: JSONObject()))
+                                .also { if (modern) it.put("thoughtSignature", "skip_thought_signature_validator") })
                         }
                     }
                 }
@@ -518,13 +524,24 @@ object Api {
                         "image" -> images.put(inline(b))
                         "tool_result" -> {
                             val rc = b.optJSONArray("content") ?: JSONArray()
-                            val txt = StringBuilder()
+                            val txt = StringBuilder(); val pics = JSONArray()
                             for (k in 0 until rc.length()) {
                                 val x = rc.getJSONObject(k)
-                                if (x.optString("type") == "image") images.put(inline(x)) else txt.append(x.optString("text"))
+                                if (x.optString("type") == "image") pics.put(inline(x)) else txt.append(x.optString("text"))
                             }
+                            if (pics.length() > 0 && !modern) txt.append("\n(그림은 이 모델에 보낼 수 없어 뺐어요. 글자 지도를 보세요)")
                             val resp = JSONObject().put(if (b.optBoolean("is_error")) "error" else "result", txt.toString())
-                            parts.put(JSONObject().put("functionResponse", JSONObject().put("name", names[b.optString("tool_use_id")] ?: "tool").put("response", resp)))
+                            val fr = JSONObject().put("name", names[b.optString("tool_use_id")] ?: "tool").put("response", resp)
+                            if (pics.length() > 0 && modern) {
+                                // multimodal function response: each picture gets a name and the response points at it
+                                for (k in 0 until pics.length()) {
+                                    val nm = "shot_${b.optString("tool_use_id").takeLast(8)}_$k.png"
+                                    pics.getJSONObject(k).getJSONObject("inlineData").put("displayName", nm)
+                                    resp.put(if (k == 0) "image" else "image$k", JSONObject().put("\$ref", nm))
+                                }
+                                fr.put("parts", pics)
+                            }
+                            parts.put(JSONObject().put("functionResponse", fr))
                         }
                     }
                 }

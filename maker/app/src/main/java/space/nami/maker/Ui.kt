@@ -25,6 +25,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
+/** Set by the PC build's main(). */
+object Plat { var desktop = false }
+
 // Claude-like warm palette
 object K {
     val bg = Color(0xFFFAF9F5)
