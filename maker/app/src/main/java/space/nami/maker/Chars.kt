@@ -71,28 +71,105 @@ object Chars {
 
     private fun png(b: Bitmap): ByteArray = ByteArrayOutputStream().also { b.compress(Bitmap.CompressFormat.PNG, 100, it) }.toByteArray()
 
-    /** PNG 한 장을 넣음. 넣은 캐릭터 수(시트 모양이 아니면 0). */
+    private class Cell(val x: Int, val y: Int)
+
+    /** PNG 한 장을 넣음. 넣은 캐릭터 수(시트 모양이 아니면 0). 빈 캐릭터 칸은 건너뜀. */
     fun addPng(name: String, bytes: ByteArray, tidy: Boolean = false, oneBack: Boolean = false): Int {
         val d = dir ?: return 0
         val b = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return 0
         val base = name.substringAfterLast('/').substringAfterLast('\\').substringBeforeLast('.').removePrefix("!").removePrefix("$")
         val w = b.width; val h = b.height
-        if (w % 12 == 0 && h % 8 == 0 && w * 2 == h * 3 && !name.substringAfterLast('/').startsWith("$") && w >= 12 * 16) {
-            // 8명 시트: 4 × 2 칸
-            val cw = w / 4; val ch = h / 2
-            for (k in 0 until 8) {
-                val part = Bitmap.createBitmap(b, (k % 4) * cw, (k / 4) * ch, cw, ch)
-                File(d, unique("$base ${k + 1}") + ".png").writeBytes(png(part))
-            }
-            return 8
-        }
         if (w < 24 || h < 32) return 0
-        if ((w % 3 != 0 || h % 4 != 0) && !tidy) return 0
-        val r = (w / 3f) / (h / 4f)
-        if (r < 0.5f || r > 2f) return 0
-        val out = if (tidy || oneBack) png(process(b, tidy, oneBack)) else bytes
-        File(d, unique(base) + ".png").writeBytes(out)
-        return 1
+        val px = IntArray(w * h)
+        b.getPixels(px, 0, w, 0, 0, w, h)
+        // 배경이 칠해져 있으면(투명이 아니면) 늘 지움 — AI가 체크무늬를 그려 넣은 경우 포함
+        if (tidy || !borderClear(px, w, h)) clearBackground(px, w, h)
+        val sheets = ArrayList<Triple<List<Cell>, Int, Int>>() // 칸 12개(왼쪽 위 모서리), 칸 너비, 칸 높이
+        val box = contentBox(px, w, h) ?: return 0
+        val fills = (box[2] - box[0]) >= w * 0.7f && (box[3] - box[1]) >= h * 0.7f
+        if (w % 12 == 0 && h % 8 == 0 && w * 2 == h * 3 && !name.substringAfterLast('/').startsWith("$") && w >= 12 * 16) {
+            // 8명 시트: 4 × 2 칸 (비어 있는 자리는 빼고)
+            val cw = w / 12; val ch = h / 8
+            for (k in 0 until 8) sheets.add(Triple(List(12) { i -> Cell((k % 4) * 3 * cw + (i % 3) * cw, (k / 4) * 4 * ch + (i / 3) * ch) }, cw, ch))
+        } else if (w % 3 == 0 && h % 4 == 0 && fills) {
+            val cw = w / 3; val ch = h / 4
+            sheets.add(Triple(List(12) { i -> Cell((i % 3) * cw, (i / 3) * ch) }, cw, ch))
+        } else {
+            // 큰 그림 안에 캐릭터만 있는 경우(여백·워터마크): 그림이 있는 열·줄 묶음을 찾아 칸을 정함
+            fun ok(c: List<Pair<Int, Int>>, k: Int) = c.size >= k && c.size % k == 0
+            var cols = bands(px, w, h, true, false); if (!ok(cols, 3)) cols = bands(px, w, h, true, true)
+            var rows = bands(px, w, h, false, false); if (!ok(rows, 4)) rows = bands(px, w, h, false, true)
+            if (cols.size >= 3 && rows.size >= 4 && cols.size % 3 == 0 && rows.size % 4 == 0) {
+                for (gr in 0 until rows.size / 4) for (gc in 0 until cols.size / 3) {
+                    val cs = cols.subList(gc * 3, gc * 3 + 3); val rs = rows.subList(gr * 4, gr * 4 + 4)
+                    val cx = cs.map { (it.first + it.second) / 2 }
+                    val maxW = cs.maxOf { it.second - it.first }; val maxH = rs.maxOf { it.second - it.first }
+                    val cw = maxOf((cx[2] - cx[0]) / 2, maxW + 2)
+                    val ch = maxOf((rs[3].second - rs[0].second) / 3, maxH + 2)
+                    val pad = (ch - maxH) / 2
+                    sheets.add(Triple(List(12) { i -> Cell(cx[i % 3] - cw / 2, rs[i / 3].second + pad - ch) }, cw, ch))
+                }
+            } else if (tidy) {
+                val r = (w / 3f) / (h / 4f)
+                if (r < 0.5f || r > 2f) return 0
+                val cw = w / 3; val ch = h / 4
+                sheets.add(Triple(List(12) { i -> Cell((i % 3) * cw, (i / 3) * ch) }, cw, ch))
+            } else return 0
+        }
+        var n = 0
+        val many = sheets.size > 1
+        sheets.forEachIndexed { k, (cells, cw, ch) ->
+            if (cells.none { c -> filled(px, w, h, c.x, c.y, cw, ch) }) return@forEachIndexed
+            val nm = if (many) "$base ${k + 1}" else base
+            File(d, unique(nm) + ".png").writeBytes(png(build(px, w, h, cells, cw, ch, oneBack)))
+            n++
+        }
+        return n
+    }
+
+    private fun borderClear(px: IntArray, w: Int, h: Int): Boolean {
+        var t = 0; var all = 0
+        fun c(i: Int) { all++; if ((px[i] ushr 24) < 128) t++ }
+        for (x in 0 until w) { c(x); c((h - 1) * w + x) }
+        for (y in 0 until h) { c(y * w); c(y * w + w - 1) }
+        return t * 10 >= all * 9
+    }
+
+    private fun contentBox(px: IntArray, w: Int, h: Int): IntArray? {
+        var x0 = w; var y0 = h; var x1 = -1; var y1 = -1
+        for (y in 0 until h) for (x in 0 until w) if ((px[y * w + x] ushr 24) >= 128) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y }
+        return if (x1 < 0) null else intArrayOf(x0, y0, x1 + 1, y1 + 1)
+    }
+
+    /** 그림이 있는 열(또는 줄) 묶음. 조각(워터마크 등)은 버리고, merge면 작은 틈을 이어 붙임. */
+    private fun bands(px: IntArray, w: Int, h: Int, vertical: Boolean, merge: Boolean): List<Pair<Int, Int>> {
+        val n = if (vertical) w else h
+        val mass = IntArray(n)
+        for (y in 0 until h) for (x in 0 until w) if ((px[y * w + x] ushr 24) >= 128) mass[if (vertical) x else y]++
+        val raw = ArrayList<IntArray>() // start, end, mass
+        var s = -1; var m = 0
+        for (i in 0..n) {
+            val on = i < n && mass[i] > 0
+            if (on) { if (s < 0) { s = i; m = 0 }; m += mass[i] }
+            else if (s >= 0) { raw.add(intArrayOf(s, i, m)); s = -1 }
+        }
+        if (raw.isEmpty()) return emptyList()
+        val big = raw.maxOf { it[2] }
+        val keep = raw.filter { it[2] * 8 >= big }
+        if (keep.isEmpty()) return emptyList()
+        val med = keep.map { it[1] - it[0] }.sorted()[keep.size / 2]
+        val out = ArrayList<IntArray>()
+        for (r in keep) {
+            val last = out.lastOrNull()
+            if (merge && last != null && r[0] - last[1] < med / 4) { last[1] = r[1]; last[2] += r[2] } else out.add(r.copyOf())
+        }
+        return out.map { it[0] to it[1] }
+    }
+
+    private fun filled(px: IntArray, w: Int, h: Int, x0: Int, y0: Int, cw: Int, ch: Int): Boolean {
+        var c = 0
+        for (y in maxOf(0, y0) until minOf(h, y0 + ch)) for (x in maxOf(0, x0) until minOf(w, x0 + cw)) if ((px[y * w + x] ushr 24) >= 128) c++
+        return c * 200 > cw * ch
     }
 
     /** zip(받은 그대로) 또는 PNG. 넣은 캐릭터 수. */
@@ -112,40 +189,33 @@ object Chars {
     }
 
     /**
-     * AI 시트 다듬기: 가장자리와 이어진 배경색을 투명하게, 칸이 64픽셀보다 크면 48픽셀 도트로(구역마다 가장 많은 색),
+     * 칸 12개를 모아 시트 한 장으로. 칸이 64픽셀보다 크면 48픽셀 도트로(구역마다 가장 많은 색),
      * oneBack이면 뒷모습 줄을 가운데 칸 하나로.
      */
-    private fun process(b: Bitmap, tidy: Boolean, oneBack: Boolean): Bitmap {
-        val w = b.width; val h = b.height
-        val px = IntArray(w * h)
-        b.getPixels(px, 0, w, 0, 0, w, h)
-        if (tidy) clearBackground(px, w, h)
-        val cw = w / 3; val ch = h / 4
-        val tw = if (tidy && cw > 64) 48 else cw
+    private fun build(px: IntArray, w: Int, h: Int, cells: List<Cell>, cw: Int, ch: Int, oneBack: Boolean): Bitmap {
+        fun at(x: Int, y: Int) = if (x in 0 until w && y in 0 until h) px[y * w + x] else 0
+        val tw = if (cw > 64) 48 else cw
         val th = maxOf(1, Math.round(ch * tw / cw.toFloat()))
         val ow = tw * 3; val oh = th * 4
         val out = IntArray(ow * oh)
         val cnt = HashMap<Int, Int>()
         for (row in 0 until 4) for (col in 0 until 3) {
             val sc = if (oneBack && row == 3) 1 else col
-            val sx0 = sc * cw; val sy0 = row * ch
+            val cell = cells[row * 3 + sc]
+            val sx0 = cell.x; val sy0 = cell.y
             for (ty in 0 until th) for (tx in 0 until tw) {
                 val v: Int
-                if (tw == cw && th == ch) v = px[(sy0 + ty) * w + sx0 + tx]
+                if (tw == cw && th == ch) v = at(sx0 + tx, sy0 + ty)
                 else {
                     val x0 = sx0 + tx * cw / tw; val x1 = maxOf(x0 + 1, sx0 + (tx + 1) * cw / tw)
                     val y0 = sy0 + ty * ch / th; val y1 = maxOf(y0 + 1, sy0 + (ty + 1) * ch / th)
                     cnt.clear(); var clear = 0; var all = 0
                     for (yy in y0 until y1) for (xx in x0 until x1) {
-                        val c = px[yy * w + xx]; all++
+                        val c = at(xx, yy); all++
                         if ((c ushr 24) < 128) clear++
                         else { val q = (c and 0xF0F0F0) or (0xFF shl 24); cnt[q] = (cnt[q] ?: 0) + 1 }
                     }
-                    v = if (clear * 2 > all || cnt.isEmpty()) 0 else {
-                        // 가장 많은 색(양자화) 그대로 쓰되 원래 색에 가깝게: 그 색 묶음의 첫 픽셀 대신 양자화 값 + 8
-                        val q = cnt.maxByOrNull { it.value }!!.key
-                        q or 0x080808
-                    }
+                    v = if (clear * 2 > all || cnt.isEmpty()) 0 else cnt.maxByOrNull { it.value }!!.key or 0x080808
                 }
                 out[(row * th + ty) * ow + col * tw + tx] = v
             }
