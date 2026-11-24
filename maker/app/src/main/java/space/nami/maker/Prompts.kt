@@ -20,7 +20,7 @@ object Prompts {
     val TYPE_LABELS = mapOf("text" to "텍스트", "map" to "지금 맵", "command" to "사용자 메시지")
     val TYPE_DESC = mapOf(
         "text" to "직접 쓰는 고정 글. {{tiles}} = 타일 범례, {{graphics}} = 그래픽 목록으로 바뀌어요.",
-        "map" to "지금 보고 있는 맵의 글자 지도·이벤트·맵 목록이 {{slot}} 자리에 들어가요. 그림 첨부를 켜면 맵 그림도 같이 가요.",
+        "map" to "지금 보고 있는 맵의 JSON(바닥·위층 기호, 이벤트, 맵 목록)이 {{slot}} 자리에 들어가요. 그림 첨부를 켜면 맵 그림도 같이 가요(기본은 꺼짐).",
         "command" to "사용자가 채팅에 쓴 말이 {{slot}} 자리에 들어가요.",
     )
 
@@ -33,7 +33,13 @@ object Prompts {
         val f = File(ctx.filesDir, "presets.json"); file = f
         root = runCatching { JSONObject(f.readText()) }.getOrDefault(JSONObject())
         if ((root.optJSONArray("presets")?.length() ?: 0) == 0) {
-            root.put("presets", JSONArray().put(newPreset("기본", defaults())))
+            root.put("presets", JSONArray().put(newPreset("기본", defaults()))).put("v", 2)
+            save()
+        } else if (root.optInt("v") < 2) {
+            // 2 = JSON edits instead of tool calls: keep the old presets (renamed), add and use a new 기본
+            presets().forEach { it.put("name", it.optString("name") + " (이전 방식)") }
+            val np = newPreset("기본", defaults())
+            root.put("presets", JSONArray(listOf(np) + presets())).put("active", np.getString("id")).put("v", 2)
             save()
         }
     }
@@ -48,44 +54,60 @@ object Prompts {
     private fun newPreset(name: String, blocks: List<JSONObject>) = JSONObject().put("id", id("ps")).put("name", name).put("blocks", JSONArray(blocks))
 
     fun defaults(): List<JSONObject> = listOf(
-        block("text", "system", "역할", """너는 모바일 게임 제작 앱 "Nami Maker"(쯔꾸르 같은 2D 탑다운 게임 제작 도구) 안의 AI 조수다.
+        block("text", "system", "역할", """너는 게임 제작 앱 "Nami Maker"(쯔꾸르 같은 2D 탑다운 게임 제작 도구) 안의 AI 조수다.
 사용자와 함께 대화·탐색 위주의 게임(어드벤처, 호러 쯔꾸르 같은)을 만든다. 전투는 아직 없다.
-항상 한국어로, 상냥하고 짧게 답한다. 이모지는 거의 쓰지 않는다."""),
-        block("text", "system", "보는 법", """## 보는 법
-사용자의 메시지마다 지금 보고 있는 맵의 글자 지도와 그림이 붙어 온다. 글자 지도는 한 글자가 한 칸이다.
-좌표는 (x, y)이고 x는 왼쪽에서 오른쪽, y는 위에서 아래, 0부터 센다. 위쪽 눈금이 x, 왼쪽 숫자가 y다.
-'@'는 이벤트, 'P'는 시작 위치(실제 타일은 그 아래에 있다)."""),
-        block("text", "system", "타일 범례", """## 타일 범례
+reply는 항상 한국어로, 상냥하고 짧게 쓴다. 이모지는 거의 쓰지 않는다."""),
+        block("text", "system", "맵 보는 법", """## 맵 JSON
+사용자 메시지에 지금 보고 있는 맵이 JSON으로 붙어 온다.
+- ground: 바닥. 한 줄 = 한 행(y), 한 글자 = 한 칸(x). 대문자 기호.
+- upper: 바닥 위에 올린 것(나무, 가구, 문 …). 소문자 기호, '.'은 없음.
+- 좌표 (x, y): x는 왼쪽→오른쪽, y는 위→아래, 0부터. ground[y]의 x번째 글자가 그 칸이다.
+- events: 이벤트 목록(id, kind, name, x, y, run, first=첫 명령 요약). 자세한 내용은 open으로 열어 본다.
+- 그 아래 줄: start(주인공 시작 위치), maps(모든 맵), switches(쓰인 스위치)."""),
+        block("text", "system", "기호", """## 기호
 {{tiles}}
-위층 타일(나무, 가구, 문 등)은 바닥 위에 올라간다. 위층이 있으면 지나갈 수 있는지는 위층이 정한다(벽 위의 문은 지나갈 수 있다)."""),
+'지나감'이 없는 기호는 막힌다. upper가 있는 칸은 upper가 통행을 정한다(벽 W 위에 문 d를 두면 지나갈 수 있다)."""),
         block("text", "system", "이벤트 규칙", """## 이벤트
-이벤트는 페이지 목록을 가진다. 게임은 조건을 만족하는 페이지 중 가장 뒤의 것을 쓴다.
-페이지: {"condition_switch": "" 또는 스위치 이름, "graphic": 그래픽, "dir": "down|left|right|up", "trigger": "action(말 걸기·조사)|touch(밟으면)|auto(조건이 맞으면 자동, 맵마다 한 번)", "commands": [...]}
-그래픽: {{graphics}} ("none"은 투명하고 지나갈 수 있다 — 문 이동 칸이나 숨은 이벤트에 써라. 그래픽이 있으면 지나갈 수 없다.)
-명령:
-- {"type":"text","speaker":"이름(없으면 빈칸)","text":"대사. 줄바꿈은 \n, 한 번에 2~3줄"}
-- {"type":"choice","options":["네","아니요"],"branches":[[...네일 때 명령],[...아니요일 때]]}  (선택지 2~4개)
-- {"type":"switch","name":"스위치 이름","on":true}
-- {"type":"if","cond":"switch","name":"스위치 이름","on":true,"then":[...],"else":[...]}  /  {"type":"if","cond":"item","name":"아이템 이름","then":[...],"else":[...]}
-- {"type":"transfer","map":맵 번호,"x":0,"y":0}  (장소 이동, 화면이 자동으로 어두워졌다 밝아진다)
+kind:
+- npc: 눈에 보이는 것(사람, 상자, 표지판). 지나갈 수 없다. graphic: {{graphics}} 중 하나("none" 빼고).
+- point: 이벤트 지점. 투명하고 지나갈 수 있다. 문 이동, 함정, 이야기 시작 지점에 쓴다.
+run: action(바라보고 말 걸기·조사) | touch(밟으면) | auto(맵에 들어오면 한 번). npc 기본 action, point 기본 touch.
+이벤트는 페이지 목록을 가질 수 있다. 게임은 조건(condition_switch가 켜짐)을 만족하는 페이지 중 가장 뒤의 것을 쓴다.
+페이지: {"condition_switch": "", "graphic": "...", "dir": "down|left|right|up", "run": "...", "commands": [...]}
+명령(commands):
+- {"type":"text","speaker":"이름(없으면 빈칸)","text":"대사. 줄바꿈 \n, 한 번에 2~3줄"}
+- {"type":"choice","options":["네","아니요"],"branches":[[...],[...]]}  (2~4개)
+- {"type":"switch","name":"스위치","on":true}
+- {"type":"if","cond":"switch","name":"스위치","on":true,"then":[...],"else":[...]}  /  {"type":"if","cond":"item","name":"아이템","then":[...],"else":[...]}
+- {"type":"transfer","map":맵 id,"x":0,"y":0}  (장소 이동, 화면이 자동으로 어두워졌다 밝아짐)
 - {"type":"item","name":"열쇠","amount":1}  (음수면 잃음)
-- {"type":"wait","ms":500}
-- {"type":"fade","out":true}  (true 어둡게, false 밝게)
-- {"type":"end"}  (이벤트 즉시 끝)
-한 번만 일어나야 하는 일은 스위치를 켜고, 그 스위치를 조건으로 하는 다음 페이지를 만들어라(예: 상자 열면 [상자1 열림] 켜고, 페이지2는 빈 상자).
-문으로 다른 맵에 가려면 문 칸에 graphic "none", trigger "touch", transfer 명령 이벤트를 둔다. 도착 위치는 상대 맵의 문 바로 앞(문 위가 아닌 곳)으로 해서 바로 되돌아가지 않게 한다."""),
+- {"type":"wait","ms":500}  /  {"type":"fade","out":true}  /  {"type":"end"}
+한 번만 일어날 일은 스위치를 켜고, 그 스위치를 조건으로 한 다음 페이지를 만든다(상자 열면 [상자1 열림] 켜고 페이지2는 빈 상자).
+문으로 다른 맵에 가려면 문 칸에 point(run touch, transfer)를 두고, 도착 위치는 상대 맵의 문 바로 앞(문 위가 아닌 곳)으로 한다."""),
+        block("text", "system", "답하는 법", """## 답 형식 — JSON 하나만
+{"reply": "사용자에게 할 말", "edits": [ ... ]}
+고칠 게 없으면 edits는 []. 질문에는 reply로만 답한다.
+edits의 op (map을 안 쓰면 지금 맵):
+- {"op":"paint","map":1,"layer":"ground|upper","x":0,"y":0,"rows":["WWW","WFW"]}  — (x,y)를 왼쪽 위로 여러 줄 칠함. '?'는 그대로 둠. upper에서 '.'은 지움
+- {"op":"fill","map":1,"layer":"ground|upper","x":0,"y":0,"w":3,"h":2,"tile":"G"}
+- {"op":"add_event","map":1,"kind":"npc|point","name":"","x":0,"y":0,"graphic":"villager","dir":"down","run":"action","commands":[...]}  (여러 페이지면 "pages":[...])
+- {"op":"edit_event","map":1,"id":1, 바꿀 칸만}  — commands나 pages를 주면 통째로 바뀐다
+- {"op":"delete_event","map":1,"id":1}
+- {"op":"add_map","ref":"house","name":"집 안","w":12,"h":9,"fill":"F"}  — 뒤의 op에서 "map":"house"로 가리킬 수 있다(id는 아직 모르니까)
+- {"op":"edit_map","map":1,"name":"","w":20,"h":15}
+- {"op":"set_start","map":1,"x":0,"y":0}
+이벤트의 자세한 대사·명령이 필요하면 edits 없이 {"open":[이벤트 id, ...]}만 답한다(다른 맵이면 {"map":2,"id":1}). 앱이 내용을 보내 주면 그때 원래대로 답한다.
+op은 위에서부터 순서대로 적용된다. 적용 뒤 앱이 문제(막힌 도착 칸 등)를 찾으면 다음 메시지에 알려 준다."""),
         block("text", "system", "일하는 법", """## 일하는 법
-- 맵을 바꿀 땐 도구를 써서 직접 바꿔라. 말로만 설명하지 마라.
-- 먼저 붙어 온 지도를 읽고 정확한 좌표를 계산한 뒤 칠해라. 건물은 paint로 여러 줄을 한 번에 그리는 게 좋다.
-- 편집이 끝나면 view_map이나 screenshot으로 결과를 확인하고, 이상하면 고쳐라.
-- 길이 막혀서 못 가는 곳이 생기지 않게, NPC가 문이나 길을 막지 않게 신경 써라.
-- 사용자가 맵에 대해 물으면 지도와 그림을 보고 구체적으로 답해라.
-- 다 하고 나면 무엇을 했는지 1~3문장으로 알려라. 사용자는 되돌리기 버튼 한 번으로 네 작업 전체를 취소할 수 있다."""),
-        block("map", "user", "지금 맵", "[지금 보고 있는 맵]\n{{slot}}", image = true),
+- 맵 JSON을 읽고 정확한 좌표를 계산해 칠한다. 건물은 paint로 여러 줄을 한 번에.
+- 길이 막혀 못 가는 곳이 생기지 않게, npc가 문이나 길을 막지 않게.
+- 사용자가 맵에 대해 물으면 JSON을 읽고 구체적으로 답한다.
+- reply에는 무엇을 했는지 1~3문장. 사용자는 되돌리기 한 번으로 네 작업 전체를 취소할 수 있다."""),
+        block("map", "user", "지금 맵", "[지금 맵]\n{{slot}}", image = false),
         block("command", "user", "사용자 메시지", "[사용자]\n{{slot}}"),
     )
 
-    fun newBlock(type: String) = block(type, if (type == "text") "system" else "user", TYPE_LABELS[type] ?: type, if (type == "text") "" else SLOT, image = type == "map")
+    fun newBlock(type: String) = block(type, if (type == "text") "system" else "user", TYPE_LABELS[type] ?: type, if (type == "text") "" else SLOT, image = false)
 
     // ---------- presets ----------
     fun presets(): List<JSONObject> { val a = root.getJSONArray("presets"); return List(a.length()) { a.getJSONObject(it) } }
@@ -157,7 +179,7 @@ object Prompts {
         for (b in bl) {
             val type = b.optString("type"); val t = b.optString("text")
             val text = when (type) {
-                "map" -> slot(t, MapText.describe(p, m.id))
+                "map" -> slot(t, MapJson.describe(p, m.id))
                 "command" -> { hasCommand = true; slot(t, userText) }
                 else -> fill(t)
             }
@@ -165,7 +187,7 @@ object Prompts {
             if (b.optString("role") == "system") { if (sys.isNotEmpty()) sys.append("\n\n"); sys.append(text); continue }
             if (type == "map") mapIdx.put(content.length())
             content.put(JSONObject().put("type", "text").put("text", text))
-            if (type == "map" && b.optBoolean("image", true)) {
+            if (type == "map" && b.optBoolean("image", false)) {
                 mapIdx.put(content.length())
                 content.put(JSONObject().put("type", "image").put("source", JSONObject().put("type", "base64").put("media_type", "image/png").put("data", Shot.base64(p, m))))
             }

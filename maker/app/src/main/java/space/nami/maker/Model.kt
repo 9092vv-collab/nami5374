@@ -179,6 +179,9 @@ class GameMap(var id: Int, var name: String, var w: Int, var h: Int) {
         if (Tiles.get(tile).upper) upper[k] = tile else { ground[k] = tile; upper[k] = 0 }
     }
 
+    fun setGround(x: Int, y: Int, tile: Int) { if (inside(x, y) && !Tiles.get(tile).upper) ground[i(x, y)] = tile }
+    fun setUpper(x: Int, y: Int, tile: Int) { if (inside(x, y) && (tile == 0 || Tiles.get(tile).upper)) upper[i(x, y)] = tile }
+
     fun resize(nw: Int, nh: Int, fill: Int = 1) {
         val g = IntArray(nw * nh) { fill }
         val u = IntArray(nw * nh)

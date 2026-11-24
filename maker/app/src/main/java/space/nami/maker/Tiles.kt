@@ -11,31 +11,32 @@ class TileDef(val id: Int, val name: String, val ch: Char, val pass: Boolean, va
 
 object Tiles {
     val list = listOf(
-        TileDef(0, "없음", '%', false, false),
-        TileDef(1, "풀", '.', true, false),
-        TileDef(2, "흙길", ',', true, false),
-        TileDef(3, "돌바닥", '_', true, false),
-        TileDef(4, "나무 바닥", '=', true, false),
-        TileDef(5, "모래", ':', true, false),
-        TileDef(6, "카펫", '+', true, false),
-        TileDef(7, "어두운 바닥", '-', true, false),
-        TileDef(8, "물", '~', false, false),
-        TileDef(9, "벽", '#', false, false),
-        TileDef(10, "창문 벽", 'w', false, false),
-        TileDef(11, "지붕", '^', false, false),
-        TileDef(12, "바위", 'O', false, true),
-        TileDef(13, "나무", 'T', false, true),
-        TileDef(14, "꽃", '*', true, true),
-        TileDef(15, "덤불", '"', false, true),
-        TileDef(16, "문", 'D', true, true),
-        TileDef(17, "탁자", 'n', false, true),
-        TileDef(18, "침대", 'b', false, true),
-        TileDef(19, "책장", 'B', false, true),
+        // ground: capital letters · upper: small letters ('.' = nothing on top in the AI map)
+        TileDef(0, "없음", 'X', false, false),
+        TileDef(1, "풀", 'G', true, false),
+        TileDef(2, "흙길", 'D', true, false),
+        TileDef(3, "돌바닥", 'S', true, false),
+        TileDef(4, "나무 바닥", 'F', true, false),
+        TileDef(5, "모래", 'A', true, false),
+        TileDef(6, "카펫", 'C', true, false),
+        TileDef(7, "어두운 바닥", 'K', true, false),
+        TileDef(8, "물", 'L', false, false),
+        TileDef(9, "벽", 'W', false, false),
+        TileDef(10, "창문 벽", 'N', false, false),
+        TileDef(11, "지붕", 'R', false, false),
+        TileDef(12, "바위", 'o', false, true),
+        TileDef(13, "나무", 't', false, true),
+        TileDef(14, "꽃", 'w', true, true),
+        TileDef(15, "덤불", 'b', false, true),
+        TileDef(16, "문", 'd', true, true),
+        TileDef(17, "탁자", 'e', false, true),
+        TileDef(18, "침대", 'm', false, true),
+        TileDef(19, "책장", 'k', false, true),
         TileDef(20, "울타리", 'f', false, true),
-        TileDef(21, "계단", 'S', true, true),
-        TileDef(22, "묘비", 't', false, true),
+        TileDef(21, "계단", 's', true, true),
+        TileDef(22, "묘비", 'g', false, true),
         TileDef(23, "통", 'x', false, true),
-        TileDef(24, "촛대", 'i', false, true),
+        TileDef(24, "촛대", 'c', false, true),
     )
 
     fun get(id: Int) = list.getOrNull(id) ?: list[0]
@@ -44,8 +45,11 @@ object Tiles {
     /** Upper layer overrides passability (a door on a wall is walkable, a tree on grass isn't). */
     fun passable(ground: Int, upper: Int) = if (upper != 0) get(upper).pass else get(ground).pass
 
-    fun legend(): String = list.joinToString("\n") { t ->
-        "'${t.ch}' ${t.name}" + (if (t.upper) " (위층)" else " (바닥)") + (if (t.pass) "" else ", 못 지나감")
+    /** "[G] 풀 · 지나감" — no "지나감" means blocked. */
+    fun legend(): String {
+        fun line(t: TileDef) = "[${t.ch}] ${t.name}" + if (t.pass) " · 지나감" else ""
+        return "바닥(ground, 대문자):\n" + list.filter { !it.upper }.joinToString("\n") { line(it) } +
+            "\n위층(upper, 소문자, '.' = 없음):\n" + list.filter { it.upper }.joinToString("\n") { line(it) }
     }
 }
 

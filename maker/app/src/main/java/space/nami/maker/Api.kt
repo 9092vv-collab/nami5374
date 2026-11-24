@@ -303,12 +303,12 @@ object Api {
     class Live(val onText: (String) -> Unit = {}, val onThink: (String) -> Unit = {})
 
     /** [messages] use Anthropic-style blocks; assistant turns from Gemini also carry "gparts". */
-    suspend fun turn(system: String, tools: JSONArray, messages: JSONArray, live: Live): Turn {
+    suspend fun turn(system: String, tools: JSONArray?, messages: JSONArray, live: Live, json: Boolean = false): Turn {
         val m = current() ?: throw ApiError("설정 › API에서 프로바이더와 모델을 먼저 추가해 주세요")
         val p = provider(m.optString("providerId")) ?: throw ApiError("모델에 연결된 프로바이더가 없어요")
         val c = connect(p)
         val cb = if (atOnce(m)) Live() else live
-        return if (c.format == "gemini") geminiTurn(c, m, system, tools, messages, cb) else anthropicTurn(c, m, system, tools, messages, cb)
+        return if (c.format == "gemini") geminiTurn(c, m, system, tools, messages, cb, json) else anthropicTurn(c, m, system, tools, messages, cb)
     }
 
     /** POST that reads a server-sent-event stream; onData gets each event's data. */
@@ -337,7 +337,7 @@ object Api {
         } finally { c.disconnect() }
     }
 
-    private suspend fun anthropicTurn(c: Conn, m: JSONObject, system: String, tools: JSONArray, messages: JSONArray, live: Live): Turn {
+    private suspend fun anthropicTurn(c: Conn, m: JSONObject, system: String, tools: JSONArray?, messages: JSONArray, live: Live): Turn {
         val clean = JSONArray()
         for (i in 0 until messages.length()) {
             val o = messages.getJSONObject(i)
@@ -345,7 +345,8 @@ object Api {
         }
         val th = thinking(m)
         var maxTokens = m.optInt("maxTokens", 0).takeIf { it > 0 } ?: 8000
-        val body = JSONObject().put("model", m.optString("modelId")).put("system", system).put("tools", tools).put("messages", clean)
+        val body = JSONObject().put("model", m.optString("modelId")).put("system", system).put("messages", clean)
+        if (tools != null && tools.length() > 0) body.put("tools", tools)
         if (th.optBoolean("enabled")) {
             val budget = maxOf(1024, th.optInt("budget", 0).takeIf { it > 0 } ?: 4000)
             body.put("thinking", JSONObject().put("type", "enabled").put("budget_tokens", budget))
@@ -397,15 +398,16 @@ object Api {
 
     private val BLOCKS = setOf("SAFETY", "PROHIBITED_CONTENT", "BLOCKLIST", "SPII", "IMAGE_SAFETY", "RECITATION", "OTHER")
 
-    private suspend fun geminiTurn(c: Conn, m: JSONObject, system: String, tools: JSONArray, messages: JSONArray, live: Live): Turn {
+    private suspend fun geminiTurn(c: Conn, m: JSONObject, system: String, tools: JSONArray?, messages: JSONArray, live: Live, json: Boolean): Turn {
         val id = m.optString("modelId")
         val decl = JSONArray()
-        for (i in 0 until tools.length()) {
-            val t = tools.getJSONObject(i)
+        for (i in 0 until (tools?.length() ?: 0)) {
+            val t = tools!!.getJSONObject(i)
             decl.put(JSONObject().put("name", t.getString("name")).put("description", t.optString("description"))
                 .put("parameters", gSchema(t.getJSONObject("input_schema"))))
         }
         val gc = JSONObject().put("maxOutputTokens", m.optInt("maxTokens", 0).takeIf { it > 0 } ?: 32768)
+        if (json) gc.put("responseMimeType", "application/json")
         val th = thinking(m)
         if (th.optBoolean("enabled")) gc.put("thinkingConfig", JSONObject().put("includeThoughts", true).also { t ->
             val budget = th.optInt("budget", 0)
@@ -419,8 +421,8 @@ object Api {
         val body = JSONObject()
             .put("contents", toGemini(messages, modern = !isOldGemini(id)))
             .put("systemInstruction", JSONObject().put("parts", JSONArray().put(JSONObject().put("text", system))))
-            .put("tools", JSONArray().put(JSONObject().put("functionDeclarations", decl)))
             .put("generationConfig", gc)
+            .also { if (decl.length() > 0) it.put("tools", JSONArray().put(JSONObject().put("functionDeclarations", decl))) }
             .put("safetySettings", JSONArray().also { a ->
                 listOf("HARM_CATEGORY_HARASSMENT", "HARM_CATEGORY_HATE_SPEECH", "HARM_CATEGORY_SEXUALLY_EXPLICIT", "HARM_CATEGORY_DANGEROUS_CONTENT")
                     .forEach { a.put(JSONObject().put("category", it).put("threshold", "BLOCK_NONE")) }

@@ -8,248 +8,237 @@ import androidx.compose.runtime.setValue
 import org.json.JSONArray
 import org.json.JSONObject
 
-/** The map as text, so the AI can "see" exact positions. */
-object MapText {
-    fun grid(p: Project, m: GameMap): String {
+/**
+ * The map as short JSON for the AI (Nami next 방식): ground/upper rows with one letter per cell
+ * ([G] 풀 …), events by id·kind·position, the start, and the list of maps.
+ */
+object MapJson {
+    private fun q(s: String) = JSONObject.quote(s)
+
+    fun kind(e: GameEvent) = if ((e.pages.firstOrNull()?.graphic ?: "none") == "none") "point" else "npc"
+
+    fun eventBrief(p: Project, e: GameEvent): String {
+        val pg = e.pages.firstOrNull() ?: EventPage()
+        val o = StringBuilder("{\"id\":${e.id},\"kind\":\"${kind(e)}\",\"name\":${q(e.name)},\"x\":${e.x},\"y\":${e.y}")
+        if (kind(e) == "npc") o.append(",\"graphic\":\"${pg.graphic}\"")
+        o.append(",\"run\":\"${pg.trigger}\"")
+        if (e.pages.size > 1) o.append(",\"pages\":${e.pages.size}")
+        val first = pg.commands.firstOrNull()?.summary(p)?.take(40)
+        if (!first.isNullOrBlank()) o.append(",\"first\":${q(first)}")
+        return o.append("}").toString()
+    }
+
+    fun map(p: Project, m: GameMap): String {
         val sb = StringBuilder()
-        val pad = "    "
-        if (m.w > 10) {
-            sb.append(pad); for (x in 0 until m.w) sb.append(if (x % 10 == 0) ((x / 10) % 10).toString() else " "); sb.append('\n')
-        }
-        sb.append(pad); for (x in 0 until m.w) sb.append(x % 10); sb.append('\n')
-        for (y in 0 until m.h) {
-            sb.append(y.toString().padStart(3)).append(' ')
-            for (x in 0 until m.w) {
-                val k = m.i(x, y)
-                val ch = when {
-                    m.eventAt(x, y) != null -> '@'
-                    p.startMap == m.id && p.startX == x && p.startY == y -> 'P'
-                    m.upper[k] != 0 -> Tiles.get(m.upper[k]).ch
-                    else -> Tiles.get(m.ground[k]).ch
+        sb.append("{\"map\":${m.id},\"name\":${q(m.name)},\"w\":${m.w},\"h\":${m.h},\n")
+        fun rows(key: String, upper: Boolean) {
+            sb.append(" \"$key\":[\n")
+            for (y in 0 until m.h) {
+                val r = StringBuilder()
+                for (x in 0 until m.w) {
+                    val k = m.i(x, y)
+                    r.append(if (upper) (if (m.upper[k] == 0) '.' else Tiles.get(m.upper[k]).ch) else Tiles.get(m.ground[k]).ch)
                 }
-                sb.append(ch)
+                sb.append("  \"").append(r).append('"').append(if (y < m.h - 1) ",\n" else "\n")
             }
-            sb.append('\n')
+            sb.append(" ],\n")
         }
+        rows("ground", false); rows("upper", true)
+        sb.append(" \"events\":[")
+        m.events.forEachIndexed { i, e -> sb.append(if (i == 0) "\n  " else ",\n  ").append(eventBrief(p, e)) }
+        sb.append(if (m.events.isEmpty()) "]" else "\n ]").append("}")
         return sb.toString()
     }
 
-    fun eventLine(p: Project, e: GameEvent): String {
-        val pages = e.pages.mapIndexed { i, pg ->
-            val cond = if (pg.condSwitch.isNotBlank()) "조건 [${pg.condSwitch}] 켜짐, " else ""
-            val first = pg.commands.take(2).joinToString(" / ") { it.summary(p) }.take(80)
-            "페이지${i + 1}(${cond}${pg.graphic}, ${pg.trigger}, 명령 ${pg.commands.size}개${if (first.isNotEmpty()) ": $first" else ""})"
-        }
-        return "#${e.id} \"${e.name}\" (${e.x},${e.y}) " + pages.joinToString(" ")
-    }
-
+    /** What goes in the "지금 맵" block. */
     fun describe(p: Project, mapId: Int): String {
         val m = p.map(mapId) ?: p.maps[0]
-        val sb = StringBuilder()
-        sb.append("맵 #${m.id} \"${m.name}\" ${m.w}x${m.h} (x: 왼→오, y: 위→아래, 0부터. @=이벤트, P=시작 위치)\n")
-        sb.append(grid(p, m))
-        sb.append("이벤트:\n")
-        if (m.events.isEmpty()) sb.append(" (없음)\n")
-        m.events.forEach { sb.append(" ").append(eventLine(p, it)).append('\n') }
-        sb.append("시작 위치: 맵 #${p.startMap} (${p.startX},${p.startY})\n")
-        sb.append("모든 맵: " + p.maps.joinToString(", ") { "#${it.id} \"${it.name}\" ${it.w}x${it.h}" } + "\n")
-        val sw = p.switches()
-        sb.append("쓰인 스위치: " + (if (sw.isEmpty()) "없음" else sw.joinToString(", ")))
-        return sb.toString()
+        val maps = p.maps.joinToString(",") { "{\"id\":${it.id},\"name\":${q(it.name)},\"w\":${it.w},\"h\":${it.h}}" }
+        val sw = p.switches().joinToString(",") { q(it) }
+        return map(p, m) + "\n" +
+            "{\"start\":{\"map\":${p.startMap},\"x\":${p.startX},\"y\":${p.startY}},\"maps\":[$maps],\"switches\":[$sw]}"
     }
+
+    /** Full event (pages + commands) for an "open" request. */
+    fun eventFull(e: GameEvent): String = e.toJson().put("kind", kind(e)).toString()
 }
 
-class ToolResult(val text: String, val summary: String, val image: String? = null, val error: Boolean = false, val mapId: Int? = null)
+class ChatItem(val role: String, val text: String) // user, ai, think, tool, warn, error
 
-object Tools {
-    val defs: JSONArray by lazy { JSONArray(DEFS) }
+/** Turns the AI's JSON answer into changes (one undo step for the whole answer). */
+object Edits {
+    class Result(val done: MutableList<String> = mutableListOf(), val failed: MutableList<String> = mutableListOf(), var focus: Int? = null)
 
-    fun run(doc: Doc, name: String, a: JSONObject): ToolResult = try { exec(doc, name, a) } catch (e: Exception) {
-        ToolResult("오류: ${e.message}", "실패: $name", error = true)
+    private fun tile(c: Char, upper: Boolean): Int? {
+        if (upper && c == '.') return 0
+        val t = Tiles.byChar(c) ?: return null
+        return if (t.upper == upper) t.id else null
     }
 
-    private fun mapOf(doc: Doc, a: JSONObject): GameMap =
-        doc.p.map(a.optInt("map_id", -1)) ?: throw IllegalArgumentException("map_id ${a.opt("map_id")} 맵이 없어요")
-
-    private fun tileOf(s: String): Int {
-        val t = s.trim()
-        if (t.length == 1) Tiles.byChar(t[0])?.let { return it.id }
-        Tiles.list.firstOrNull { it.name == t }?.let { return it.id }
-        t.toIntOrNull()?.let { if (it in Tiles.list.indices) return it }
-        throw IllegalArgumentException("모르는 타일: $s")
+    private fun page(o: JSONObject, kind: String, base: EventPage?): EventPage {
+        val pg = base ?: EventPage().also { if (kind == "point") { it.graphic = "none"; it.trigger = "touch" } }
+        if (o.has("graphic")) pg.graphic = o.optString("graphic").let { if (Sprites.ids.contains(it)) it else pg.graphic }
+        if (kind == "point" && !o.has("graphic")) pg.graphic = "none"
+        if (o.has("dir")) pg.dir = DIRS.indexOf(o.optString("dir")).coerceAtLeast(0)
+        (o.optString("run").ifBlank { o.optString("trigger") }).takeIf { it in TRIGGERS }?.let { pg.trigger = it }
+        if (o.has("condition_switch")) pg.condSwitch = o.optString("condition_switch")
+        o.optJSONArray("commands")?.let { pg.commands = Cmd.list(it) }
+        return pg
     }
 
-    private fun pages(v: Any?): MutableList<EventPage>? {
-        val a = when (v) {
-            is JSONArray -> v
-            is String -> runCatching { JSONArray(v.trim()) }.getOrElse { throw IllegalArgumentException("pages JSON을 읽지 못했어요: ${it.message}") }
-            else -> null
-        }
-        if (a == null || a.length() == 0) return null
-        return MutableList(a.length()) { EventPage.from(a.getJSONObject(it)) }
-    }
-
-    private fun exec(doc: Doc, name: String, a: JSONObject): ToolResult {
+    fun apply(doc: Doc, viewMap: Int, edits: JSONArray): Result {
         val p = doc.p
-        when (name) {
-            "view_map" -> { val m = mapOf(doc, a); return ToolResult(MapText.describe(p, m.id), "맵 보기: ${m.name}", mapId = m.id) }
-            "screenshot" -> { val m = mapOf(doc, a); return ToolResult("맵 #${m.id} 그림 (한 칸 32px)", "맵 사진 보기: ${m.name}", image = Shot.base64(p, m), mapId = m.id) }
-            "get_event" -> {
-                val m = mapOf(doc, a); val e = m.event(a.getInt("event_id")) ?: throw IllegalArgumentException("이벤트가 없어요")
-                return ToolResult(e.toJson().toString(1), "이벤트 보기: ${e.name}", mapId = m.id)
-            }
-            "paint" -> {
-                val m = mapOf(doc, a); val x0 = a.getInt("x"); val y0 = a.getInt("y"); val rows = a.getJSONArray("rows")
-                var n = 0; val bad = sortedSetOf<Char>()
-                for (r in 0 until rows.length()) {
-                    val line = rows.getString(r)
-                    for ((c, ch) in line.withIndex()) {
-                        if (ch == '?' || ch == ' ') continue
-                        val t = Tiles.byChar(ch)
-                        if (t == null) { bad.add(ch); continue }
-                        val x = x0 + c; val y = y0 + r
-                        if (!m.inside(x, y)) continue
-                        m.paint(x, y, t.id); n++
+        val r = Result()
+        val refs = mutableMapOf<String, Int>()
+        fun mapOf(o: JSONObject): GameMap? {
+            val v = o.opt("map") ?: return p.map(viewMap)
+            if (v is Number) return p.map(v.toInt())
+            val s = v.toString()
+            refs[s]?.let { return p.map(it) }
+            s.toIntOrNull()?.let { return p.map(it) }
+            return p.maps.firstOrNull { it.name == s }
+        }
+        for (i in 0 until edits.length()) {
+            val o = edits.optJSONObject(i) ?: continue
+            val op = o.optString("op")
+            try {
+                if (op == "add_map") {
+                    val w = o.optInt("w", o.optInt("width", 20)).coerceIn(5, MAX_MAP); val h = o.optInt("h", o.optInt("height", 15)).coerceIn(5, MAX_MAP)
+                    val m = GameMap(p.nextMapId(), o.optString("name", "새 맵"), w, h)
+                    val fill = o.optString("fill", "G").firstOrNull()?.let { tile(it, false) } ?: 1
+                    for (k in m.ground.indices) m.ground[k] = fill
+                    p.maps.add(m)
+                    o.optString("ref").takeIf { it.isNotBlank() }?.let { refs[it] = m.id }
+                    refs[m.name] = m.id
+                    r.done.add("새 맵 #${m.id} ${m.name} (${w}×${h})"); r.focus = m.id
+                    continue
+                }
+                val m = mapOf(o) ?: throw IllegalArgumentException("맵 ${o.opt("map")}이(가) 없어요")
+                when (op) {
+                    "paint" -> {
+                        val upper = o.optString("layer") == "upper"
+                        val x0 = o.getInt("x"); val y0 = o.getInt("y"); val rows = o.getJSONArray("rows")
+                        var n = 0; val bad = sortedSetOf<Char>()
+                        for (ry in 0 until rows.length()) for ((cx, ch) in rows.getString(ry).withIndex()) {
+                            if (ch == '?' || ch == ' ') continue
+                            val t = tile(ch, upper); if (t == null) { bad.add(ch); continue }
+                            val x = x0 + cx; val y = y0 + ry
+                            if (!m.inside(x, y)) continue
+                            if (upper) m.setUpper(x, y, t) else m.setGround(x, y, t); n++
+                        }
+                        r.done.add("${m.name} ${if (upper) "위층" else "바닥"} ${n}칸 칠함")
+                        if (bad.isNotEmpty()) r.failed.add("${if (upper) "위층" else "바닥"}에 쓸 수 없는 기호 무시: ${bad.joinToString("")}")
                     }
+                    "fill" -> {
+                        val upper = o.optString("layer") == "upper"
+                        val c = o.optString("tile").firstOrNull() ?: throw IllegalArgumentException("tile이 없어요")
+                        val t = tile(c, upper) ?: throw IllegalArgumentException("${if (upper) "위층" else "바닥"} 기호가 아니에요: $c")
+                        val x0 = o.getInt("x"); val y0 = o.getInt("y"); var n = 0
+                        for (y in y0 until y0 + o.optInt("h", 1)) for (x in x0 until x0 + o.optInt("w", 1)) if (m.inside(x, y)) {
+                            if (upper) m.setUpper(x, y, t) else m.setGround(x, y, t); n++
+                        }
+                        r.done.add("${m.name} ${if (upper) "위층" else "바닥"} [$c] ${n}칸 채움")
+                    }
+                    "add_event" -> {
+                        val x = o.getInt("x"); val y = o.getInt("y")
+                        if (!m.inside(x, y)) throw IllegalArgumentException("(${x},${y})은 맵 밖이에요")
+                        m.eventAt(x, y)?.let { throw IllegalArgumentException("(${x},${y})에 이미 이벤트 #${it.id}이 있어요") }
+                        val kind = o.optString("kind", "npc")
+                        val e = GameEvent(m.nextEventId(), o.optString("name", if (kind == "point") "이벤트 지점" else "이벤트"), x, y)
+                        val pages = o.optJSONArray("pages")
+                        e.pages = if (pages != null && pages.length() > 0) MutableList(pages.length()) { page(pages.getJSONObject(it), kind, null) }
+                            else mutableListOf(page(o, kind, null))
+                        m.events.add(e)
+                        r.done.add("${if (kind == "point") "이벤트 지점" else "이벤트"} 추가: ${e.name} #${e.id}")
+                    }
+                    "edit_event" -> {
+                        val e = m.event(o.getInt("id")) ?: throw IllegalArgumentException("${m.name}에 이벤트 #${o.opt("id")}이 없어요")
+                        if (o.has("name")) e.name = o.getString("name")
+                        if (o.has("x") || o.has("y")) {
+                            val nx = o.optInt("x", e.x); val ny = o.optInt("y", e.y)
+                            if (!m.inside(nx, ny)) throw IllegalArgumentException("(${nx},${ny})은 맵 밖이에요")
+                            m.eventAt(nx, ny)?.let { if (it !== e) throw IllegalArgumentException("(${nx},${ny})에 이벤트 #${it.id}이 있어요") }
+                            e.x = nx; e.y = ny
+                        }
+                        val kind = o.optString("kind", MapJson.kind(e))
+                        val pages = o.optJSONArray("pages")
+                        if (pages != null && pages.length() > 0) e.pages = MutableList(pages.length()) { page(pages.getJSONObject(it), kind, null) }
+                        else if (listOf("graphic", "dir", "run", "trigger", "condition_switch", "commands", "kind").any { o.has(it) }) page(o, kind, e.pages[0])
+                        r.done.add("이벤트 수정: ${e.name} #${e.id}")
+                    }
+                    "delete_event" -> {
+                        val e = m.event(o.getInt("id")) ?: throw IllegalArgumentException("${m.name}에 이벤트 #${o.opt("id")}이 없어요")
+                        m.events.remove(e); r.done.add("이벤트 삭제: ${e.name}")
+                    }
+                    "edit_map" -> {
+                        if (o.has("name")) m.name = o.getString("name")
+                        if (o.has("w") || o.has("h")) m.resize(o.optInt("w", m.w).coerceIn(5, MAX_MAP), o.optInt("h", m.h).coerceIn(5, MAX_MAP))
+                        r.done.add("맵 설정: ${m.name} ${m.w}×${m.h}")
+                    }
+                    "set_start" -> {
+                        val x = o.getInt("x"); val y = o.getInt("y")
+                        if (!m.inside(x, y)) throw IllegalArgumentException("(${x},${y})은 맵 밖이에요")
+                        p.startMap = m.id; p.startX = x; p.startY = y; r.done.add("시작 위치: ${m.name} ($x,$y)")
+                    }
+                    else -> throw IllegalArgumentException("모르는 op: $op")
                 }
-                doc.changed()
-                val warn = if (bad.isNotEmpty()) " (모르는 글자 무시: ${bad.joinToString("")})" else ""
-                return ToolResult("${n}칸 칠함$warn", "타일 ${n}칸 칠함", mapId = m.id)
-            }
-            "fill_rect" -> {
-                val m = mapOf(doc, a); val x0 = a.getInt("x"); val y0 = a.getInt("y")
-                val w = a.getInt("width"); val h = a.getInt("height"); val ts = a.getString("tile")
-                val clear = ts == "none"; val t = if (clear) 0 else tileOf(ts)
-                var n = 0
-                for (y in y0 until y0 + h) for (x in x0 until x0 + w) if (m.inside(x, y)) {
-                    if (clear) m.upper[m.i(x, y)] = 0 else m.paint(x, y, t); n++
-                }
-                doc.changed()
-                return ToolResult("${n}칸 처리", if (clear) "위층 ${n}칸 지움" else "${Tiles.get(t).name} ${n}칸 채움", mapId = m.id)
-            }
-            "add_event" -> {
-                val m = mapOf(doc, a); val x = a.getInt("x"); val y = a.getInt("y")
-                if (!m.inside(x, y)) throw IllegalArgumentException("맵 밖 좌표예요")
-                m.eventAt(x, y)?.let { throw IllegalArgumentException("(${x},${y})에 이미 이벤트 #${it.id}이 있어요") }
-                val e = GameEvent(m.nextEventId(), a.optString("name", "이벤트"), x, y)
-                pages(a.opt("pages"))?.let { e.pages = it }
-                m.events.add(e); doc.changed()
-                return ToolResult("이벤트 #${e.id} 만듦", "이벤트 추가: ${e.name}", mapId = m.id)
-            }
-            "update_event" -> {
-                val m = mapOf(doc, a); val e = m.event(a.getInt("event_id")) ?: throw IllegalArgumentException("이벤트가 없어요")
-                if (a.has("name")) e.name = a.getString("name")
-                if (a.has("x") || a.has("y")) {
-                    val nx = a.optInt("x", e.x); val ny = a.optInt("y", e.y)
-                    if (!m.inside(nx, ny)) throw IllegalArgumentException("맵 밖 좌표예요")
-                    m.eventAt(nx, ny)?.let { if (it !== e) throw IllegalArgumentException("그 자리에 이벤트 #${it.id}이 있어요") }
-                    e.x = nx; e.y = ny
-                }
-                pages(a.opt("pages"))?.let { e.pages = it }
-                doc.changed()
-                return ToolResult("이벤트 #${e.id} 수정함", "이벤트 수정: ${e.name}", mapId = m.id)
-            }
-            "delete_event" -> {
-                val m = mapOf(doc, a); val e = m.event(a.getInt("event_id")) ?: throw IllegalArgumentException("이벤트가 없어요")
-                m.events.remove(e); doc.changed()
-                return ToolResult("삭제함", "이벤트 삭제: ${e.name}", mapId = m.id)
-            }
-            "create_map" -> {
-                val w = a.getInt("width").coerceIn(5, MAX_MAP); val h = a.getInt("height").coerceIn(5, MAX_MAP)
-                val m = GameMap(p.nextMapId(), a.optString("name", "새 맵"), w, h)
-                val fill = tileOf(a.optString("fill", "."))
-                for (k in m.ground.indices) m.ground[k] = if (Tiles.get(fill).upper) 1 else fill
-                p.maps.add(m); doc.changed()
-                return ToolResult("맵 #${m.id} 만듦 (${w}x${h})", "새 맵: ${m.name}", mapId = m.id)
-            }
-            "edit_map" -> {
-                val m = mapOf(doc, a)
-                if (a.has("name")) m.name = a.getString("name")
-                if (a.has("width") || a.has("height")) m.resize(a.optInt("width", m.w).coerceIn(5, MAX_MAP), a.optInt("height", m.h).coerceIn(5, MAX_MAP))
-                doc.changed()
-                return ToolResult("맵 #${m.id}: ${m.name} ${m.w}x${m.h}", "맵 설정: ${m.name}", mapId = m.id)
-            }
-            "set_start" -> {
-                val m = mapOf(doc, a); val x = a.getInt("x"); val y = a.getInt("y")
-                if (!m.inside(x, y)) throw IllegalArgumentException("맵 밖 좌표예요")
-                p.startMap = m.id; p.startX = x; p.startY = y; doc.changed()
-                return ToolResult("시작 위치 바꿈", "시작 위치: ${m.name} ($x,$y)", mapId = m.id)
+                if (r.focus == null) r.focus = m.id
+            } catch (e: Exception) {
+                r.failed.add("$op: ${e.message}")
             }
         }
-        throw IllegalArgumentException("모르는 도구: $name")
+        return r
     }
 
-    private const val DEFS = """[
-{"name":"view_map","description":"맵을 글자 지도로 다시 본다(좌표 눈금, 이벤트 목록 포함). 편집 후 결과 확인에 써라.","input_schema":{"type":"object","properties":{"map_id":{"type":"integer"}},"required":["map_id"]}},
-{"name":"screenshot","description":"맵을 실제 그림으로 본다(이벤트 그래픽, 시작 위치 포함). 분위기·모양을 눈으로 판단할 때 써라.","input_schema":{"type":"object","properties":{"map_id":{"type":"integer"}},"required":["map_id"]}},
-{"name":"get_event","description":"이벤트 하나의 전체 내용(JSON: 페이지, 명령)을 본다. 수정 전에 꼭 확인.","input_schema":{"type":"object","properties":{"map_id":{"type":"integer"},"event_id":{"type":"integer"}},"required":["map_id","event_id"]}},
-{"name":"paint","description":"(x,y)를 왼쪽 위로 하여 글자 줄들을 타일로 칠한다. 한 줄 = 한 행, 한 글자 = 한 칸. 범례 글자를 쓰고, '?'나 공백은 그대로 둔다. 바닥 타일은 그 칸의 위층을 지우고, 위층 타일은 바닥 위에 올린다. '@'와 'P'는 타일이 아니니 쓰지 마라.","input_schema":{"type":"object","properties":{"map_id":{"type":"integer"},"x":{"type":"integer"},"y":{"type":"integer"},"rows":{"type":"array","items":{"type":"string"}}},"required":["map_id","x","y","rows"]}},
-{"name":"fill_rect","description":"사각형을 한 타일로 채운다. tile은 범례 글자 하나. tile을 \"none\"으로 하면 그 범위의 위층(나무, 가구 등)만 지운다.","input_schema":{"type":"object","properties":{"map_id":{"type":"integer"},"x":{"type":"integer"},"y":{"type":"integer"},"width":{"type":"integer"},"height":{"type":"integer"},"tile":{"type":"string"}},"required":["map_id","x","y","width","height","tile"]}},
-{"name":"add_event","description":"이벤트(NPC, 상자, 문 이동 칸 등)를 만든다. pages를 주면 그 내용으로, 없으면 기본 마을 사람.","input_schema":{"type":"object","properties":{"map_id":{"type":"integer"},"x":{"type":"integer"},"y":{"type":"integer"},"name":{"type":"string"},"pages":{"type":"array","items":{"type":"object"}}},"required":["map_id","x","y","name"]}},
-{"name":"update_event","description":"이벤트의 이름, 위치, 페이지를 바꾼다. pages를 주면 페이지 전체를 교체하니 get_event로 기존 내용을 먼저 보고 필요한 부분만 고쳐서 넣어라.","input_schema":{"type":"object","properties":{"map_id":{"type":"integer"},"event_id":{"type":"integer"},"name":{"type":"string"},"x":{"type":"integer"},"y":{"type":"integer"},"pages":{"type":"array","items":{"type":"object"}}},"required":["map_id","event_id"]}},
-{"name":"delete_event","description":"이벤트를 지운다.","input_schema":{"type":"object","properties":{"map_id":{"type":"integer"},"event_id":{"type":"integer"}},"required":["map_id","event_id"]}},
-{"name":"create_map","description":"새 맵을 만든다(가로·세로 5~64). fill은 바닥 타일 글자.","input_schema":{"type":"object","properties":{"name":{"type":"string"},"width":{"type":"integer"},"height":{"type":"integer"},"fill":{"type":"string"}},"required":["name","width","height"]}},
-{"name":"edit_map","description":"맵 이름이나 크기를 바꾼다. 줄이면 바깥 칸과 이벤트는 사라진다.","input_schema":{"type":"object","properties":{"map_id":{"type":"integer"},"name":{"type":"string"},"width":{"type":"integer"},"height":{"type":"integer"}},"required":["map_id"]}},
-{"name":"set_start","description":"게임 시작 위치(주인공이 처음 서는 곳)를 정한다.","input_schema":{"type":"object","properties":{"map_id":{"type":"integer"},"x":{"type":"integer"},"y":{"type":"integer"}},"required":["map_id","x","y"]}}
-]"""
-
-    fun system(): String = """너는 모바일 게임 제작 앱 "Nami Maker"(쯔꾸르 같은 2D 탑다운 게임 제작 도구) 안의 AI 조수다.
-사용자와 함께 대화·탐색 위주의 게임(어드벤처, 호러 쯔꾸르 같은)을 만든다. 전투는 아직 없다.
-항상 한국어로, 상냥하고 짧게 답한다. 이모지는 거의 쓰지 않는다.
-
-## 보는 법
-사용자의 메시지마다 지금 보고 있는 맵의 글자 지도와 그림이 붙어 온다. 글자 지도는 한 글자가 한 칸이다.
-좌표는 (x, y)이고 x는 왼쪽에서 오른쪽, y는 위에서 아래, 0부터 센다. 위쪽 눈금이 x, 왼쪽 숫자가 y다.
-'@'는 이벤트, 'P'는 시작 위치(실제 타일은 그 아래에 있다).
-
-## 타일 범례
-${Tiles.legend()}
-위층 타일(나무, 가구, 문 등)은 바닥 위에 올라간다. 위층이 있으면 지나갈 수 있는지는 위층이 정한다(벽 위의 문은 지나갈 수 있다).
-
-## 이벤트
-이벤트는 페이지 목록을 가진다. 게임은 조건을 만족하는 페이지 중 가장 뒤의 것을 쓴다.
-페이지: {"condition_switch": "" 또는 스위치 이름, "graphic": 그래픽, "dir": "down|left|right|up", "trigger": "action(말 걸기·조사)|touch(밟으면)|auto(조건이 맞으면 자동, 맵마다 한 번)", "commands": [...]}
-그래픽: ${Sprites.ids.joinToString(", ")} ("none"은 투명하고 지나갈 수 있다 — 문 이동 칸이나 숨은 이벤트에 써라. 그래픽이 있으면 지나갈 수 없다.)
-명령:
-- {"type":"text","speaker":"이름(없으면 빈칸)","text":"대사. 줄바꿈은 \n, 한 번에 2~3줄"}
-- {"type":"choice","options":["네","아니요"],"branches":[[...네일 때 명령],[...아니요일 때]]}  (선택지 2~4개)
-- {"type":"switch","name":"스위치 이름","on":true}
-- {"type":"if","cond":"switch","name":"스위치 이름","on":true,"then":[...],"else":[...]}  /  {"type":"if","cond":"item","name":"아이템 이름","then":[...],"else":[...]}
-- {"type":"transfer","map":맵 번호,"x":0,"y":0}  (장소 이동, 화면이 자동으로 어두워졌다 밝아진다)
-- {"type":"item","name":"열쇠","amount":1}  (음수면 잃음)
-- {"type":"wait","ms":500}
-- {"type":"fade","out":true}  (true 어둡게, false 밝게)
-- {"type":"end"}  (이벤트 즉시 끝)
-한 번만 일어나야 하는 일은 스위치를 켜고, 그 스위치를 조건으로 하는 다음 페이지를 만들어라(예: 상자 열면 [상자1 열림] 켜고, 페이지2는 빈 상자).
-문으로 다른 맵에 가려면 문 칸에 graphic "none", trigger "touch", transfer 명령 이벤트를 둔다. 도착 위치는 상대 맵의 문 바로 앞(문 위가 아닌 곳)으로 해서 바로 되돌아가지 않게 한다.
-
-## 일하는 법
-- 맵을 바꿀 땐 도구를 써서 직접 바꿔라. 말로만 설명하지 마라.
-- 먼저 붙어 온 지도를 읽고 정확한 좌표를 계산한 뒤 칠해라. 건물은 paint로 여러 줄을 한 번에 그리는 게 좋다.
-- 편집이 끝나면 view_map이나 screenshot으로 결과를 확인하고, 이상하면 고쳐라.
-- 길이 막혀서 못 가는 곳이 생기지 않게, NPC가 문이나 길을 막지 않게 신경 써라.
-- 사용자가 맵에 대해 물으면 지도와 그림을 보고 구체적으로 답해라.
-- 다 하고 나면 무엇을 했는지 1~3문장으로 알려라. 사용자는 되돌리기 버튼 한 번으로 네 작업 전체를 취소할 수 있다."""
+    /** Problems the AI should hear about next time (blocked start, doors to nowhere, …). */
+    fun check(p: Project): List<String> {
+        val out = mutableListOf<String>()
+        fun blocked(m: GameMap, x: Int, y: Int): Boolean {
+            if (!m.inside(x, y)) return true
+            val k = m.i(x, y)
+            return !Tiles.passable(m.ground[k], m.upper[k]) || m.events.any { it.x == x && it.y == y && MapJson.kind(it) == "npc" }
+        }
+        val sm = p.map(p.startMap)
+        if (sm == null) out.add("시작 맵이 없어요")
+        else if (blocked(sm, p.startX, p.startY)) out.add("시작 위치 ${sm.name} (${p.startX},${p.startY})가 막힌 칸이에요")
+        for (m in p.maps) for (e in m.events) for (pg in e.pages) {
+            fun walk(l: List<Cmd>) {
+                for (c in l) {
+                    if (c.type == "transfer") {
+                        val t = p.map(c.map)
+                        if (t == null) out.add("${m.name} #${e.id} ${e.name}: 이동할 맵 ${c.map}이 없어요")
+                        else if (blocked(t, c.x, c.y)) out.add("${m.name} #${e.id} ${e.name}: 도착 칸 ${t.name} (${c.x},${c.y})가 막혀 있어요")
+                        else if (t.events.any { it.x == c.x && it.y == c.y && it.pages.any { pp -> pp.trigger == "touch" } }) out.add("${m.name} #${e.id} ${e.name}: 도착 칸이 다른 이동 지점 위예요(바로 되돌아가요)")
+                    }
+                    c.branches.forEach { walk(it) }; walk(c.then); walk(c.other)
+                }
+            }
+            walk(pg.commands)
+        }
+        for (m in p.maps) for (e in m.events) if (MapJson.kind(e) == "point" && !Tiles.passable(m.ground[m.i(e.x, e.y)], m.upper[m.i(e.x, e.y)]))
+            out.add("${m.name} #${e.id} ${e.name}: 이벤트 지점이 막힌 칸 위라 밟을 수 없어요")
+        return out.take(12)
+    }
 }
 
-class ChatItem(val role: String, val text: String) // user, ai, tool, error
-
-/** Talks to Claude with the map attached and lets it edit through tools. */
+/** Talks to the AI with the map JSON attached; the AI answers with JSON edits (Nami next 작업실 방식). */
 class AiChat(private val ctx: Context, private val doc: Doc) {
     val items = mutableStateListOf<ChatItem>()
     var busy by mutableStateOf(false)
-    /** Streaming text/thinking of the current round (empty when "한 번에 불러오기"). */
+    /** Streaming reply/thinking of the current request (empty when "한 번에 불러오기"). */
     var live by mutableStateOf("")
     var liveThink by mutableStateOf("")
     var onFocusMap: (Int) -> Unit = {}
     private var messages = JSONArray()
+    private var note = ""   // problems found after the last edits, sent with the next message
     private val file = Store.chatFile(doc)
 
     init {
         runCatching {
             if (file.exists()) {
                 val o = JSONObject(file.readText())
-                messages = o.optJSONArray("messages") ?: JSONArray()
+                // version 2 = JSON edits; older chats used tool calls, which this history can't replay
+                if (o.optInt("v") >= 2) { messages = o.optJSONArray("messages") ?: JSONArray(); note = o.optString("note") }
                 o.optJSONArray("items")?.let { a -> for (i in 0 until a.length()) a.getJSONObject(i).let { items.add(ChatItem(it.getString("r"), it.getString("t"))) } }
             }
         }
@@ -257,10 +246,44 @@ class AiChat(private val ctx: Context, private val doc: Doc) {
 
     private fun save() = runCatching {
         val a = JSONArray(); items.forEach { a.put(JSONObject().put("r", it.role).put("t", it.text)) }
-        file.writeText(JSONObject().put("messages", messages).put("items", a).toString())
+        file.writeText(JSONObject().put("v", 2).put("messages", messages).put("items", a).put("note", note).toString())
     }
 
-    fun clear() { items.clear(); messages = JSONArray(); save() }
+    fun clear() { items.clear(); messages = JSONArray(); note = ""; save() }
+
+    /** The "reply" so far, pulled out of a JSON answer that is still streaming. */
+    private fun replySoFar(raw: String): String {
+        val k = raw.indexOf("\"reply\""); if (k < 0) return ""
+        val colon = raw.indexOf(':', k); if (colon < 0) return ""
+        var i = raw.indexOf('"', colon + 1); if (i < 0) return ""
+        val sb = StringBuilder(); i++
+        while (i < raw.length) {
+            val c = raw[i]
+            if (c == '\\' && i + 1 < raw.length) { val n = raw[i + 1]; sb.append(when (n) { 'n' -> '\n'; 't' -> ' '; else -> n }); i += 2; continue }
+            if (c == '"') break
+            sb.append(c); i++
+        }
+        return sb.toString()
+    }
+
+    /** The JSON object in the answer (code fences and stray words around it are ignored). */
+    private fun parse(raw: String): JSONObject? {
+        val a = raw.indexOf('{'); val b = raw.lastIndexOf('}')
+        if (a < 0 || b <= a) return null
+        return runCatching { JSONObject(raw.substring(a, b + 1)) }.getOrNull()
+    }
+
+    private fun opens(o: JSONObject, viewMap: Int): List<Pair<Int, Int>> {
+        val v = o.opt("open") ?: return emptyList()
+        val a = when (v) { is JSONArray -> v; is JSONObject -> v.optJSONArray("events") ?: JSONArray(); else -> JSONArray() }
+        return (0 until a.length()).mapNotNull { i ->
+            when (val x = a.opt(i)) {
+                is Number -> viewMap to x.toInt()
+                is JSONObject -> x.optInt("map", viewMap) to x.optInt("id", -1)
+                else -> x?.toString()?.toIntOrNull()?.let { viewMap to it }
+            }
+        }
+    }
 
     suspend fun send(text: String, viewMapId: Int) {
         if (busy) return
@@ -268,43 +291,62 @@ class AiChat(private val ctx: Context, private val doc: Doc) {
         busy = true
         items.add(ChatItem("user", text))
         val mark = messages.length()
+        val keepNote = note
         val before = doc.snapshot()
         var edited = false
         try {
-            val built = Prompts.build(doc.p, viewMapId, text)
-            val system = built.system.ifBlank { "너는 게임 제작 앱 Nami Maker의 AI 조수다." }
+            val userText = if (note.isNotBlank()) "[지난 작업 뒤 앱이 찾은 문제]\n$note\n\n$text" else text
+            val built = Prompts.build(doc.p, viewMapId, userText)
+            val system = built.system.ifBlank { "너는 게임 제작 앱 Nami Maker의 AI 조수다. JSON으로 답하라." }
             messages.put(JSONObject().put("role", "user").put("content", built.content).put("mapIdx", built.mapIdx))
-            for (round in 0 until 40) {
+            note = ""
+            var opened = 0
+            while (true) {
                 live = ""; liveThink = ""
-                val res = Api.turn(system, Tools.defs, outgoing(),
-                    Api.Live(onText = { t -> live += t }, onThink = { t -> liveThink += t }))
+                val raw = StringBuilder()
+                val res = Api.turn(system, null, outgoing(), Api.Live(
+                    onText = { t -> raw.append(t); live = replySoFar(raw.toString()) },
+                    onThink = { t -> liveThink += t }), json = true)
                 live = ""; liveThink = ""
                 if (res.reasoning.isNotBlank()) items.add(ChatItem("think", res.reasoning.trim()))
-                val blocks = res.blocks
-                messages.put(JSONObject().put("role", "assistant").put("content", blocks).also { m -> res.raw?.let { m.put("gparts", it) } })
-                val results = JSONArray()
-                for (i in 0 until blocks.length()) {
-                    val b = blocks.getJSONObject(i)
-                    when (b.optString("type")) {
-                        "text" -> b.optString("text").trim().takeIf { it.isNotEmpty() }?.let { items.add(ChatItem("ai", it)) }
-                        "tool_use" -> {
-                            val name = b.getString("name")
-                            val r = Tools.run(doc, name, b.optJSONObject("input") ?: JSONObject())
-                            if (!name.startsWith("view") && name != "screenshot" && name != "get_event" && !r.error) edited = true
-                            r.mapId?.let { onFocusMap(it) }
-                            items.add(ChatItem(if (r.error) "error" else "tool", r.summary))
-                            val rc = JSONArray().put(JSONObject().put("type", "text").put("text", r.text))
-                            r.image?.let { rc.put(image(it)) }
-                            results.put(JSONObject().put("type", "tool_result").put("tool_use_id", b.getString("id"))
-                                .put("content", rc).put("is_error", r.error))
-                        }
+                val answer = (0 until res.blocks.length()).map { res.blocks.getJSONObject(it) }
+                    .filter { it.optString("type") == "text" }.joinToString("") { it.optString("text") }
+                messages.put(JSONObject().put("role", "assistant").put("content", JSONArray().put(JSONObject().put("type", "text").put("text", answer.ifBlank { "{}" })))
+                    .also { m -> res.raw?.let { m.put("gparts", it) } })
+                val o = parse(answer)
+                if (o == null) { if (answer.isNotBlank()) items.add(ChatItem("ai", answer.trim())); break }
+                val want = opens(o, viewMapId)
+                if (want.isNotEmpty() && opened < 2 && (o.optJSONArray("edits")?.length() ?: 0) == 0) {
+                    opened++
+                    val sb = StringBuilder("[요청한 이벤트 내용]\n")
+                    want.forEach { (mid, eid) ->
+                        val e = doc.p.map(mid)?.event(eid)
+                        sb.append(if (e == null) "맵 $mid 이벤트 $eid: 없음\n" else "맵 $mid: " + MapJson.eventFull(e) + "\n")
+                    }
+                    sb.append("이제 이 내용을 보고 원래 요청대로 답하라.")
+                    items.add(ChatItem("tool", "이벤트 ${want.size}개 열어봄"))
+                    messages.put(JSONObject().put("role", "user").put("content", JSONArray().put(JSONObject().put("type", "text").put("text", sb.toString()))))
+                    continue
+                }
+                o.optString("reply").trim().takeIf { it.isNotEmpty() }?.let { items.add(ChatItem("ai", it)) }
+                val edits = o.optJSONArray("edits")
+                if (edits != null && edits.length() > 0) {
+                    val r = Edits.apply(doc, viewMapId, edits)
+                    if (r.done.isNotEmpty()) { edited = true; doc.changed() }
+                    r.done.forEach { items.add(ChatItem("tool", it)) }
+                    r.failed.forEach { items.add(ChatItem("warn", it)) }
+                    r.focus?.let { onFocusMap(it) }
+                    val problems = r.failed.map { "적용 못 함: $it" } + Edits.check(doc.p)
+                    if (problems.isNotEmpty()) {
+                        note = problems.joinToString("\n")
+                        items.add(ChatItem("warn", "확인할 것: " + problems.joinToString(" / ")))
                     }
                 }
-                if (results.length() == 0 || !res.wantsTools) break
-                messages.put(JSONObject().put("role", "user").put("content", results))
+                break
             }
         } catch (e: Exception) {
             live = ""; liveThink = ""
+            note = keepNote
             while (messages.length() > mark) messages.remove(messages.length() - 1)
             items.add(ChatItem("error", "오류: " + (e.message ?: e.javaClass.simpleName)))
         }
@@ -313,19 +355,12 @@ class AiChat(private val ctx: Context, private val doc: Doc) {
         save()
     }
 
-    private fun image(b64: String) = JSONObject().put("type", "image")
-        .put("source", JSONObject().put("type", "base64").put("media_type", "image/png").put("data", b64))
+    private fun isPlainUser(o: JSONObject) = o.optString("role") == "user" && o.has("mapIdx")
 
-    private fun isPlainUser(o: JSONObject): Boolean {
-        if (o.optString("role") != "user") return false
-        val c = o.optJSONArray("content") ?: return true
-        return c.length() > 0 && c.getJSONObject(0).optString("type") != "tool_result"
-    }
-
-    /** History to send: last ~40 messages, starting at a real user turn, with old pictures replaced by a note. */
+    /** History to send: last ~30 messages, starting at a real user turn; old maps/pictures shrunk to a note. */
     private fun outgoing(): JSONArray {
         val n = messages.length()
-        var start = maxOf(0, n - 40)
+        var start = maxOf(0, n - 30)
         while (start < n && !isPlainUser(messages.getJSONObject(start))) start++
         if (start >= n) start = 0
         var lastUser = start
@@ -339,30 +374,17 @@ class AiChat(private val ctx: Context, private val doc: Doc) {
     }
 
     private fun strip(o: JSONObject): JSONObject {
-        val c0 = o.optJSONArray("content") ?: return o
+        val c = o.optJSONArray("content") ?: return o
         val idx = o.optJSONArray("mapIdx")?.let { a -> (0 until a.length()).map { a.optInt(it) }.toSet() } ?: emptySet()
-        val c = if (idx.isEmpty()) c0 else JSONArray().also { a ->
-            for (i in 0 until c0.length()) a.put(if (i in idx) JSONObject().put("type", "text").put("text", "[예전 맵 생략]") else c0.get(i))
+        val out = JSONArray()
+        for (i in 0 until c.length()) {
+            val b = c.getJSONObject(i)
+            out.put(when {
+                i in idx -> JSONObject().put("type", "text").put("text", "[예전 맵 생략]")
+                b.optString("type") == "image" -> JSONObject().put("type", "text").put("text", "[예전 그림 생략]")
+                else -> b
+            })
         }
-        fun fix(a: JSONArray): JSONArray {
-            val r = JSONArray()
-            for (i in 0 until a.length()) {
-                val b = a.getJSONObject(i)
-                when (b.optString("type")) {
-                    "image" -> r.put(JSONObject().put("type", "text").put("text", "[예전 그림 생략]"))
-                    "tool_result" -> { b.optJSONArray("content")?.let { b.put("content", fix(it)) }; r.put(b) }
-                    "text" -> {
-                        val t = b.optString("text")
-                        // old map dumps are long; keep only the user's words
-                        val k = t.indexOf("\n\n[사용자]\n")
-                        r.put(if (t.startsWith("[지금 보고 있는 맵]") && k > 0) JSONObject().put("type", "text").put("text", t.substring(k + 2)) else b)
-                    }
-                    else -> r.put(b)
-                }
-            }
-            return r
-        }
-        o.put("content", fix(c))
-        return o
+        return o.put("content", out)
     }
 }

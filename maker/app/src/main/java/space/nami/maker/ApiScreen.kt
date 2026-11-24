@@ -476,7 +476,7 @@ private fun PresetPage(pid: String, onBack: () -> Unit, onBlock: (String) -> Uni
                                 Text(b.optString("name").ifBlank { Prompts.TYPE_LABELS[b.optString("type")] ?: "블록" }, fontSize = 15.sp,
                                     color = if (b.optBoolean("enabled", true)) K.text else K.sub)
                                 Text((Prompts.TYPE_LABELS[b.optString("type")] ?: "") + " · " + (if (b.optString("role") == "user") "사용자 메시지에" else "시스템 프롬프트에") +
-                                    (if (b.optString("type") == "map" && b.optBoolean("image", true)) " · 그림 첨부" else ""), fontSize = 12.sp, color = K.sub)
+                                    (if (b.optString("type") == "map" && b.optBoolean("image", false)) " · 그림 첨부" else ""), fontSize = 12.sp, color = K.sub)
                             }
                             if (i > 0) IconBtn(androidx.compose.material.icons.Icons.Filled.KeyboardArrowUp, "위로") { Prompts.move(pid, bid, -1) }
                             if (i < bl.size - 1) IconBtn(androidx.compose.material.icons.Icons.Filled.KeyboardArrowDown, "아래로") { Prompts.move(pid, bid, 1) }
@@ -526,7 +526,7 @@ private fun BlockPage(pid: String, bid: String, onBack: () -> Unit) {
                 Label("어디에 넣을까")
                 Seg(listOf("시스템 프롬프트", "사용자 메시지"), if (b.optString("role") == "user") 1 else 0) { Prompts.patchBlock(pid, bid, "role", if (it == 1) "user" else "system") }
                 Hint("시스템 프롬프트 블록은 이어 붙여 AI의 기본 지시가 되고, 사용자 메시지 블록은 매번 보내는 메시지에 순서대로 들어가요.")
-                if (type == "map") SwitchRow("맵 그림 첨부", "글자 지도와 함께 맵 그림(PNG)도 보내요. 끄면 토큰이 줄어요.", b.optBoolean("image", true)) { Prompts.patchBlock(pid, bid, "image", it) }
+                if (type == "map") SwitchRow("맵 그림 첨부", "글자 지도와 함께 맵 그림(PNG)도 보내요. 끄면 토큰이 줄어요.", b.optBoolean("image", false)) { Prompts.patchBlock(pid, bid, "image", it) }
                 Label("내용")
                 OutlinedTextField(text, { text = it; Prompts.patchBlock(pid, bid, "text", it) }, minLines = 8,
                     modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp),

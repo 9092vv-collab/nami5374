@@ -110,6 +110,8 @@ fun ChatPane(chat: AiChat, mapId: Int, modifier: Modifier, onSettings: () -> Uni
                     }
                     "ai" -> SelectionContainer { Text(it.text, fontSize = 15.sp, color = K.text, lineHeight = 22.sp, modifier = Modifier.padding(end = 12.dp)) }
                     "think" -> ThinkCard(it.text, live = false)
+                    "warn" -> SelectionContainer { Text(it.text, fontSize = 13.sp, color = Color(0xFF8A5A00), lineHeight = 18.sp, modifier = Modifier.clip(RoundedCornerShape(10.dp))
+                        .background(Color(0xFFFFF4DC)).padding(horizontal = 12.dp, vertical = 8.dp)) }
                     "tool" -> Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Filled.Build, null, tint = K.sub, modifier = Modifier.size(13.dp))
                         Text("  " + it.text, fontSize = 12.sp, color = K.sub)
