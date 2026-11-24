@@ -440,20 +440,25 @@ class AiChat(private val ctx: Context, val doc: Doc) {
         var edited = false
         fun add(role: String, text: String) = items.add(ChatItem(role, text, turn))
         try {
-            val system = Prompts.build(doc.p, viewMapId, "").system.ifBlank { "너는 게임 제작 앱 Nami Maker의 AI 조수다. JSON으로 답하라." }
+            val b0 = Prompts.build(doc.p, viewMapId, "")
+            val system = b0.system.ifBlank { "너는 게임 제작 앱 Nami Maker의 AI 조수다. JSON으로 답하라." }
+            // 프리필: AI 답의 첫머리를 미리 넣어 보내고, AI는 거기에 이어 씀 (끝 공백은 API가 거부해서 뺌)
+            val prefill = b0.prefill.trimEnd()
             var opened = 0
             while (true) {
                 live = ""; liveThink = ""
-                val raw = StringBuilder()
-                val res = Api.turn(system, null, outgoing(), Api.Live(
+                val raw = StringBuilder(prefill)
+                val out = outgoing()
+                if (prefill.isNotEmpty()) out.put(JSONObject().put("role", "assistant").put("content", JSONArray().put(JSONObject().put("type", "text").put("text", prefill))))
+                val res = Api.turn(system, null, out, Api.Live(
                     onText = { t -> raw.append(t); live = replySoFar(raw.toString()) },
-                    onThink = { t -> liveThink += t }), json = true)
+                    onThink = { t -> liveThink += t }), json = prefill.isEmpty())
                 live = ""; liveThink = ""
                 if (res.reasoning.isNotBlank()) add("think", res.reasoning.trim())
-                val answer = (0 until res.blocks.length()).map { res.blocks.getJSONObject(it) }
+                val answer = prefill + (0 until res.blocks.length()).map { res.blocks.getJSONObject(it) }
                     .filter { it.optString("type") == "text" }.joinToString("") { it.optString("text") }
                 messages.put(JSONObject().put("role", "assistant").put("content", JSONArray().put(JSONObject().put("type", "text").put("text", answer.ifBlank { "{}" })))
-                    .put("turn", turn).also { m -> res.raw?.let { m.put("gparts", it) } })
+                    .put("turn", turn).also { m -> res.raw?.takeIf { prefill.isEmpty() }?.let { m.put("gparts", it) } })
                 val o = parse(answer)
                 if (o == null) { if (answer.isNotBlank()) add("ai", answer.trim()); break }
                 val want = opens(o, viewMapId)

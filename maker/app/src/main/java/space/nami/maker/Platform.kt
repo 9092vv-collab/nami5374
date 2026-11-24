@@ -21,3 +21,17 @@ fun rememberFilePicker(onPick: (String, ByteArray) -> Unit): () -> Unit {
     }
     return { l.launch("*/*") }
 }
+
+/** 파일로 저장하기 (이름, 내용) → onDone(성공?). 폰: 시스템 저장 창. */
+@androidx.compose.runtime.Composable
+fun rememberFileSaver(onDone: (Boolean) -> Unit = {}): (String, ByteArray) -> Unit {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val cb = androidx.compose.runtime.rememberUpdatedState(onDone)
+    val pending = androidx.compose.runtime.remember { arrayOfNulls<ByteArray>(1) }
+    val l = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.CreateDocument("application/json")) { uri ->
+        val b = pending[0]; pending[0] = null
+        if (uri == null || b == null) return@rememberLauncherForActivityResult
+        cb.value(runCatching { ctx.contentResolver.openOutputStream(uri)?.use { it.write(b) } != null }.getOrDefault(false))
+    }
+    return { name, bytes -> pending[0] = bytes; l.launch(name) }
+}

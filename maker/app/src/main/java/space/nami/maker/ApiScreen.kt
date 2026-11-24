@@ -175,8 +175,15 @@ private fun ApiHome(onClose: () -> Unit, onOpen: (String) -> Unit, onModel: (Str
                         }
                     }
                 }
+                val presetPick = rememberFilePicker { _, bytes ->
+                    val n = Prompts.import(String(bytes, Charsets.UTF_8))
+                    presetMsg = if (n > 0) true to "프리셋 ${n}개를 가져왔어요" else false to "가져올 프리셋을 찾지 못했어요. 내보내기로 저장한 JSON 파일인지 확인해 주세요."
+                }
+                val allSave = rememberFileSaver { ok -> presetMsg = if (ok) true to "프리셋 ${Prompts.presets().size}개를 파일로 저장했어요" else false to "저장하지 못했어요" }
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Btn("+ 새 프리셋") { onPreset(Prompts.add("프리셋 ${Prompts.presets().size + 1}")) }
+                    Btn("파일에서 불러오기") { presetPick() }
+                    Btn("전체 파일로 내보내기") { allSave("Nami Maker 프리셋.json", Prompts.exportAll().toByteArray(Charsets.UTF_8)) }
                     Btn("클립보드에서 가져오기") {
                         val n = Prompts.import(clip.getText()?.text ?: "")
                         presetMsg = if (n > 0) true to "프리셋 ${n}개를 가져왔어요" else false to "가져올 프리셋을 찾지 못했어요. 내보내기로 복사한 JSON인지 확인해 주세요."
@@ -477,7 +484,7 @@ private fun PresetPage(pid: String, onBack: () -> Unit, onBlock: (String) -> Uni
                             Column(Modifier.weight(1f)) {
                                 Text(b.optString("name").ifBlank { Prompts.TYPE_LABELS[b.optString("type")] ?: "블록" }, fontSize = 15.sp,
                                     color = if (b.optBoolean("enabled", true)) K.text else K.sub)
-                                Text((Prompts.TYPE_LABELS[b.optString("type")] ?: "") + " · " + (if (b.optString("role") == "user") "사용자 메시지에" else "시스템 프롬프트에") +
+                                Text((Prompts.TYPE_LABELS[b.optString("type")] ?: "") + " · " + (when { b.optString("type") == "prefill" -> "AI 답 첫머리"; b.optString("role") == "user" -> "사용자 메시지에"; else -> "시스템 프롬프트에" }) +
                                     (if (b.optString("type") == "map" && b.optBoolean("image", false)) " · 그림 첨부" else ""), fontSize = 12.sp, color = K.sub)
                             }
                             if (i > 0) IconBtn(androidx.compose.material.icons.Icons.Filled.KeyboardArrowUp, "위로") { Prompts.move(pid, bid, -1) }
@@ -491,7 +498,9 @@ private fun PresetPage(pid: String, onBack: () -> Unit, onBlock: (String) -> Uni
                     Pill("취소") { adding = false }
                 }
                 Label("관리")
+                val oneSave = rememberFileSaver { ok -> msg = if (ok) true to "프리셋을 파일로 저장했어요" else false to "저장하지 못했어요" }
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Btn("파일로 내보내기") { oneSave(Prompts.fileName(ps.optString("name")), Prompts.export(ps).toByteArray(Charsets.UTF_8)) }
                     Btn("클립보드로 내보내기") { clip.setText(androidx.compose.ui.text.AnnotatedString(Prompts.export(ps))); msg = true to "프리셋을 클립보드에 복사했어요" }
                     Btn("복제") { Prompts.copy(pid)?.let { msg = true to "사본을 만들었어요" } }
                     Btn(if (confirm == "reset") "정말 되돌릴까요?" else "기본값으로 되돌리기") {
@@ -525,16 +534,19 @@ private fun BlockPage(pid: String, bid: String, onBack: () -> Unit) {
                 SwitchRow("켜기", "끄면 이 블록은 보내지 않아요.", b.optBoolean("enabled", true)) { Prompts.patchBlock(pid, bid, "enabled", it) }
                 Label("이름")
                 Input(name, { name = it; Prompts.patchBlock(pid, bid, "name", it) }, "블록 이름")
+                if (type == "prefill") Hint("AI 답의 첫머리로 들어가요. 블록 순서와 상관없이 맨 끝(AI 차례)에 붙어요. 프리필을 쓰면 제미니의 JSON 강제 모드는 꺼져요. 클로드는 추론(thinking)을 켜면 프리필을 받지 않아요.")
+                else {
                 Label("어디에 넣을까")
                 Seg(listOf("시스템 프롬프트", "사용자 메시지"), if (b.optString("role") == "user") 1 else 0) { Prompts.patchBlock(pid, bid, "role", if (it == 1) "user" else "system") }
                 Hint("시스템 프롬프트 블록은 이어 붙여 AI의 기본 지시가 되고, 사용자 메시지 블록은 매번 보내는 메시지에 순서대로 들어가요.")
+                }
                 if (type == "map") SwitchRow("맵 그림 첨부", "글자 지도와 함께 맵 그림(PNG)도 보내요. 끄면 토큰이 줄어요.", b.optBoolean("image", false)) { Prompts.patchBlock(pid, bid, "image", it) }
                 Label("내용")
                 OutlinedTextField(text, { text = it; Prompts.patchBlock(pid, bid, "text", it) }, minLines = 8,
                     modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp),
                     textStyle = androidx.compose.ui.text.TextStyle(fontSize = 14.sp, color = K.text, lineHeight = 20.sp),
                     colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = K.accent, unfocusedBorderColor = K.line, focusedContainerColor = K.card, unfocusedContainerColor = K.card))
-                if (type != "text") Hint("{{slot}} 자리에 내용이 들어가요. 없으면 글 뒤에 붙여요.")
+                if (type != "text" && type != "prefill") Hint("{{slot}} 자리에 내용이 들어가요. 없으면 글 뒤에 붙여요.")
                 else Hint("{{tiles}} = 타일 범례, {{graphics}} = 그래픽 목록")
                 Spacer(Modifier.height(28.dp))
                 Text(if (confirmDel) "정말 지울까요? 한 번 더 누르세요" else "이 블록 지우기", fontSize = 14.sp, color = K.danger,

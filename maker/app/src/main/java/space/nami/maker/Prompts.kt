@@ -17,12 +17,13 @@ import java.io.File
  */
 object Prompts {
     const val SLOT = "{{slot}}"
-    val TYPE_LABELS = mapOf("text" to "텍스트", "story" to "소설·계획", "map" to "지금 맵", "command" to "사용자 메시지")
+    val TYPE_LABELS = mapOf("text" to "텍스트", "story" to "소설·계획", "map" to "지금 맵", "command" to "사용자 메시지", "prefill" to "프리필")
     val TYPE_DESC = mapOf(
         "text" to "직접 쓰는 고정 글. {{tiles}} = 타일 범례, {{graphics}} = 그래픽 목록으로 바뀌어요.",
         "story" to "이 게임의 소설과 AI가 세운 제작 계획이 {{slot}} 자리에 들어가요. 둘 다 비어 있으면 이 블록은 안 보내요.",
         "map" to "지금 보고 있는 맵의 JSON(바닥·위층 기호, 이벤트, 맵 목록)이 {{slot}} 자리에 들어가요. 그림 첨부를 켜면 맵 그림도 같이 가요(기본은 꺼짐).",
         "command" to "사용자가 채팅에 쓴 말이 {{slot}} 자리에 들어가요.",
+        "prefill" to "AI 답의 첫머리를 미리 써 둬요. AI는 이 글에 이어서 답해요(예: {\"reply\": \"). 여러 개면 순서대로 이어 붙여요.",
     )
 
     var rev by mutableIntStateOf(0)
@@ -175,7 +176,8 @@ op은 위에서부터 순서대로 적용된다. 적용 뒤 앱이 문제(막힌
    - 소설에 없는 사건이나 인물을 지어내지 않는다. 게임에 필요한 연결(문, 길)만 더한다.
 4. 계획을 고치라고 하면 set_plan으로 계획 전체를 다시 쓴다.""")
 
-    fun newBlock(type: String) = block(type, if (type == "text") "system" else "user", TYPE_LABELS[type] ?: type, if (type == "text") "" else SLOT, image = false)
+    fun newBlock(type: String) = block(type, when (type) { "text" -> "system"; "prefill" -> "assistant"; else -> "user" }, TYPE_LABELS[type] ?: type,
+        if (type == "text" || type == "prefill") "" else SLOT, image = false)
 
     // ---------- presets ----------
     fun presets(): List<JSONObject> { val a = root.getJSONArray("presets"); return List(a.length()) { a.getJSONObject(it) } }
@@ -213,6 +215,10 @@ op은 위에서부터 순서대로 적용된다. 적용 뒤 앱이 문제(막힌
 
     // ---------- export / import (clipboard JSON) ----------
     fun export(p: JSONObject): String = JSONObject().put("nami_maker_preset", 1).put("name", p.optString("name")).put("blocks", p.optJSONArray("blocks")).toString(2)
+    fun exportAll(): String = JSONObject().put("nami_maker_preset", 1)
+        .put("presets", JSONArray(presets().map { JSONObject().put("name", it.optString("name")).put("blocks", it.optJSONArray("blocks")) })).toString(2)
+    /** 파일 이름으로 쓸 수 있게 */
+    fun fileName(name: String) = name.replace(Regex("[\\\\/:*?\"<>|]"), "_").trim().ifBlank { "프리셋" } + ".json"
 
     /** Returns the new preset id, or null if the text isn't a preset. Accepts one preset or a list. */
     fun import(text: String): Int {
@@ -236,7 +242,8 @@ op은 위에서부터 순서대로 적용된다. 적용 뒤 앱이 문제(막힌
     private fun fill(t: String) = t.replace("{{tiles}}", Tiles.legend()).replace("{{graphics}}", Sprites.ids.joinToString(", "))
     private fun slot(t: String, v: String) = if (SLOT in t) t.replace(SLOT, v) else if (t.isBlank()) v else "$t\n\n$v"
 
-    class Built(val system: String, val content: JSONArray, val mapIdx: JSONArray)
+    /** prefill = AI 답의 첫머리(프리필 블록들을 이어 붙인 것). 비어 있으면 안 씀. */
+    class Built(val system: String, val content: JSONArray, val mapIdx: JSONArray, val prefill: String = "")
 
     /** System prompt + the user's message content (text/image blocks). mapIdx = content positions holding the map (shrunk later). */
     fun build(p: Project, mapId: Int, userText: String): Built {
@@ -244,8 +251,10 @@ op은 위에서부터 순서대로 적용된다. 적용 뒤 앱이 문제(막힌
         val sys = StringBuilder(); val content = JSONArray(); val mapIdx = JSONArray()
         val m = p.map(mapId) ?: p.maps[0]
         var hasCommand = false
+        val pre = StringBuilder()
         for (b in bl) {
             val type = b.optString("type"); val t = b.optString("text")
+            if (type == "prefill") { pre.append(fill(t)); continue }
             val text = when (type) {
                 "map" -> slot(t, MapJson.describe(p, m.id))
                 "story" -> if (p.story.isBlank() && p.plan.isBlank()) "" else slot(t,
@@ -263,6 +272,6 @@ op은 위에서부터 순서대로 적용된다. 적용 뒤 앱이 문제(막힌
             }
         }
         if (!hasCommand) content.put(JSONObject().put("type", "text").put("text", userText))
-        return Built(sys.toString(), content, mapIdx)
+        return Built(sys.toString(), content, mapIdx, pre.toString())
     }
 }

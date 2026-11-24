@@ -18,3 +18,18 @@ fun rememberFilePicker(onPick: (String, ByteArray) -> Unit): () -> Unit {
         }
     }
 }
+
+/** 파일로 저장하기 (이름, 내용) → onDone(성공?). PC: 윈도우 저장 창. */
+@androidx.compose.runtime.Composable
+fun rememberFileSaver(onDone: (Boolean) -> Unit = {}): (String, ByteArray) -> Unit {
+    val cb = androidx.compose.runtime.rememberUpdatedState(onDone)
+    return androidx.compose.runtime.remember {
+        { name: String, bytes: ByteArray ->
+            val fd = java.awt.FileDialog(null as java.awt.Frame?, "저장하기", java.awt.FileDialog.SAVE)
+            fd.file = name
+            fd.isVisible = true
+            val f = fd.file
+            if (f != null) cb.value(runCatching { java.io.File(fd.directory, f).writeBytes(bytes); true }.getOrDefault(false))
+        }
+    }
+}
