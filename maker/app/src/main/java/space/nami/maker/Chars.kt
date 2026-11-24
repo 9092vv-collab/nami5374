@@ -56,7 +56,7 @@ object Chars {
     private fun png(b: Bitmap): ByteArray = ByteArrayOutputStream().also { b.compress(Bitmap.CompressFormat.PNG, 100, it) }.toByteArray()
 
     /** PNG 한 장을 넣음. 넣은 캐릭터 수(시트 모양이 아니면 0). */
-    fun addPng(name: String, bytes: ByteArray): Int {
+    fun addPng(name: String, bytes: ByteArray, tidy: Boolean = false, oneBack: Boolean = false): Int {
         val d = dir ?: return 0
         val b = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return 0
         val base = name.substringAfterLast('/').substringAfterLast('\\').substringBeforeLast('.').removePrefix("!").removePrefix("$")
@@ -73,24 +73,97 @@ object Chars {
         if (w % 3 != 0 || h % 4 != 0 || w < 24) return 0
         val r = (w / 3f) / (h / 4f)
         if (r < 0.5f || r > 2f) return 0
-        File(d, unique(base) + ".png").writeBytes(bytes)
+        val out = if (tidy || oneBack) png(process(b, tidy, oneBack)) else bytes
+        File(d, unique(base) + ".png").writeBytes(out)
         return 1
     }
 
     /** zip(받은 그대로) 또는 PNG. 넣은 캐릭터 수. */
-    fun import(name: String, bytes: ByteArray): Int {
+    fun import(name: String, bytes: ByteArray, tidy: Boolean = false, oneBack: Boolean = false): Int {
         var n = 0
         if (bytes.size > 4 && bytes[0] == 'P'.code.toByte() && bytes[1] == 'K'.code.toByte()) {
             ZipInputStream(bytes.inputStream()).use { z ->
                 while (true) {
                     val e = z.nextEntry ?: break
                     val nm = e.name
-                    if (!e.isDirectory && nm.endsWith(".png", true) && !nm.contains("__MACOSX")) n += runCatching { addPng(nm, z.readBytes()) }.getOrDefault(0)
+                    if (!e.isDirectory && nm.endsWith(".png", true) && !nm.contains("__MACOSX")) n += runCatching { addPng(nm, z.readBytes(), tidy, oneBack) }.getOrDefault(0)
                 }
             }
-        } else n = addPng(name, bytes)
+        } else n = addPng(name, bytes, tidy, oneBack)
         refresh()
         return n
+    }
+
+    /**
+     * AI 시트 다듬기: 가장자리와 이어진 배경색을 투명하게, 칸이 64픽셀보다 크면 48픽셀 도트로(구역마다 가장 많은 색),
+     * oneBack이면 뒷모습 줄을 가운데 칸 하나로.
+     */
+    private fun process(b: Bitmap, tidy: Boolean, oneBack: Boolean): Bitmap {
+        val w = b.width; val h = b.height
+        val px = IntArray(w * h)
+        b.getPixels(px, 0, w, 0, 0, w, h)
+        if (tidy) clearBackground(px, w, h)
+        val cw = w / 3; val ch = h / 4
+        val tw = if (tidy && cw > 64) 48 else cw
+        val th = maxOf(1, Math.round(ch * tw / cw.toFloat()))
+        val ow = tw * 3; val oh = th * 4
+        val out = IntArray(ow * oh)
+        val cnt = HashMap<Int, Int>()
+        for (row in 0 until 4) for (col in 0 until 3) {
+            val sc = if (oneBack && row == 3) 1 else col
+            val sx0 = sc * cw; val sy0 = row * ch
+            for (ty in 0 until th) for (tx in 0 until tw) {
+                val v: Int
+                if (tw == cw && th == ch) v = px[(sy0 + ty) * w + sx0 + tx]
+                else {
+                    val x0 = sx0 + tx * cw / tw; val x1 = maxOf(x0 + 1, sx0 + (tx + 1) * cw / tw)
+                    val y0 = sy0 + ty * ch / th; val y1 = maxOf(y0 + 1, sy0 + (ty + 1) * ch / th)
+                    cnt.clear(); var clear = 0; var all = 0
+                    for (yy in y0 until y1) for (xx in x0 until x1) {
+                        val c = px[yy * w + xx]; all++
+                        if ((c ushr 24) < 128) clear++
+                        else { val q = (c and 0xF0F0F0) or (0xFF shl 24); cnt[q] = (cnt[q] ?: 0) + 1 }
+                    }
+                    v = if (clear * 2 > all || cnt.isEmpty()) 0 else {
+                        // 가장 많은 색(양자화) 그대로 쓰되 원래 색에 가깝게: 그 색 묶음의 첫 픽셀 대신 양자화 값 + 8
+                        val q = cnt.maxByOrNull { it.value }!!.key
+                        q or 0x080808
+                    }
+                }
+                out[(row * th + ty) * ow + col * tw + tx] = v
+            }
+        }
+        val r = Bitmap.createBitmap(ow, oh, Bitmap.Config.ARGB_8888)
+        r.setPixels(out, 0, ow, 0, 0, ow, oh)
+        return r
+    }
+
+    /** 테두리에서 시작해 배경색(테두리에 가장 많은 색)과 비슷한 이어진 픽셀을 투명하게. */
+    private fun clearBackground(px: IntArray, w: Int, h: Int) {
+        val border = HashMap<Int, Int>()
+        fun q(c: Int) = c and 0xE0E0E0
+        for (x in 0 until w) { border.merge(q(px[x]), 1, Int::plus); border.merge(q(px[(h - 1) * w + x]), 1, Int::plus) }
+        for (y in 0 until h) { border.merge(q(px[y * w]), 1, Int::plus); border.merge(q(px[y * w + w - 1]), 1, Int::plus) }
+        val bgq = border.maxByOrNull { it.value }?.key ?: return
+        // 실제 배경색: 그 묶음에 드는 테두리 픽셀 하나
+        var bg = 0xFFFFFF
+        for (x in 0 until w) if (q(px[x]) == bgq) { bg = px[x] and 0xFFFFFF; break }
+        val br = bg shr 16 and 255; val bgG = bg shr 8 and 255; val bb = bg and 255
+        fun near(c: Int): Boolean {
+            if ((c ushr 24) < 128) return true
+            return Math.abs((c shr 16 and 255) - br) < 40 && Math.abs((c shr 8 and 255) - bgG) < 40 && Math.abs((c and 255) - bb) < 40
+        }
+        val seen = BooleanArray(w * h)
+        val stack = IntArray(w * h); var sp = 0
+        fun push(i: Int) { if (!seen[i] && near(px[i])) { seen[i] = true; stack[sp++] = i } }
+        for (x in 0 until w) { push(x); push((h - 1) * w + x) }
+        for (y in 0 until h) { push(y * w); push(y * w + w - 1) }
+        while (sp > 0) {
+            val i = stack[--sp]; px[i] = 0
+            val x = i % w; val y = i / w
+            if (x > 0) push(i - 1); if (x < w - 1) push(i + 1)
+            if (y > 0) push(i - w); if (y < h - 1) push(i + w)
+        }
     }
 
     private fun load(id: String): List<Bitmap>? = frames.getOrPut(id) {

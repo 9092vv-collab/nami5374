@@ -106,7 +106,14 @@ fun EditorScreen(doc: Doc, chat: AiChat, onBack: () -> Unit, onPlay: () -> Unit)
 
     // AI chat: full screen in both layouts, closed only with the back key (or its ← button)
     androidx.activity.compose.BackHandler(enabled = showChat) { showChat = false }
-    BoxWithConstraints(Modifier.fillMaxSize().background(K.bg)) {
+    // next처럼 탭 3개: 이벤트 목록 · 맵·작업실(가운데, 기본) · 이미지. 맵 그리기와 겹치지 않게 밀어서 넘기기는 없음.
+    var tab by remember { mutableIntStateOf(1) }
+    androidx.activity.compose.BackHandler(enabled = tab != 1 && !showChat) { tab = 1 }
+    Column(Modifier.fillMaxSize().background(K.bg)) {
+    Box(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp)) { Seg(listOf("이벤트", "맵·작업실", "이미지"), tab) { tab = it } }
+    if (tab == 0) EventsPage(doc, map, Modifier.weight(1f).fillMaxWidth(), onPickMap = { mapId = it }, onEditEvent = { editEvent = it })
+    else if (tab == 2) ImagePage(Modifier.weight(1f).fillMaxWidth())
+    else BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
         val wide = maxWidth >= 700.dp
         EditorPane(
             doc, map, wide, Modifier.fillMaxSize(),
@@ -117,6 +124,7 @@ fun EditorScreen(doc: Doc, chat: AiChat, onBack: () -> Unit, onPlay: () -> Unit)
         if (showChat) {
             ChatPane(chat, map.id, Modifier.fillMaxSize().background(K.bg).pointerInput(Unit) {}, onSettings = { settings = true }, onClose = { showChat = false })
         }
+    }
     }
 
     val ee = editEvent?.let { map.event(it) }
@@ -461,4 +469,36 @@ private fun MapSettingsDialog(doc: Doc, map: GameMap, onClose: () -> Unit, onDel
         },
         dismissButton = { TextButton(onClick = onClose) { Text("취소", color = K.sub) } },
     )
+}
+
+/** 왼쪽 '이벤트' 탭: 맵을 고르고 그 맵의 이벤트를 목록으로. 누르면 이벤트 편집. */
+@Composable
+private fun EventsPage(doc: Doc, map: GameMap, modifier: Modifier, onPickMap: (Int) -> Unit, onEditEvent: (Int) -> Unit) {
+    @Suppress("UNUSED_VARIABLE") val rev = doc.rev
+    Column(modifier) {
+        androidx.compose.foundation.lazy.LazyRow(contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            items(doc.p.maps.size) { i -> val m = doc.p.maps[i]; Pill(m.name, on = m.id == map.id) { onPickMap(m.id) } }
+        }
+        if (map.events.isEmpty()) Text("이 맵에는 이벤트가 없어요. 맵·작업실 탭에서 이벤트 도구로 칸을 누르거나 AI에게 부탁해 보세요.",
+            fontSize = 13.sp, color = K.sub, modifier = Modifier.padding(18.dp))
+        androidx.compose.foundation.lazy.LazyColumn(Modifier.fillMaxSize(), contentPadding = androidx.compose.foundation.layout.PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            items(map.events.size) { i ->
+                val e = map.events[i]
+                val pg = e.pages.firstOrNull() ?: EventPage()
+                Row(Modifier.fillMaxWidth().clip(androidx.compose.foundation.shape.RoundedCornerShape(12.dp)).background(K.panel).clickable { onEditEvent(e.id) }.padding(10.dp),
+                    verticalAlignment = Alignment.CenterVertically) {
+                    androidx.compose.foundation.Canvas(Modifier.size(40.dp)) {
+                        drawIntoCanvas { c -> if (pg.graphic != "none") Art.sprite(c.art(), pg.graphic, pg.dir, 0f, 0f, size.width) }
+                    }
+                    Column(Modifier.weight(1f).padding(start = 10.dp)) {
+                        Text(e.name.ifBlank { "이벤트 #${e.id}" }, fontSize = 15.sp, color = K.text)
+                        val run = when (pg.trigger) { "touch" -> "밟으면"; "auto" -> "자동"; else -> "말 걸기" }
+                        Text("#${e.id} · (${e.x}, ${e.y}) · $run" + (if (e.pages.size > 1) " · 페이지 ${e.pages.size}개" else ""), fontSize = 12.sp, color = K.sub)
+                        pg.commands.firstOrNull()?.summary(doc.p)?.let { Text(it, fontSize = 12.sp, color = K.sub, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis) }
+                    }
+                    Text("›", color = K.sub)
+                }
+            }
+        }
+    }
 }

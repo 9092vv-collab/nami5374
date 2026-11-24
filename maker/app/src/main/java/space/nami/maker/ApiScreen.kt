@@ -208,49 +208,6 @@ private fun ApiHome(onClose: () -> Unit, onOpen: (String) -> Unit, onModel: (Str
                     Btn("취소") { adding = false }
                 }
                 Hint("키는 이 폰의 보안 저장소에 암호화해서 보관해요. 화면에 다시 보이지 않아요.")
-                Label("그림 받기")
-                val uri = androidx.compose.ui.platform.LocalUriHandler.current
-                listOf(
-                    Triple("Pipoya 캐릭터 (32×32)", "RPG Maker풍 걷기 캐릭터 64종 · 4방향", "https://pipoya.itch.io/pipoya-free-rpg-character-sprites-32x32"),
-                    Triple("Pipoya 타일셋 (32×32)", "RPG Maker풍 마을·실내·자연 타일", "https://pipoya.itch.io/pipoya-rpg-tileset-32x32"),
-                ).forEach { (t, d, u) ->
-                    Card(onClick = { runCatching { uri.openUri(u) } }) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Column(Modifier.weight(1f)) {
-                                Text(t, fontSize = 15.sp, color = K.text)
-                                Text(d, fontSize = 12.sp, color = K.sub)
-                            }
-                            Text("열기 ›", fontSize = 13.sp, color = K.sub)
-                        }
-                    }
-                }
-                Hint("무료예요(Download Now → 'No thanks, just take me to the downloads'). 그림을 다시 배포하거나 팔면 안 되고, 게임에 쓰는 건 자유예요.")
-                Label("캐릭터 그림")
-                @Suppress("UNUSED_VARIABLE") val crev = Chars.rev
-                var charMsg by remember { mutableStateOf<Pair<Boolean?, String>>(null to "") }
-                var delSel by remember { mutableStateOf<String?>(null) }
-                val pick = rememberFilePicker { name, bytes ->
-                    val n = runCatching { Chars.import(name, bytes) }.getOrDefault(0)
-                    charMsg = if (n > 0) true to "캐릭터 ${n}명을 넣었어요" else false to "넣을 캐릭터 그림을 못 찾았어요. 걷기 시트(3칸 × 4줄) PNG나 그걸 담은 zip인지 확인해 주세요."
-                }
-                Btn("zip·PNG 불러오기", filled = true) { pick() }
-                Result(charMsg.first, charMsg.second)
-                val chars = Chars.ids
-                if (chars.isEmpty()) Hint("받은 zip을 그대로 고르면 안에 든 캐릭터를 한 번에 넣어요. 넣은 캐릭터는 이벤트 그래픽에서 고르고, AI도 이름으로 써요.")
-                else {
-                    Hint("${chars.size}명 · 누르면 지우기")
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        chars.forEach { id ->
-                            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(64.dp).clip(RoundedCornerShape(8.dp)).clickable { delSel = if (delSel == id) null else id }.padding(2.dp)) {
-                                androidx.compose.foundation.Canvas(Modifier.size(44.dp).clip(RoundedCornerShape(8.dp)).background(K.panel)) {
-                                    drawIntoCanvas { c -> Art.sprite(c.art(), id, 0, 0f, 0f, size.width) }
-                                }
-                                if (delSel == id) Text("지우기", fontSize = 11.sp, color = K.danger, modifier = Modifier.clickable { Chars.delete(id); delSel = null })
-                                else Text(Sprites.name(id), fontSize = 10.sp, color = K.sub, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
-                            }
-                        }
-                    }
-                }
                 Spacer(Modifier.height(40.dp))
             }
         }
@@ -586,5 +543,63 @@ private fun BlockPage(pid: String, bid: String, onBack: () -> Unit) {
                 Spacer(Modifier.height(40.dp))
             }
         }
+    }
+}
+
+/** 오른쪽 '이미지' 탭: 그림 받기 링크, 캐릭터 그림 불러오기·다듬기·목록. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun ImagePage(modifier: Modifier = Modifier) {
+    var tidy by remember { mutableStateOf(false) }
+    var oneBack by remember { mutableStateOf(false) }
+    Column(modifier.verticalScroll(rememberScrollState()).padding(horizontal = 18.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+      Column(Modifier.widthIn(max = 640.dp).fillMaxWidth()) {
+        Label("그림 받기")
+        val uri = androidx.compose.ui.platform.LocalUriHandler.current
+        listOf(
+            Triple("Pipoya 캐릭터 (32×32)", "RPG Maker풍 걷기 캐릭터 64종 · 4방향", "https://pipoya.itch.io/pipoya-free-rpg-character-sprites-32x32"),
+            Triple("Pipoya 타일셋 (32×32)", "RPG Maker풍 마을·실내·자연 타일", "https://pipoya.itch.io/pipoya-rpg-tileset-32x32"),
+        ).forEach { (t, d, u) ->
+            Card(onClick = { runCatching { uri.openUri(u) } }) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(t, fontSize = 15.sp, color = K.text)
+                        Text(d, fontSize = 12.sp, color = K.sub)
+                    }
+                    Text("열기 ›", fontSize = 13.sp, color = K.sub)
+                }
+            }
+        }
+        Hint("무료예요(Download Now → 'No thanks, just take me to the downloads'). 그림을 다시 배포하거나 팔면 안 되고, 게임에 쓰는 건 자유예요.")
+        Label("캐릭터 그림")
+        @Suppress("UNUSED_VARIABLE") val crev = Chars.rev
+        var charMsg by remember { mutableStateOf<Pair<Boolean?, String>>(null to "") }
+        var delSel by remember { mutableStateOf<String?>(null) }
+        val pick = rememberFilePicker { name, bytes ->
+            val n = runCatching { Chars.import(name, bytes, tidy, oneBack) }.getOrDefault(0)
+            charMsg = if (n > 0) true to "캐릭터 ${n}명을 넣었어요" else false to "넣을 캐릭터 그림을 못 찾았어요. 걷기 시트(3칸 × 4줄) PNG나 그걸 담은 zip인지 확인해 주세요."
+        }
+        SwitchRow("AI 그림 다듬기", "흰 배경을 투명하게 지우고, 큰 그림은 한 칸 48픽셀 도트로 줄여요. 제미니 같은 AI가 만든 시트에 켜세요.", tidy) { tidy = it }
+        SwitchRow("뒷모습 하나로", "맨 아랫줄(뒷모습) 가운데 칸을 세 칸 모두에 써요. 뒷모습이 들쭉날쭉할 때.", oneBack) { oneBack = it }
+        Btn("zip·PNG 불러오기", filled = true) { pick() }
+        Result(charMsg.first, charMsg.second)
+        val chars = Chars.ids
+        if (chars.isEmpty()) Hint("받은 zip을 그대로 고르면 안에 든 캐릭터를 한 번에 넣어요. 넣은 캐릭터는 이벤트 그래픽에서 고르고, AI도 이름으로 써요.")
+        else {
+            Hint("${chars.size}명 · 누르면 지우기")
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                chars.forEach { id ->
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(64.dp).clip(RoundedCornerShape(8.dp)).clickable { delSel = if (delSel == id) null else id }.padding(2.dp)) {
+                        androidx.compose.foundation.Canvas(Modifier.size(44.dp).clip(RoundedCornerShape(8.dp)).background(K.panel)) {
+                            drawIntoCanvas { c -> Art.sprite(c.art(), id, 0, 0f, 0f, size.width) }
+                        }
+                        if (delSel == id) Text("지우기", fontSize = 11.sp, color = K.danger, modifier = Modifier.clickable { Chars.delete(id); delSel = null })
+                        else Text(Sprites.name(id), fontSize = 10.sp, color = K.sub, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                    }
+                }
+            }
+        }
+        Spacer(Modifier.height(40.dp))
+      }
     }
 }

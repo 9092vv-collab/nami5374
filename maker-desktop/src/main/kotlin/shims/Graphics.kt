@@ -34,6 +34,23 @@ class Bitmap internal constructor(val sk: org.jetbrains.skia.Bitmap) {
 
     fun recycle() {}
 
+    /** ARGB(곱하지 않은 알파) 정수로 읽기. */
+    fun getPixels(out: IntArray, offset: Int, stride: Int, x: Int, y: Int, w: Int, h: Int) {
+        for (yy in 0 until h) for (xx in 0 until w) out[offset + yy * stride + xx] = sk.getColor(x + xx, y + yy)
+    }
+
+    /** 비트맵 전체를 ARGB 정수로 바꿔 넣기. */
+    fun setPixels(src: IntArray, offset: Int, stride: Int, x: Int, y: Int, w: Int, h: Int) {
+        val bytes = ByteArray(width * height * 4)
+        sk.readPixels(org.jetbrains.skia.ImageInfo(width, height, org.jetbrains.skia.ColorType.RGBA_8888, org.jetbrains.skia.ColorAlphaType.UNPREMUL), width * 4, 0, 0)?.copyInto(bytes)
+        for (yy in 0 until h) for (xx in 0 until w) {
+            val c = src[offset + yy * stride + xx]; val i = ((y + yy) * width + x + xx) * 4
+            bytes[i] = (c shr 16).toByte(); bytes[i + 1] = (c shr 8).toByte(); bytes[i + 2] = c.toByte(); bytes[i + 3] = (c ushr 24).toByte()
+        }
+        sk.installPixels(org.jetbrains.skia.ImageInfo(width, height, org.jetbrains.skia.ColorType.RGBA_8888, org.jetbrains.skia.ColorAlphaType.UNPREMUL), bytes, width * 4)
+        changed()
+    }
+
     enum class Config { ARGB_8888, RGB_565 }
     enum class CompressFormat { JPEG, PNG, WEBP }
 
