@@ -159,6 +159,10 @@ private fun ApiHome(onClose: () -> Unit, onOpen: (String) -> Unit, onModel: (Str
                     }
                 }
                 if (models.isNotEmpty()) Hint("동그라미 = AI가 쓸 모델. 카드를 누르면 스트리밍·추론 설정이에요.")
+                Label("프롬프트에 유저 설정 ({{user}})")
+                var uname by remember { mutableStateOf(Prompts.userName()) }
+                Input(uname, { uname = it; Prompts.setUserName(it) }, "예: 자기")
+                Hint(if (uname.isBlank()) "비어 있으면 프롬프트의 {{user}}가 그대로 나가요." else "프롬프트의 {{user}} → ${uname.trim()} · AIRI가 이 이름으로 불러요.")
                 Label("프롬프트 프리셋")
                 val active = Prompts.active().optString("id")
                 Prompts.presets().forEach { ps ->
@@ -549,7 +553,7 @@ private fun BlockPage(pid: String, bid: String, onBack: () -> Unit) {
                     textStyle = androidx.compose.ui.text.TextStyle(fontSize = 14.sp, color = K.text, lineHeight = 20.sp),
                     colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = K.accent, unfocusedBorderColor = K.line, focusedContainerColor = K.card, unfocusedContainerColor = K.card))
                 if (type != "text" && type != "prefill") Hint("{{slot}} 자리에 내용이 들어가요. 없으면 글 뒤에 붙여요.")
-                else Hint("{{tiles}} = 타일 범례, {{graphics}} = 그래픽 목록")
+                else Hint("{{tiles}} = 타일 범례, {{graphics}} = 그래픽 목록, {{user}} = 유저 이름")
                 Spacer(Modifier.height(28.dp))
                 Text(if (confirmDel) "정말 지울까요? 한 번 더 누르세요" else "이 블록 지우기", fontSize = 14.sp, color = K.danger,
                     modifier = Modifier.clip(RoundedCornerShape(50)).clickable { if (!confirmDel) confirmDel = true else { Prompts.removeBlock(pid, bid); onBack() } }

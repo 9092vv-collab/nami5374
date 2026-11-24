@@ -87,7 +87,26 @@ object Prompts {
             }
             root.put("v", 5); save()
         }
+        if (root.optInt("v") < 6) {
+            // 6 = AI 조수 이름 AIRI + {{user}}로 부르기: 기본 그대로인 '역할' 블록만 바꿈
+            presets().forEach { pr ->
+                val l = blocks(pr)
+                l.forEach { b -> val t = b.optString("text"); if (OLD_ROLE in t) b.put("text", t.replace(OLD_ROLE, NEW_ROLE)) }
+                pr.put("blocks", JSONArray(l))
+            }
+            root.put("v", 6); save()
+        }
     }
+
+    private const val OLD_ROLE = """너는 게임 제작 앱 "Nami Maker"(쯔꾸르 같은 2D 탑다운 게임 제작 도구) 안의 AI 조수다.
+사용자와 함께 대화·탐색 위주의 게임(어드벤처, 호러 쯔꾸르 같은)을 만든다. 전투는 아직 없다."""
+    private const val NEW_ROLE = """너는 AIRI, 게임 제작 앱 "Nami Maker"(쯔꾸르 같은 2D 탑다운 게임 제작 도구) 안의 AI 조수다.
+{{user}}와 함께 대화·탐색 위주의 게임(어드벤처, 호러 쯔꾸르 같은)을 만든다. 전투는 아직 없다.
+reply에서 사용자는 항상 "{{user}}"라고 부른다."""
+
+    /** 프롬프트의 {{user}}에 들어갈 이름 (비어 있으면 {{user}} 그대로 나감) */
+    fun userName(): String = root.optString("userName")
+    fun setUserName(v: String) { root.put("userName", v.trim()); save() }
 
     private fun save() { file?.writeText(root.toString()); rev++ }
     private fun id(p: String) = p + System.nanoTime().toString(36)
@@ -99,8 +118,9 @@ object Prompts {
     private fun newPreset(name: String, blocks: List<JSONObject>) = JSONObject().put("id", id("ps")).put("name", name).put("blocks", JSONArray(blocks))
 
     fun defaults(): List<JSONObject> = listOf(
-        block("text", "system", "역할", """너는 게임 제작 앱 "Nami Maker"(쯔꾸르 같은 2D 탑다운 게임 제작 도구) 안의 AI 조수다.
-사용자와 함께 대화·탐색 위주의 게임(어드벤처, 호러 쯔꾸르 같은)을 만든다. 전투는 아직 없다.
+        block("text", "system", "역할", """너는 AIRI, 게임 제작 앱 "Nami Maker"(쯔꾸르 같은 2D 탑다운 게임 제작 도구) 안의 AI 조수다.
+{{user}}와 함께 대화·탐색 위주의 게임(어드벤처, 호러 쯔꾸르 같은)을 만든다. 전투는 아직 없다.
+reply에서 사용자는 항상 "{{user}}"라고 부른다.
 reply는 항상 한국어로, 상냥하고 짧게 쓴다. 이모지는 거의 쓰지 않는다."""),
         block("text", "system", "맵 보는 법", """## 맵 JSON
 사용자 메시지에 지금 보고 있는 맵이 JSON으로 붙어 온다.
@@ -240,6 +260,7 @@ op은 위에서부터 순서대로 적용된다. 적용 뒤 앱이 문제(막힌
 
     // ---------- building a request ----------
     private fun fill(t: String) = t.replace("{{tiles}}", Tiles.legend()).replace("{{graphics}}", Sprites.ids.joinToString(", "))
+        .let { s -> userName().let { u -> if (u.isBlank()) s else s.replace("{{user}}", u) } }
     private fun slot(t: String, v: String) = if (SLOT in t) t.replace(SLOT, v) else if (t.isBlank()) v else "$t\n\n$v"
 
     /** prefill = AI 답의 첫머리(프리필 블록들을 이어 붙인 것). 비어 있으면 안 씀. */

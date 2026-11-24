@@ -441,7 +441,7 @@ class AiChat(private val ctx: Context, val doc: Doc) {
         fun add(role: String, text: String) = items.add(ChatItem(role, text, turn))
         try {
             val b0 = Prompts.build(doc.p, viewMapId, "")
-            val system = b0.system.ifBlank { "너는 게임 제작 앱 Nami Maker의 AI 조수다. JSON으로 답하라." }
+            val system = b0.system.ifBlank { "너는 게임 제작 앱 Nami Maker의 AI 조수 AIRI다. JSON으로 답하라." }
             // 프리필: AI 답의 첫머리를 미리 넣어 보내고, AI는 거기에 이어 씀 (끝 공백은 API가 거부해서 뺌)
             val prefill = b0.prefill.trimEnd()
             var opened = 0
