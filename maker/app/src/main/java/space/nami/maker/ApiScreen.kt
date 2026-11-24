@@ -553,12 +553,17 @@ private const val SHEET_PROMPT = "Turn the character in this image into an RPG M
     "Chibi proportions about 2.5 heads tall, full body inside every cell, same size and position in each cell, clean dark outlines. " +
     "Keep the hair style, hair color, eye color and outfit of the reference."
 
-private const val SHEET_PROMPT_EXAMPLE = "The first image is an example of the exact sprite sheet format I need. The second image is my character. " +
-    "Draw the character from the second image as a new pixel-art walking sprite sheet in exactly the same format as the first image: " +
-    "the same 3 columns and 4 rows layout, the same cell size, the same character size and position in each cell, the same chibi proportions, " +
-    "the same pixel size and outline style, and the same row order (front, facing left, facing right, back) and walking frames. " +
-    "Plain pure white background, no grid lines, no text. Keep the hair style, hair color, eye color and outfit of the second image. " +
-    "Do not copy the character of the first image."
+// 예시 시트가 있으면 글로 길게 설명하지 않음 — 그림이 형식을 다 알려 줘서, 긴 지시는 오히려 방해됨
+private const val SHEET_PROMPT_EXAMPLE = "첫 번째 그림(레퍼런스)처럼 두 번째 그림의 캐릭터를 만들어주세요. 배경은 투명으로요."
+
+/** 고를 수 있는 구글 이미지 모델 (Vertex). 맨 위가 최신. */
+private val IMAGE_MODELS = listOf(
+    "gemini-nano-banana-2.1" to "Nano Banana 2.1 (최신)",
+    "gemini-3-pro-image" to "Nano Banana Pro · 고품질",
+    "gemini-3.1-flash-image" to "Nano Banana 2",
+    "gemini-3.1-flash-lite-image" to "Nano Banana 2 Lite · 빠름",
+    "gemini-2.5-flash-image" to "Nano Banana (구버전)",
+)
 
 /** 오른쪽 '이미지' 탭: 그림 받기 링크, 캐릭터 그림 불러오기·다듬기·목록. */
 @OptIn(ExperimentalLayoutApi::class)
@@ -602,7 +607,12 @@ fun ImagePage(modifier: Modifier = Modifier) {
         var genMsg by remember { mutableStateOf<Pair<Boolean?, String>>(null to "") }
         Input(refName, { refName = it }, "캐릭터 이름 (예: 나, 클로드)")
         Spacer(Modifier.height(6.dp))
-        Input(imgModel, { imgModel = it; Api.setImageModel(it) }, "이미지 모델 ID")
+        Label("이미지 모델")
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            IMAGE_MODELS.forEach { (id, nm) -> Pill(nm, on = imgModel == id) { imgModel = id; Api.setImageModel(id) } }
+        }
+        Spacer(Modifier.height(6.dp))
+        Input(imgModel, { imgModel = it; Api.setImageModel(it) }, "모델 ID 직접 입력")
         Spacer(Modifier.height(6.dp))
         val refPick = rememberFilePicker { fname, bytes ->
             val nm = refName.trim().ifEmpty { fname.substringBeforeLast('.') }

@@ -151,14 +151,18 @@ object Chars {
         fun q(c: Int) = c and 0xE0E0E0
         for (x in 0 until w) { border.merge(q(px[x]), 1, Int::plus); border.merge(q(px[(h - 1) * w + x]), 1, Int::plus) }
         for (y in 0 until h) { border.merge(q(px[y * w]), 1, Int::plus); border.merge(q(px[y * w + w - 1]), 1, Int::plus) }
-        val bgq = border.maxByOrNull { it.value }?.key ?: return
-        // 실제 배경색: 그 묶음에 드는 테두리 픽셀 하나
-        var bg = 0xFFFFFF
-        for (x in 0 until w) if (q(px[x]) == bgq) { bg = px[x] and 0xFFFFFF; break }
-        val br = bg shr 16 and 255; val bgG = bg shr 8 and 255; val bb = bg and 255
+        // 테두리에 가장 많은 색 두 가지: AI가 체크무늬(밝은 회색 두 톤)를 그림으로 그려 넣는 경우까지 지움
+        val top = border.entries.sortedByDescending { it.value }.take(2)
+        if (top.isEmpty()) return
+        val total = border.values.sum()
+        fun real(qc: Int): Int { for (x in 0 until w) if (q(px[x]) == qc) return px[x] and 0xFFFFFF; for (y in 0 until h) if (q(px[y * w]) == qc) return px[y * w] and 0xFFFFFF; return qc }
+        fun neutralLight(c: Int): Boolean { val r = c shr 16 and 255; val g = c shr 8 and 255; val b = c and 255
+            return minOf(r, g, b) > 150 && maxOf(r, g, b) - minOf(r, g, b) < 20 }
+        val bgs = mutableListOf(real(top[0].key))
+        if (top.size > 1 && top[1].value * 5 > total && neutralLight(bgs[0]) && neutralLight(real(top[1].key))) bgs.add(real(top[1].key))
         fun near(c: Int): Boolean {
             if ((c ushr 24) < 128) return true
-            return Math.abs((c shr 16 and 255) - br) < 40 && Math.abs((c shr 8 and 255) - bgG) < 40 && Math.abs((c and 255) - bb) < 40
+            return bgs.any { bg -> Math.abs((c shr 16 and 255) - (bg shr 16 and 255)) < 40 && Math.abs((c shr 8 and 255) - (bg shr 8 and 255)) < 40 && Math.abs((c and 255) - (bg and 255)) < 40 }
         }
         val seen = BooleanArray(w * h)
         val stack = IntArray(w * h); var sp = 0
