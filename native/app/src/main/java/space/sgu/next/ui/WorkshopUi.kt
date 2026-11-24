@@ -1,5 +1,9 @@
 package space.sgu.next.ui
 
+import androidx.compose.ui.input.key.isShiftPressed
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
 import kotlinx.serialization.json.JsonArray
 import space.sgu.next.data.orEmptyObj
 import androidx.compose.foundation.layout.widthIn
@@ -210,7 +214,15 @@ fun WorkshopPage(cid: String, openFieldTab: (String) -> Unit, openRoute: (String
             Box(Modifier.weight(1f).padding(horizontal = 12.dp, vertical = 11.dp)) {
                 if (input.isEmpty()) Text("캐릭터에게 적용할 명령을 입력", color = Sgu.Sub, style = MaterialTheme.typography.bodyLarge, maxLines = 1)
                 BasicTextField(value = input, onValueChange = { input = it }, maxLines = 6, textStyle = MaterialTheme.typography.bodyLarge.copy(color = Sgu.Ink),
-                    cursorBrush = SolidColor(Sgu.Ink), modifier = Modifier.fillMaxWidth())
+                    cursorBrush = SolidColor(Sgu.Ink), modifier = Modifier.fillMaxWidth().onPreviewKeyEvent { e ->
+                        // PC판: Enter = 보내기, Shift+Enter = 줄바꿈. 한글 조합이 먼저 끝나도록 잠깐 기다렸다가 보냄.
+                        if (!Platform.desktop || e.key != androidx.compose.ui.input.key.Key.Enter || e.isShiftPressed) return@onPreviewKeyEvent false
+                        if (e.type == androidx.compose.ui.input.key.KeyEventType.KeyDown && !busy) scope.launch {
+                            kotlinx.coroutines.delay(40)
+                            if (input.isNotBlank()) { Workshop.start(cid, input.trim()); input = ""; listState.animateScrollToItem(0) }
+                        }
+                        true
+                    })
             }
             Box(
                 Modifier.size(44.dp).clip(CircleShape).background(if (busy || input.isNotBlank()) Sgu.Ink else Sgu.Bubble).clickable {
