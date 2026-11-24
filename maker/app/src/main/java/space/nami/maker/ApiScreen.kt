@@ -39,6 +39,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
@@ -117,6 +118,7 @@ private fun Radio(on: Boolean) {
 
 @Composable
 private fun ApiHome(onClose: () -> Unit, onOpen: (String) -> Unit) {
+    @Suppress("UNUSED_VARIABLE") val rev = Api.rev
     var adding by remember { mutableStateOf(false) }
     Column(Modifier.fillMaxSize()) {
         Header("API 설정", back = false, onClick = onClose)
@@ -167,7 +169,9 @@ private fun ApiHome(onClose: () -> Unit, onOpen: (String) -> Unit) {
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ProviderPage(pid: String, onBack: () -> Unit) {
+    @Suppress("UNUSED_VARIABLE") val rev = Api.rev
     val scope = rememberCoroutineScope()
+    val clip = LocalClipboardManager.current
     val p = Api.provider(pid) ?: return
     val isVertex = p.optString("preset") == "vertex"
     val preset = Api.preset(p.optString("preset"))
@@ -180,15 +184,29 @@ private fun ProviderPage(pid: String, onBack: () -> Unit) {
     var newModel by remember(pid) { mutableStateOf("") }
     var check by remember(pid) { mutableStateOf<Pair<Boolean?, String>>(null to "") }
     var busy by remember(pid) { mutableStateOf(false) }
+    var atPaste by remember(pid) { mutableStateOf(false) }
     var tests by remember(pid) { mutableStateOf(mapOf<String, Pair<Boolean?, String>>()) }
     var confirmDel by remember(pid) { mutableStateOf(false) }
 
-    fun runCheck() {
-        busy = true; check = null to "확인하는 중…"
+    fun runCheck(lead: String = "") {
+        busy = true; atPaste = lead.isNotEmpty(); check = null to (lead + "연결 확인하는 중…")
         scope.launch {
-            check = try { true to Api.check(pid) } catch (e: Exception) { false to (e.message ?: e.javaClass.simpleName) }
+            val t0 = System.currentTimeMillis()
+            check = try { true to (lead + Api.check(pid) + secs(t0)) } catch (e: Exception) { false to (lead + (e.message ?: e.javaClass.simpleName)) }
             busy = false
         }
+    }
+
+    fun useJson(s: String): Boolean {
+        val sa = Api.Vertex.parseServiceAccount(s) ?: return false
+        val (pj, mail, pk) = sa
+        projectId = pj; email = mail
+        Api.patchProvider(pid, "projectId", pj); Api.patchProvider(pid, "clientEmail", mail)
+        if (location.isBlank()) { location = "global"; Api.patchProvider(pid, "location", "global") }
+        Api.setKey(pid, pk)
+        saJson = ""
+        runCheck("서비스 계정을 저장했어요 ($mail)\n")
+        return true
     }
 
     Column(Modifier.fillMaxSize()) {
@@ -200,19 +218,23 @@ private fun ProviderPage(pid: String, onBack: () -> Unit) {
                 Input(name, { name = it; Api.patchProvider(pid, "name", it) }, preset.name)
 
                 if (isVertex) {
-                    Label("서비스 계정 JSON 붙여넣기 (제일 쉬워요)")
+                    if (Api.hasKey(pid) && projectId.isNotBlank()) Text("저장됨 · $projectId · ${email.ifBlank { "?" }}", fontSize = 13.sp, color = Color(0xFF2E7D4F), modifier = Modifier.padding(top = 8.dp))
+                    Label("서비스 계정 JSON (제일 쉬워요)")
+                    Btn("클립보드에서 붙여넣기", filled = true) {
+                        val t = clip.getText()?.text ?: ""
+                        atPaste = true
+                        if (t.isBlank()) check = false to "클립보드가 비어 있어요. JSON 파일 내용을 복사한 뒤 눌러주세요."
+                        else if (!useJson(t)) check = false to "서비스 계정 JSON으로 읽지 못했어요. project_id · client_email · private_key가 들어 있는 파일 전체를 복사했는지 확인해 주세요."
+                    }
+                    Spacer(Modifier.height(8.dp))
                     Input(saJson, { s ->
                         saJson = s
-                        Api.Vertex.parseServiceAccount(s)?.let { (pj, mail, pk) ->
-                            projectId = pj; email = mail
-                            Api.patchProvider(pid, "projectId", pj); Api.patchProvider(pid, "clientEmail", mail)
-                            if (location.isBlank()) { location = "global"; Api.patchProvider(pid, "location", "global") }
-                            Api.setKey(pid, pk)
-                            saJson = ""
-                            check = true to "서비스 계정을 저장했어요"
-                            runCheck()
+                        if (!useJson(s) && s.trim().startsWith("{") && s.trim().endsWith("}")) {
+                            atPaste = true
+                            check = false to "서비스 계정 JSON으로 읽지 못했어요. project_id · client_email · private_key가 있는지 확인해 주세요."
                         }
-                    }, "{ \"type\": \"service_account\", … }", single = false)
+                    }, "또는 여기에 직접 붙여넣기", single = false)
+                    if (atPaste) Result(check.first, check.second)
                     Label("또는 직접 입력")
                     Input(projectId, { projectId = it; Api.patchProvider(pid, "projectId", it.trim()) }, "Project ID")
                     Input(email, { email = it; Api.patchProvider(pid, "clientEmail", it.trim()) }, "Client Email")
@@ -233,7 +255,7 @@ private fun ProviderPage(pid: String, onBack: () -> Unit) {
                     if (Api.hasKey(pid)) Btn("키 삭제") { Api.removeKey(pid); check = null to "" }
                     Btn(if (busy) "확인 중…" else "연결 확인", enabled = !busy) { runCheck() }
                 }
-                Result(check.first, check.second)
+                if (!atPaste) Result(check.first, check.second)
 
                 Label("모델")
                 val cur = Api.current()?.optString("id")
@@ -248,7 +270,8 @@ private fun ProviderPage(pid: String, onBack: () -> Unit) {
                                     modifier = Modifier.clip(RoundedCornerShape(50)).clickable {
                                         tests = tests + (mid to (null to "보내는 중…"))
                                         scope.launch {
-                                            val r = try { true to "응답: " + Api.testModel(mid) } catch (e: Exception) { false to (e.message ?: "실패") }
+                                            val t0 = System.currentTimeMillis()
+                                            val r = try { true to ("응답: " + Api.testModel(mid) + secs(t0)) } catch (e: Exception) { false to ((e.message ?: "실패") + secs(t0)) }
                                             tests = tests + (mid to r)
                                         }
                                     }.padding(horizontal = 10.dp, vertical = 6.dp))
@@ -277,3 +300,5 @@ private fun ProviderPage(pid: String, onBack: () -> Unit) {
         }
     }
 }
+
+private fun secs(t0: Long) = " · %.1f초".format((System.currentTimeMillis() - t0) / 1000f)

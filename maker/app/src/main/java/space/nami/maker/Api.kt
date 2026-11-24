@@ -255,7 +255,7 @@ object Api {
             "gemini" -> {
                 val body = JSONObject()
                     .put("contents", JSONArray().put(JSONObject().put("role", "user").put("parts", JSONArray().put(JSONObject().put("text", prompt)))))
-                    .put("generationConfig", JSONObject().put("maxOutputTokens", 2048))
+                    .put("generationConfig", JSONObject().put("maxOutputTokens", 2048).also { g -> thinkLow(id)?.let { g.put("thinkingConfig", it) } })
                 val o = JSONObject(http("POST", c.base + "/models/${URLEncoder.encode(id, "UTF-8")}:generateContent", c.headers, body.toString(), 60_000))
                 geminiText(o).ifBlank { "(빈 응답 · ${o.optJSONArray("candidates")?.optJSONObject(0)?.optString("finishReason") ?: "?"})" }
             }
@@ -267,6 +267,13 @@ object Api {
                 (0 until a.length()).map { a.getJSONObject(it) }.filter { it.optString("type") == "text" }.joinToString("") { it.optString("text") }
             }
         }.trim().take(60)
+    }
+
+    /** Quick tests shouldn't think long: Gemini 3+ takes thinkingLevel, 2.x flash takes a 0 budget. */
+    private fun thinkLow(id: String): JSONObject? = when {
+        Regex("gemini-2\\.5-flash", RegexOption.IGNORE_CASE).containsMatchIn(id) -> JSONObject().put("thinkingBudget", 0)
+        Regex("gemini-[12](\\.|-|$)", RegexOption.IGNORE_CASE).containsMatchIn(id) -> null
+        else -> JSONObject().put("thinkingLevel", "low")
     }
 
     private fun geminiText(o: JSONObject): String {
