@@ -107,18 +107,34 @@ class Game(val p: Project) {
         return m.events.any { it.x == x && it.y == y && (page(it)?.graphic ?: "none") != "none" }
     }
 
+    /** 걷는 중인지, 그리고 지난 걸음에서 남은 진행분(이어 걸을 때 씀). */
+    var walking by mutableStateOf(false)
+    var carry = 0f
+
     suspend fun step(d: Int) {
         dir = d
         val nx = px + DX[d]; val ny = py + DY[d]
-        if (blocked(nx, ny)) { delay(60); return }
+        if (blocked(nx, ny)) { carry = 0f; delay(60); return }
         fx = px; fy = py; px = nx; py = ny; steps++
-        prog.snapTo(0f)
-        prog.animateTo(1f, tween(170, easing = LinearEasing))
+        // 프레임마다 직접 움직이고, 남은 몫(carry)은 다음 칸으로 넘김 → 칸 사이에서 멈칫하지 않음
+        walking = true
+        var t = carry
+        var last = -1L
+        prog.snapTo(t.coerceIn(0f, 1f))
+        while (t < 1f) {
+            androidx.compose.runtime.withFrameNanos { now ->
+                if (last >= 0) t += (now - last) / 170_000_000f
+                last = now
+            }
+            prog.snapTo(t.coerceAtMost(1f))
+        }
+        carry = (t - 1f).coerceIn(0f, 0.5f)
+        walking = false
         map.events.firstOrNull { it.x == px && it.y == py && page(it)?.trigger == "touch" }?.let { run(it); autoCheck() }
     }
 
     suspend fun interact() {
-        if (busy || prog.isRunning) return
+        if (busy || walking) return
         val tx = px + DX[dir]; val ty = py + DY[dir]
         val m = map
         val e = m.events.firstOrNull { it.x == tx && it.y == ty && page(it)?.trigger == "action" }
@@ -253,7 +269,7 @@ fun PlayScreen(p: Project, onExit: () -> Unit) {
         game.autoCheck()
         while (true) {
             val h = held
-            if (h != null && !game.busy && game.msg == null) game.step(h) else delay(16)
+            if (h != null && !game.busy && game.msg == null) game.step(h) else { game.carry = 0f; delay(16) }
         }
     }
 
@@ -306,7 +322,7 @@ fun PlayScreen(p: Project, onExit: () -> Unit) {
                         val (ex, ey) = game.evPos[e.id] ?: (e.x.toFloat() to e.y.toFloat())
                         sprites.add(Triple(ey, 0f) { Art.sprite(nc, pg.graphic, game.face[e.id] ?: game.turned[e.id] ?: pg.dir, ex * ts, ey * ts, ts) })
                     }
-                    val bob = if (game.prog.isRunning && game.steps % 2 == 0) 1 else 0
+                    val bob = if (game.walking && game.steps % 2 == 0) 1 else 0
                     sprites.add(Triple(cy, 1f) { Art.sprite(nc, "hero", game.dir, cx * ts, cy * ts, ts, bob) })
                     sprites.sortedWith(compareBy<Triple<Float, Float, () -> Unit>>({ it.first }, { it.second })).forEach { it.third() }
                 }
