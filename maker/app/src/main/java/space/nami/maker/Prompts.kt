@@ -17,13 +17,15 @@ import java.io.File
  */
 object Prompts {
     const val SLOT = "{{slot}}"
-    val TYPE_LABELS = mapOf("text" to "텍스트", "story" to "소설·계획", "map" to "지금 맵", "command" to "사용자 메시지", "prefill" to "프리필")
+    val TYPE_LABELS = mapOf("text" to "텍스트", "story" to "소설·계획", "map" to "지금 맵", "command" to "사용자 메시지")
+    /** next처럼 블록마다 역할: 시스템 / 어시스턴트 / 유저. 맨 끝 어시스턴트 블록 = 프리필 */
+    val ROLES = listOf("system" to "시스템", "assistant" to "어시스턴트", "user" to "유저")
+    fun roleLabel(r: String) = ROLES.firstOrNull { it.first == r }?.second ?: "시스템"
     val TYPE_DESC = mapOf(
         "text" to "직접 쓰는 고정 글. {{tiles}} = 타일 범례, {{graphics}} = 그래픽 목록으로 바뀌어요.",
         "story" to "이 게임의 소설과 AI가 세운 제작 계획이 {{slot}} 자리에 들어가요. 둘 다 비어 있으면 이 블록은 안 보내요.",
         "map" to "지금 보고 있는 맵의 JSON(바닥·위층 기호, 이벤트, 맵 목록)이 {{slot}} 자리에 들어가요. 그림 첨부를 켜면 맵 그림도 같이 가요(기본은 꺼짐).",
         "command" to "사용자가 채팅에 쓴 말이 {{slot}} 자리에 들어가요.",
-        "prefill" to "AI 답의 첫머리를 미리 써 둬요. AI는 이 글에 이어서 답해요(예: {\"reply\": \"). 여러 개면 순서대로 이어 붙여요.",
     )
 
     var rev by mutableIntStateOf(0)
@@ -95,6 +97,10 @@ object Prompts {
                 pr.put("blocks", JSONArray(l))
             }
             root.put("v", 6); save()
+        }
+        if (root.optInt("v") < 7) {
+            presets().forEach { pr -> pr.put("blocks", JSONArray(blocks(pr).map { upgrade(it) })) }
+            root.put("v", 7); save()
         }
     }
 
@@ -196,8 +202,10 @@ op은 위에서부터 순서대로 적용된다. 적용 뒤 앱이 문제(막힌
    - 소설에 없는 사건이나 인물을 지어내지 않는다. 게임에 필요한 연결(문, 길)만 더한다.
 4. 계획을 고치라고 하면 set_plan으로 계획 전체를 다시 쓴다.""")
 
-    fun newBlock(type: String) = block(type, when (type) { "text" -> "system"; "prefill" -> "assistant"; else -> "user" }, TYPE_LABELS[type] ?: type,
-        if (type == "text" || type == "prefill") "" else SLOT, image = false)
+    fun newBlock(type: String) = block(type, if (type == "text") "system" else "user", TYPE_LABELS[type] ?: type, if (type == "text") "" else SLOT, image = false)
+
+    /** 예전 '프리필' 블록 종류 → 텍스트 + 어시스턴트 */
+    private fun upgrade(b: JSONObject) = b.also { if (it.optString("type") == "prefill") it.put("type", "text").put("role", "assistant") }
 
     // ---------- presets ----------
     fun presets(): List<JSONObject> { val a = root.getJSONArray("presets"); return List(a.length()) { a.getJSONObject(it) } }
@@ -251,7 +259,7 @@ op은 위에서부터 순서대로 적용된다. 적용 뒤 앱이 문제(막힌
         var n = 0
         found.forEach { o ->
             val a = o.optJSONArray("blocks") ?: return@forEach
-            val bl = (0 until a.length()).mapNotNull { a.optJSONObject(it) }.filter { it.optString("type") in TYPE_LABELS.keys }
+            val bl = (0 until a.length()).mapNotNull { a.optJSONObject(it)?.let { b -> upgrade(b) } }.filter { it.optString("type") in TYPE_LABELS.keys }
             if (bl.isEmpty()) return@forEach
             add(o.optString("name").ifBlank { "가져온 프리셋" }, bl); n++
         }
@@ -263,19 +271,21 @@ op은 위에서부터 순서대로 적용된다. 적용 뒤 앱이 문제(막힌
         .let { s -> userName().let { u -> if (u.isBlank()) s else s.replace("{{user}}", u) } }
     private fun slot(t: String, v: String) = if (SLOT in t) t.replace(SLOT, v) else if (t.isBlank()) v else "$t\n\n$v"
 
-    /** prefill = AI 답의 첫머리(프리필 블록들을 이어 붙인 것). 비어 있으면 안 씀. */
-    class Built(val system: String, val content: JSONArray, val mapIdx: JSONArray, val prefill: String = "")
+    /**
+     * system = 시스템 블록을 이어 붙인 것. content = 나머지 블록(순서대로), roles = content 칸마다 역할(user/assistant).
+     * next처럼 맨 끝의 어시스턴트 블록들은 prefill(AI 답 첫머리)이 되고 content에는 안 들어감.
+     */
+    class Built(val system: String, val content: JSONArray, val mapIdx: JSONArray, val prefill: String = "", val roles: JSONArray = JSONArray())
 
-    /** System prompt + the user's message content (text/image blocks). mapIdx = content positions holding the map (shrunk later). */
     fun build(p: Project, mapId: Int, userText: String): Built {
         val bl = blocks(active()).filter { it.optBoolean("enabled", true) }
-        val sys = StringBuilder(); val content = JSONArray(); val mapIdx = JSONArray()
+        val sys = StringBuilder()
         val m = p.map(mapId) ?: p.maps[0]
         var hasCommand = false
-        val pre = StringBuilder()
+        // (역할, 블록 종류, 글, 맵 그림 첨부?)
+        val seq = ArrayList<Triple<String, String, Pair<String, Boolean>>>()
         for (b in bl) {
             val type = b.optString("type"); val t = b.optString("text")
-            if (type == "prefill") { pre.append(fill(t)); continue }
             val text = when (type) {
                 "map" -> slot(t, MapJson.describe(p, m.id))
                 "story" -> if (p.story.isBlank() && p.plan.isBlank()) "" else slot(t,
@@ -284,15 +294,25 @@ op은 위에서부터 순서대로 적용된다. 적용 뒤 앱이 문제(막힌
                 else -> fill(t)
             }
             if (text.isBlank()) continue
-            if (b.optString("role") == "system") { if (sys.isNotEmpty()) sys.append("\n\n"); sys.append(text); continue }
-            if (type == "map" || type == "story") mapIdx.put(content.length())
-            content.put(JSONObject().put("type", "text").put("text", text))
-            if (type == "map" && b.optBoolean("image", false)) {
-                mapIdx.put(content.length())
-                content.put(JSONObject().put("type", "image").put("source", JSONObject().put("type", "base64").put("media_type", "image/png").put("data", Shot.base64(p, m))))
+            when (b.optString("role")) {
+                "system", "" -> { if (sys.isNotEmpty()) sys.append("\n\n"); sys.append(text) }
+                else -> seq.add(Triple(if (b.optString("role") == "assistant") "assistant" else "user", type, text to (type == "map" && b.optBoolean("image", false))))
             }
         }
-        if (!hasCommand) content.put(JSONObject().put("type", "text").put("text", userText))
-        return Built(sys.toString(), content, mapIdx, pre.toString())
+        if (!hasCommand) seq.add(Triple("user", "command", userText to false))
+        // 맨 끝 어시스턴트 = 프리필
+        val pre = StringBuilder()
+        while (seq.isNotEmpty() && seq.last().first == "assistant") { pre.insert(0, seq.removeAt(seq.size - 1).third.first) }
+        val content = JSONArray(); val mapIdx = JSONArray(); val roles = JSONArray()
+        for ((role, type, tx) in seq) {
+            if (type == "map" || type == "story") mapIdx.put(content.length())
+            content.put(JSONObject().put("type", "text").put("text", tx.first)); roles.put(role)
+            if (tx.second) {
+                mapIdx.put(content.length())
+                content.put(JSONObject().put("type", "image").put("source", JSONObject().put("type", "base64").put("media_type", "image/png").put("data", Shot.base64(p, m))))
+                roles.put(role)
+            }
+        }
+        return Built(sys.toString(), content, mapIdx, pre.toString(), roles)
     }
 }

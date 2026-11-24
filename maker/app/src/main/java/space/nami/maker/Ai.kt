@@ -425,7 +425,7 @@ class AiChat(private val ctx: Context, val doc: Doc) {
         items.add(ChatItem("user", text, turn))
         val userText = if (note.isNotBlank()) "[지난 작업 뒤 앱이 찾은 문제]\n$note\n\n$text" else text
         val built = Prompts.build(doc.p, viewMapId, userText)
-        messages.put(JSONObject().put("role", "user").put("content", built.content).put("mapIdx", built.mapIdx).put("turn", turn))
+        messages.put(JSONObject().put("role", "user").put("content", built.content).put("mapIdx", built.mapIdx).put("roles", built.roles).put("turn", turn))
         note = ""
         lastBefore = null
         run(turn, viewMapId)
@@ -520,9 +520,23 @@ class AiChat(private val ctx: Context, val doc: Doc) {
         val out = JSONArray()
         for (i in start until n) {
             val o = messages.getJSONObject(i)
-            out.put(if (i < lastUser) strip(JSONObject(o.toString())) else o)
+            expand(if (i < lastUser) strip(JSONObject(o.toString())) else o, out)
         }
         return out
+    }
+
+    /** 프리셋의 유저·어시스턴트 블록 순서대로 메시지를 나눔 (next처럼). roles가 없으면 그대로. */
+    private fun expand(o: JSONObject, into: JSONArray) {
+        val roles = o.optJSONArray("roles"); val c = o.optJSONArray("content")
+        if (roles == null || c == null || roles.length() != c.length()) { into.put(o); return }
+        var cur: String? = null; var buf = JSONArray()
+        fun flush() { if (cur != null && buf.length() > 0) into.put(JSONObject().put("role", cur).put("content", buf)) }
+        for (i in 0 until c.length()) {
+            val r = if (roles.optString(i) == "assistant") "assistant" else "user"
+            if (r != cur) { flush(); cur = r; buf = JSONArray() }
+            buf.put(c.get(i))
+        }
+        flush()
     }
 
     private fun strip(o: JSONObject): JSONObject {
