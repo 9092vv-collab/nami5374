@@ -243,7 +243,10 @@ private fun MapCanvas(doc: Doc, map: GameMap, tool: Tool, tile: Int, onEditEvent
     val st = remember { StrokeState() }
 
     if (scale == 0f && box.width > 0) {
-        val s = min(box.width / (map.w * 32f), box.height / (map.h * 32f)) * 0.94f
+        // 맵을 화면에 꽉 채우지 않음: 작은 맵도 플레이 화면과 같은 타일 크기까지만 키움 (큰 맵은 전체가 보이게 줄임)
+        val fit = min(box.width / (map.w * 32f), box.height / (map.h * 32f)) * 0.94f
+        val play = min(kotlin.math.sqrt(box.width * box.height / 150f), box.width / 8f) / 32f
+        val s = min(fit, play)
         scale = s
         off = Offset((box.width - map.w * 32f * s) / 2f, (box.height - map.h * 32f * s) / 2f)
     }
