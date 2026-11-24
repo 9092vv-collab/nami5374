@@ -318,7 +318,7 @@ object Api {
     }
 
     // ---------- model settings (like Nami next: stream, at once, thinking) ----------
-    fun imageModel(): String = root.optString("imageModel", "gemini-2.5-flash-image")
+    fun imageModel(): String = root.optString("imageModel", "gemini-3.1-flash-image")
     fun setImageModel(v: String) { root.put("imageModel", v.trim()); file?.writeText(root.toString()) }
     fun patchModel(id: String, k: String, v: Any?) { model(id)?.let { if (v == null) it.remove(k) else it.put(k, v) }; save() }
     fun stream(m: JSONObject) = m.optBoolean("stream", true)

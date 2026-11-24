@@ -602,7 +602,7 @@ fun ImagePage(modifier: Modifier = Modifier) {
             genBusy = true; genMsg = null to "만드는 중… (30초~1분쯤 걸려요)"
             scope.launch {
                 genMsg = runCatching {
-                    val out = Api.image(bytes, SHEET_PROMPT, imgModel.ifBlank { "gemini-2.5-flash-image" })
+                    val out = Api.image(bytes, SHEET_PROMPT, imgModel.ifBlank { "gemini-3.1-flash-image" })
                     val n = Chars.import("$nm.png", out, tidy = true, oneBack = true)
                     if (n > 0) true to "'$nm' 캐릭터를 만들었어요. 마음에 안 들면 지우고 다시 눌러 보세요." else false to "그림은 받았는데 걷기 시트 모양이 아니었어요. 다시 눌러 보세요."
                 }.getOrElse { false to (it.message ?: "실패했어요") }
