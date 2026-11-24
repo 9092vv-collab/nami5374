@@ -235,6 +235,18 @@ fun PlayScreen(p: Project, onExit: () -> Unit) {
     val scope = rememberCoroutineScope()
     var held by remember { mutableStateOf<Int?>(null) }
     var bag by remember { mutableStateOf(false) }
+    // F3: 초당 프레임 보기 (PC)
+    var showFps by remember { mutableStateOf(false) }
+    var fps by remember { mutableIntStateOf(0) }
+    LaunchedEffect(showFps) {
+        if (!showFps) return@LaunchedEffect
+        var n = 0; var t0 = -1L
+        while (true) androidx.compose.runtime.withFrameNanos { t ->
+            if (t0 < 0) t0 = t
+            n++
+            if (t - t0 >= 1_000_000_000L) { fps = n; n = 0; t0 = t }
+        }
+    }
     BackHandler { onExit() }
 
     LaunchedEffect(game) {
@@ -266,6 +278,7 @@ fun PlayScreen(p: Project, onExit: () -> Unit) {
                 ch != null && (d == 0 || d == 3) -> { if (e.type == KeyEventType.KeyDown) sel = (sel + (if (d == 0) 1 else -1) + ch.size) % ch.size; true }
                 d >= 0 && e.type == KeyEventType.KeyDown -> { held = d; true }
                 d >= 0 && e.type == KeyEventType.KeyUp -> { if (held == d) held = null; true }
+                e.type == KeyEventType.KeyDown && e.key == Key.F3 -> { showFps = !showFps; true }
                 e.type == KeyEventType.KeyDown && (e.key == Key.Z || e.key == Key.Enter || e.key == Key.Spacebar) -> {
                     if (ch != null) game.pick(sel.coerceIn(0, ch.size - 1)) else pressA(); true
                 }
@@ -281,7 +294,8 @@ fun PlayScreen(p: Project, onExit: () -> Unit) {
             val mw = m.w * ts; val mh = m.h * ts
             val camX = if (mw <= size.width) (mw - size.width) / 2f else (cx * ts + ts / 2 - size.width / 2).coerceIn(0f, mw - size.width)
             val camY = if (mh <= size.height) (mh - size.height) / 2f else (cy * ts + ts / 2 - size.height / 2).coerceIn(0f, mh - size.height)
-            translate(-camX, -camY) {
+            // 카메라를 정수 픽셀에 맞춤(도트가 반 픽셀씩 흔들려 끊겨 보이는 것 방지)
+            translate(-kotlin.math.round(camX), -kotlin.math.round(camY)) {
                 drawImage(ib, IntOffset.Zero, IntSize(img.bmp.width, img.bmp.height), IntOffset.Zero, IntSize(mw.toInt() + 1, mh.toInt() + 1), filterQuality = FilterQuality.None)
                 drawIntoCanvas { c ->
                     val nc = c.art()
@@ -299,6 +313,8 @@ fun PlayScreen(p: Project, onExit: () -> Unit) {
             }
             if (game.fade.value > 0f) drawRect(Color.Black.copy(alpha = game.fade.value))
         }
+        if (showFps) Text("${fps} fps" + (if (Plat.gfx.isNotEmpty()) " · ${Plat.gfx}" else ""), color = Color.Yellow, fontSize = 14.sp,
+            modifier = Modifier.align(Alignment.BottomStart).background(Color.Black.copy(alpha = 0.6f)).padding(6.dp))
 
         Row(Modifier.fillMaxWidth().padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
             RoundBtn { Icon(Icons.Filled.Close, "끝내기", tint = Color.White, modifier = Modifier.size(22.dp).clickable { onExit() }) }

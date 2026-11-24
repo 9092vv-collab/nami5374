@@ -26,7 +26,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
 /** Set by the PC build's main(). */
-object Plat { var desktop = false }
+object Plat { var desktop = false; /** PC: 그리기 방식(DirectX 등), F3 화면에 표시 */ var gfx = "" }
 
 // Claude-like warm palette
 object K {

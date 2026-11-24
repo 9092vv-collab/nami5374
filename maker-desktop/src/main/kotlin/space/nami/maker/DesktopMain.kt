@@ -33,6 +33,7 @@ fun main() {
         val state = rememberWindowState(width = 1440.dp, height = 920.dp)
         Window(onCloseRequest = ::exitApplication, state = state, title = "Nami Maker",
             onPreviewKeyEvent = { e -> e.type == KeyEventType.KeyDown && e.key == Key.Escape && DesktopBack.back() }) {
+            androidx.compose.runtime.LaunchedEffect(Unit) { Plat.gfx = runCatching { window.renderApi.toString() }.getOrDefault("") }
             MakerTheme { App() }
         }
     }
