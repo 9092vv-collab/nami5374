@@ -27,7 +27,13 @@ object Chars {
     var rev by mutableIntStateOf(0)
         private set
 
+    /** 레퍼런스로 만들기에 같이 보내는 '이런 모양으로' 예시 시트. */
+    private var exampleFile: File? = null
+    fun example(): ByteArray? = exampleFile?.takeIf { it.exists() }?.readBytes()
+    fun setExample(b: ByteArray?) { exampleFile?.let { if (b == null) it.delete() else it.writeBytes(b) }; rev++ }
+
     fun init(ctx: Context) {
+        exampleFile = File(ctx.filesDir, "sheet_example.img")
         dir = File(ctx.filesDir, "chars").apply { mkdirs() }
         refresh()
     }

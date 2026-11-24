@@ -553,6 +553,13 @@ private const val SHEET_PROMPT = "Turn the character in this image into an RPG M
     "Chibi proportions about 2.5 heads tall, full body inside every cell, same size and position in each cell, clean dark outlines. " +
     "Keep the hair style, hair color, eye color and outfit of the reference."
 
+private const val SHEET_PROMPT_EXAMPLE = "The first image is an example of the exact sprite sheet format I need. The second image is my character. " +
+    "Draw the character from the second image as a new pixel-art walking sprite sheet in exactly the same format as the first image: " +
+    "the same 3 columns and 4 rows layout, the same cell size, the same character size and position in each cell, the same chibi proportions, " +
+    "the same pixel size and outline style, and the same row order (front, facing left, facing right, back) and walking frames. " +
+    "Plain pure white background, no grid lines, no text. Keep the hair style, hair color, eye color and outfit of the second image. " +
+    "Do not copy the character of the first image."
+
 /** 오른쪽 '이미지' 탭: 그림 받기 링크, 캐릭터 그림 불러오기·다듬기·목록. */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -602,13 +609,26 @@ fun ImagePage(modifier: Modifier = Modifier) {
             genBusy = true; genMsg = null to "만드는 중… (30초~1분쯤 걸려요)"
             scope.launch {
                 genMsg = runCatching {
-                    val out = Api.image(bytes, SHEET_PROMPT, imgModel.ifBlank { "gemini-3.1-flash-image" })
+                    val ex = Chars.example()
+                    val out = if (ex != null) Api.image(listOf(ex, bytes), SHEET_PROMPT_EXAMPLE, imgModel.ifBlank { "gemini-3.1-flash-image" })
+                        else Api.image(listOf(bytes), SHEET_PROMPT, imgModel.ifBlank { "gemini-3.1-flash-image" })
                     val n = Chars.import("$nm.png", out, tidy = true, oneBack = true)
                     if (n > 0) true to "'$nm' 캐릭터를 만들었어요. 마음에 안 들면 지우고 다시 눌러 보세요." else false to "그림은 받았는데 걷기 시트 모양이 아니었어요. 다시 눌러 보세요."
                 }.getOrElse { false to (it.message ?: "실패했어요") }
                 genBusy = false
             }
         }
+        // 예시 시트: 이 모양(칸 배치·크기·도트 느낌) 그대로 만들어 달라고 같이 보냄
+        @Suppress("UNUSED_VARIABLE") val erev = Chars.rev
+        val hasEx = Chars.example() != null
+        val exPick = rememberFilePicker { _, bytes -> Chars.setExample(bytes) }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(if (hasEx) "예시 시트: 있음 (이 모양대로 만들어요)" else "예시 시트: 없음", fontSize = 13.sp, color = if (hasEx) K.text else K.sub, modifier = Modifier.weight(1f))
+            Btn(if (hasEx) "바꾸기" else "예시 시트 고르기") { exPick() }
+            if (hasEx) { Spacer(Modifier.width(6.dp)); Btn("지우기") { Chars.setExample(null) } }
+        }
+        Hint("마음에 드는 걷기 시트 한 장을 예시로 넣어 두면, 칸 배치·크기·도트 느낌을 그대로 따라 그려요.")
+        Spacer(Modifier.height(6.dp))
         Btn(if (genBusy) "만드는 중…" else "레퍼런스 고르고 만들기", filled = true, enabled = !genBusy) { refPick() }
         Result(genMsg.first, genMsg.second)
         Label("시트 불러오기")

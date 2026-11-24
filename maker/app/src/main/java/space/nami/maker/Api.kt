@@ -234,19 +234,19 @@ object Api {
 
     // ---------- image generation (Vertex Gemini image model) ----------
     /** 레퍼런스 그림 + 지시문 → 만든 그림(PNG 등) 바이트. Vertex AI 프로바이더를 씀. */
-    suspend fun image(ref: ByteArray, prompt: String, modelId: String): ByteArray {
+    suspend fun image(refs: List<ByteArray>, prompt: String, modelId: String): ByteArray {
         val p = providers().firstOrNull { it.optString("preset") == "vertex" }
             ?: throw ApiError("그림 만들기는 Vertex AI 프로바이더가 필요해요. 설정 › API에서 추가해 주세요.")
         val c = connect(p)
-        val mime = when {
+        fun mime(ref: ByteArray) = when {
             ref.size > 3 && ref[0] == 0x89.toByte() && ref[1] == 'P'.code.toByte() -> "image/png"
             ref.size > 2 && ref[0] == 0xFF.toByte() && ref[1] == 0xD8.toByte() -> "image/jpeg"
             ref.size > 12 && String(ref, 8, 4, Charsets.US_ASCII) == "WEBP" -> "image/webp"
             else -> "image/png"
         }
         val parts = JSONArray()
-            .put(JSONObject().put("inlineData", JSONObject().put("mimeType", mime).put("data", Base64.encodeToString(ref, Base64.NO_WRAP))))
-            .put(JSONObject().put("text", prompt))
+        refs.forEach { ref -> parts.put(JSONObject().put("inlineData", JSONObject().put("mimeType", mime(ref)).put("data", Base64.encodeToString(ref, Base64.NO_WRAP)))) }
+        parts.put(JSONObject().put("text", prompt))
         fun body(aspect: Boolean) = JSONObject()
             .put("contents", JSONArray().put(JSONObject().put("role", "user").put("parts", parts)))
             .put("generationConfig", JSONObject().put("responseModalities", JSONArray().put("TEXT").put("IMAGE"))
