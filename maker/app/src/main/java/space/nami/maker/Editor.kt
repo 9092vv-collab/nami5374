@@ -67,7 +67,6 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.drawscope.withTransform
-import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
@@ -178,7 +177,7 @@ private fun EditorPane(
                 when (tool) {
                     Tool.EVENT -> "누르면 만들기·편집, 끌면 옮기기"
                     Tool.START -> "주인공이 처음 설 곳"
-                    Tool.HAND -> "두 손가락으로도 움직일 수 있어요"
+                    Tool.HAND -> "두 손가락·마우스 오른쪽 끌기·휠로도 돼요"
                     Tool.ERASE -> "나무·가구 같은 위층만 지워요"
                     else -> Tiles.get(tile).name
                 },
@@ -198,8 +197,8 @@ private fun EditorPane(
                         .clickable { tile = t.id; if (tool !in listOf(Tool.PEN, Tool.RECT, Tool.FILL)) tool = Tool.PEN }
                 ) {
                     drawIntoCanvas { c ->
-                        if (t.upper) Art.tile(c.nativeCanvas, 1, 0f, 0f, size.width, 0, 0)
-                        Art.tile(c.nativeCanvas, t.id, 0f, 0f, size.width, 3, 5)
+                        if (t.upper) Art.tile(c.art(), 1, 0f, 0f, size.width, 0, 0)
+                        Art.tile(c.art(), t.id, 0f, 0f, size.width, 3, 5)
                     }
                 }
             }
@@ -344,16 +343,35 @@ private fun MapCanvas(doc: Doc, map: GameMap, tool: Tool, tile: Int, onEditEvent
 
     Canvas(
         Modifier.fillMaxSize().clipToBounds().onSizeChanged { box = it }
+            // mouse wheel = zoom around the pointer (PC)
+            .pointerInput(map.id) {
+                awaitPointerEventScope {
+                    while (true) {
+                        val e = awaitPointerEvent()
+                        if (e.type == androidx.compose.ui.input.pointer.PointerEventType.Scroll) {
+                            val ch = e.changes.first()
+                            val dy = ch.scrollDelta.y
+                            if (dy != 0f && scale > 0f) {
+                                val ns = (scale * (if (dy > 0) 0.88f else 1.14f)).coerceIn(0.15f, 8f)
+                                off = ch.position - (ch.position - off) * (ns / scale); scale = ns
+                            }
+                            e.changes.forEach { it.consume() }
+                        }
+                    }
+                }
+            }
             .pointerInput(map.id, tool, tile) {
                 awaitEachGesture {
                     val down = awaitFirstDown(requireUnconsumed = false)
-                    var multi = tool == Tool.HAND
+                    // right / middle mouse button drags the view (PC)
+                    val panButton = currentEvent.buttons.isSecondaryPressed || currentEvent.buttons.isTertiaryPressed
+                    var multi = tool == Tool.HAND || panButton
                     if (!multi) { val (x, y) = cellAt(down.position); start(x, y) }
                     while (true) {
                         val ev = awaitPointerEvent()
                         val pressed = ev.changes.filter { it.pressed }
                         if (pressed.isEmpty()) break
-                        if (pressed.size >= 2 || tool == Tool.HAND) {
+                        if (pressed.size >= 2 || tool == Tool.HAND || panButton) {
                             if (!multi) { multi = true; cancel() }
                             val z = ev.calculateZoom(); val pan = ev.calculatePan(); val c = ev.calculateCentroid(useCurrent = true)
                             val ns = (scale * z).coerceIn(0.15f, 8f)
@@ -381,9 +399,9 @@ private fun MapCanvas(doc: Doc, map: GameMap, tool: Tool, tile: Int, onEditEvent
             drawIntoCanvas { c ->
                 m.events.sortedBy { it.y }.forEach { e ->
                     val pg = e.pages.firstOrNull() ?: return@forEach
-                    Art.sprite(c.nativeCanvas, pg.graphic, pg.dir, e.x * 32f, e.y * 32f, 32f)
+                    Art.sprite(c.art(), pg.graphic, pg.dir, e.x * 32f, e.y * 32f, 32f)
                 }
-                if (doc.p.startMap == m.id) Art.sprite(c.nativeCanvas, "hero", 0, doc.p.startX * 32f, doc.p.startY * 32f, 32f)
+                if (doc.p.startMap == m.id) Art.sprite(c.art(), "hero", 0, doc.p.startX * 32f, doc.p.startY * 32f, 32f)
             }
             val sw = max(2f, 2f / scale)
             m.events.forEach { e ->

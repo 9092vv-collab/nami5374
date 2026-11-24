@@ -1,0 +1,42 @@
+name: Build Nami Maker (Windows, portable)
+# 손으로 시작할 때만 (Actions 탭 또는 Claude가 API로)
+on:
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.14.3
+      - name: Compile
+        run: |
+          set -o pipefail
+          gradle -p maker-desktop compileKotlin --no-daemon --stacktrace 2>&1 | tee compile.log
+      - name: Build app folder
+        run: gradle -p maker-desktop createDistributable --no-daemon
+      - name: Portable zip (설치 없이 실행)
+        shell: pwsh
+        run: |
+          $d = Get-ChildItem -Directory maker-desktop/build/compose/binaries/main/app | Select-Object -First 1
+          Write-Host "app dir: $($d.FullName)"
+          Compress-Archive -Path $d.FullName -DestinationPath NamiMaker-portable.zip -Force
+          Get-Item NamiMaker-portable.zip
+      - name: Publish (fixed link, tag maker-pc-latest)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete maker-pc-latest -R "${{ github.repository }}" --cleanup-tag -y || true
+          gh release create maker-pc-latest NamiMaker-portable.zip -R "${{ github.repository }}" --prerelease \
+            --title "Nami Maker PC (빌드 ${{ github.run_number }})" --notes "commit ${{ github.sha }}"

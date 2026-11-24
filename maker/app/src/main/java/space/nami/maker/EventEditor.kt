@@ -42,7 +42,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
-import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -119,7 +118,7 @@ fun EventEditor(doc: Doc, map: GameMap, ev: GameEvent, onClose: () -> Unit) {
                                 Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(60.dp).clickable { pg.graphic = g; tick++ }) {
                                     Canvas(Modifier.size(52.dp).clip(RoundedCornerShape(10.dp)).background(K.panel)
                                         .border(if (sel) 2.5.dp else 1.dp, if (sel) K.accent else K.line, RoundedCornerShape(10.dp))) {
-                                        drawIntoCanvas { c -> Art.sprite(c.nativeCanvas, g, pg.dir, 0f, 0f, size.width) }
+                                        drawIntoCanvas { c -> Art.sprite(c.art(), g, pg.dir, 0f, 0f, size.width) }
                                     }
                                     Text(Sprites.name(g), fontSize = 11.sp, color = K.sub, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                 }

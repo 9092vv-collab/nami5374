@@ -46,8 +46,14 @@ import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.drawscope.translate
-import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.focusable
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
@@ -200,7 +206,30 @@ fun PlayScreen(p: Project, onExit: () -> Unit) {
     val img = remember(game.mapId) { MapImage(game.map).also { it.all() } }
     val ib = remember(img) { img.bmp.asImageBitmap() }
 
-    Box(Modifier.fillMaxSize().background(Color.Black)) {
+    // keyboard (PC): arrows/WASD move, Z/Enter/Space = A
+    val focus = remember { androidx.compose.ui.focus.FocusRequester() }
+    LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
+    var sel by remember { mutableIntStateOf(0) }
+    LaunchedEffect(game.choices) { sel = 0 }
+    fun pressA() { if (game.msg != null && game.choices == null) game.advance() else if (game.msg == null) scope.launch { game.interact() } }
+    Box(Modifier.fillMaxSize().background(Color.Black)
+        .focusRequester(focus).focusable()
+        .onKeyEvent { e ->
+            val d = when (e.key) {
+                Key.DirectionDown, Key.S -> 0; Key.DirectionLeft, Key.A -> 1
+                Key.DirectionRight, Key.D -> 2; Key.DirectionUp, Key.W -> 3; else -> -1
+            }
+            val ch = game.choices
+            when {
+                ch != null && (d == 0 || d == 3) -> { if (e.type == KeyEventType.KeyDown) sel = (sel + (if (d == 0) 1 else -1) + ch.size) % ch.size; true }
+                d >= 0 && e.type == KeyEventType.KeyDown -> { held = d; true }
+                d >= 0 && e.type == KeyEventType.KeyUp -> { if (held == d) held = null; true }
+                e.type == KeyEventType.KeyDown && (e.key == Key.Z || e.key == Key.Enter || e.key == Key.Spacebar) -> {
+                    if (ch != null) game.pick(sel.coerceIn(0, ch.size - 1)) else pressA(); true
+                }
+                else -> false
+            }
+        }) {
         Canvas(Modifier.fillMaxSize()) {
             val m = game.map
             val ts = min(sqrt(size.width * size.height / 150f), size.width / 8f)
@@ -213,7 +242,7 @@ fun PlayScreen(p: Project, onExit: () -> Unit) {
             translate(-camX, -camY) {
                 drawImage(ib, IntOffset.Zero, IntSize(img.bmp.width, img.bmp.height), IntOffset.Zero, IntSize(mw.toInt() + 1, mh.toInt() + 1), filterQuality = FilterQuality.None)
                 drawIntoCanvas { c ->
-                    val nc = c.nativeCanvas
+                    val nc = c.art()
                     val sprites = mutableListOf<Triple<Float, Float, () -> Unit>>()
                     m.events.forEach { e ->
                         val pg = game.page(e) ?: return@forEach
@@ -253,6 +282,7 @@ fun PlayScreen(p: Project, onExit: () -> Unit) {
                 ) {
                     opts.forEachIndexed { i, o ->
                         Text(o, color = Color.White, fontSize = 17.sp, modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp))
+                            .background(if (i == sel) Color(0x33FFFFFF) else Color.Transparent)
                             .clickable { game.pick(i) }.padding(horizontal = 14.dp, vertical = 10.dp))
                     }
                 }
@@ -263,10 +293,7 @@ fun PlayScreen(p: Project, onExit: () -> Unit) {
                 Spacer(Modifier.weight(1f))
                 Box(
                     Modifier.size(78.dp).clip(CircleShape).background(Color(0x66FFFFFF)).border(2.dp, Color(0x88FFFFFF), CircleShape)
-                        .clickable {
-                            if (game.msg != null && game.choices == null) game.advance()
-                            else scope.launch { game.interact() }
-                        },
+                        .clickable { pressA() },
                     contentAlignment = Alignment.Center,
                 ) { Text("A", color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.Bold) }
             }
