@@ -68,7 +68,7 @@ object MapJson {
         val b = maxOf(2, Math.ceil(maxOf(m.w, m.h) / 30.0).toInt())
         val sb = StringBuilder()
         sb.append("{\"map\":${m.id},\"name\":${q(m.name)},\"w\":${m.w},\"h\":${m.h},\"summary_block\":$b,")
-        sb.append("\n\"note\":${q("맵이 커서 요약본이다. 한 글자 = ${b}×${b}칸(그 구역에 가장 많은 타일). 요약 글자 (c, r)는 실제 좌표 (c×$b, r×$b)부터. 칠하거나 정확한 위치가 필요하면 edits 없이 {"open":{"area":[x,y,w,h]}}로 그 구역을 먼저 열어 봐라(한 번에 40×40까지, 여러 개면 배열).")},")
+        sb.append("\n\"note\":${q("맵이 커서 요약본이다. 한 글자 = ${b}×${b}칸(그 구역에 가장 많은 타일). 요약 글자 (c, r)는 실제 좌표 (c×$b, r×$b)부터. 칠하거나 정확한 위치가 필요하면 edits 없이 {\"open\":{\"area\":[x,y,w,h]}}로 그 구역을 먼저 열어 봐라(한 번에 40×40까지, 여러 개면 배열).")},")
         fun rows(key: String, upper: Boolean) {
             sb.append("\n\"$key\":[\n")
             var y = 0
