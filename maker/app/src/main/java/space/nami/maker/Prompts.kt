@@ -40,7 +40,7 @@ object Prompts {
             // 2 = JSON edits instead of tool calls: keep the old presets (renamed), add and use a new 기본
             presets().forEach { it.put("name", it.optString("name") + " (이전 방식)") }
             val np = newPreset("기본", defaults())
-            root.put("presets", JSONArray(listOf(np) + presets())).put("active", np.getString("id")).put("v", 3)
+            root.put("presets", JSONArray(listOf(np) + presets())).put("active", np.getString("id")).put("v", 4)
             save()
         } else if (root.optInt("v") < 3) {
             // 3 = 소설로 게임 만들기: 이전 방식이 아닌 프리셋에 "소설로 게임 만들기"(system)와 "소설·계획"(user, 지금 맵 앞) 블록을 넣음
@@ -59,6 +59,21 @@ object Prompts {
                 }
             }
             root.put("v", 3); save()
+        }
+        if (root.optInt("v") < 4) {
+            presets().forEach { pr ->
+                val l = blocks(pr)
+                l.firstOrNull { it.optString("name") == "이벤트 규칙" }?.let { b ->
+                    val t = b.optString("text")
+                    if ("\"goal\"" !in t && MOVE_LINE in t) b.put("text", t.replace(MOVE_LINE, MOVE_LINE + "\n" + GOAL_LINE))
+                }
+                l.firstOrNull { it.optString("name") == "소설로 게임 만들기" }?.let { b ->
+                    val t = b.optString("text"); val k = "그 스위치를 조건으로)."
+                    if ("goal" !in t && k in t) b.put("text", t.replace(k, k + "\n   - 장면이 끝나 다음에 가야 할 곳이 있으면 goal 명령으로 목적지 화살표를 켜 둔다."))
+                }
+                pr.put("blocks", JSONArray(l))
+            }
+            root.put("v", 4); save()
         }
     }
 
@@ -99,6 +114,7 @@ run: action(바라보고 말 걸기·조사) | touch(밟으면) | auto(맵에 �
 - {"type":"if","cond":"switch","name":"스위치","on":true,"then":[...],"else":[...]}  /  {"type":"if","cond":"item","name":"아이템","then":[...],"else":[...]}
 - {"type":"transfer","map":맵 id,"x":0,"y":0}  (장소 이동, 화면이 자동으로 어두워졌다 밝아짐)
 - {"type":"move","target":"player|this|이벤트 id","route":"UULLR"}  (이동 경로: U D L R = 한 칸 걷기, u d l r = 그쪽 보기, . = 잠깐 쉬기. 다 걸을 때까지 기다림)
+- {"type":"goal","map":맵 id,"target":"이벤트 id"}  (목적지 화살표: 그 이벤트 위에 화살표, 다른 맵이면 그 맵으로 가는 문을 가리킴, 그 이벤트를 실행하면 꺼짐. "target":"off" = 끄기)
 - {"type":"item","name":"열쇠","amount":1}  (음수면 잃음)
 - {"type":"wait","ms":500}  /  {"type":"fade","out":true}  /  {"type":"end"}
 한 번만 일어날 일은 스위치를 켜고, 그 스위치를 조건으로 한 다음 페이지를 만든다(상자 열면 [상자1 열림] 켜고 페이지2는 빈 상자).
@@ -129,6 +145,7 @@ op은 위에서부터 순서대로 적용된다. 적용 뒤 앱이 문제(막힌
     )
 
     private const val TRANSFER_LINE = """- {"type":"transfer","map":맵 id,"x":0,"y":0}  (장소 이동, 화면이 자동으로 어두워졌다 밝아짐)"""
+    private const val GOAL_LINE = """- {"type":"goal","map":맵 id,"target":"이벤트 id"}  (목적지 화살표: 그 이벤트 위에 화살표, 다른 맵이면 그 맵으로 가는 문을 가리킴, 그 이벤트를 실행하면 꺼짐. "target":"off" = 끄기)"""
     private const val MOVE_LINE = """- {"type":"move","target":"player|this|이벤트 id","route":"UULLR"}  (이동 경로: U D L R = 한 칸 걷기, u d l r = 그쪽 보기, . = 잠깐 쉬기. 다 걸을 때까지 기다림)"""
 
     fun storyBlock() = block("story", "user", "소설·계획", "[소설과 제작 계획]\n{{slot}}")
@@ -142,6 +159,7 @@ op은 위에서부터 순서대로 적용된다. 적용 뒤 앱이 문제(막힌
    - 대사는 소설의 말투를 살려 짧게 나눈다(한 번에 2~3줄). 서술은 이름 없는 대사나 이벤트 지점의 자동 실행으로 보여 준다.
    - 장면 연출은 move 명령으로 인물을 걷게 하고, wait·fade로 호흡을 준다. 장면이 바뀌면 transfer.
    - 다음 장면으로 넘어가는 조건은 스위치로 만든다(장면이 끝나면 스위치를 켜고, 다음 장면 이벤트는 그 스위치를 조건으로).
+   - 장면이 끝나 다음에 가야 할 곳이 있으면 goal 명령으로 목적지 화살표를 켜 둔다.
    - 소설에 없는 사건이나 인물을 지어내지 않는다. 게임에 필요한 연결(문, 길)만 더한다.
 4. 계획을 고치라고 하면 set_plan으로 계획 전체를 다시 쓴다.""")
 

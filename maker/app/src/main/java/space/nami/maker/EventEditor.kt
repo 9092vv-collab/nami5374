@@ -267,6 +267,17 @@ private fun CmdDialog(p: Project, c: Cmd, onDone: () -> Unit, onDelete: () -> Un
                         }
                         Text("도착할 칸의 좌표 (왼쪽 위가 0, 0)", fontSize = 12.sp, color = K.sub)
                     }
+                    "goal" -> {
+                        val off = target.toIntOrNull() == null
+                        Seg(listOf("목적지 정하기", "화살표 끄기"), if (off) 1 else 0) { target = if (it == 1) "off" else (p.map(mapId)?.events?.firstOrNull()?.id?.toString() ?: "1") }
+                        if (!off) {
+                            LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) { items(p.maps) { m -> Pill(m.name, on = m.id == mapId) { mapId = m.id; target = m.events.firstOrNull()?.id?.toString() ?: "1" } } }
+                            val evs = p.map(mapId)?.events.orEmpty()
+                            if (evs.isEmpty()) Text("이 맵에 이벤트가 없어요", fontSize = 12.sp, color = K.sub)
+                            else LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) { items(evs) { e -> Pill(e.name.ifBlank { "#${e.id}" }, on = target == e.id.toString()) { target = e.id.toString() } } }
+                        }
+                        Text("플레이 중 그 이벤트 위에 화살표가 떠요. 다른 맵이면 그쪽으로 가는 문을 가리키고, 그 이벤트를 실행하면 저절로 꺼져요.", fontSize = 12.sp, color = K.sub)
+                    }
                     "item" -> {
                         Field(name, { name = it }, "아이템 이름", Modifier.fillMaxWidth())
                         Field(amount, { amount = it.filter { ch -> ch.isDigit() || ch == '-' }.take(4) }, "개수 (잃으면 -1)", Modifier.fillMaxWidth())
@@ -300,6 +311,7 @@ private fun CmdDialog(p: Project, c: Cmd, onDone: () -> Unit, onDelete: () -> Un
                 c.map = mapId; c.x = x.toIntOrNull() ?: 0; c.y = y.toIntOrNull() ?: 0
                 c.ms = ms.toIntOrNull() ?: 500; c.amount = amount.toIntOrNull() ?: 1; c.out = out
                 c.target = target.ifBlank { "player" }; c.route = route
+                if (c.type == "goal") c.map = mapId
                 onDone()
             }) { Text("확인") }
         },

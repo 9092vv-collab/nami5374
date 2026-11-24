@@ -88,6 +88,21 @@ class Game(val p: Project) {
     /** 이동 경로 명령: 움직이는 중인 이벤트의 그려질 위치, 돌아선 방향. */
     val evPos = mutableStateMapOf<Int, Pair<Float, Float>>()
     val turned = mutableStateMapOf<Int, Int>()
+    /** 목적지 화살표: 맵 id·이벤트 id (없으면 -1). 그 이벤트를 실행하면 저절로 꺼짐. */
+    var goalMap by mutableStateOf(-1)
+    var goalEv by mutableStateOf(-1)
+
+    /** 화살표가 가리킬 칸: 목적지가 이 맵이면 그 이벤트, 다른 맵이면 그 맵으로 가는 이동 이벤트. */
+    fun goalTile(): Pair<Float, Float>? {
+        if (goalMap < 0) return null
+        if (goalMap == mapId) {
+            val e = map.events.firstOrNull { it.id == goalEv } ?: return null
+            return evPos[e.id] ?: (e.x.toFloat() to e.y.toFloat())
+        }
+        fun leads(l: List<Cmd>): Boolean = l.any { c -> (c.type == "transfer" && c.map == goalMap) || leads(c.then) || leads(c.other) || c.branches.any { leads(it) } }
+        val door = map.events.firstOrNull { e -> e.pages.any { leads(it.commands) } } ?: return null
+        return door.x.toFloat() to door.y.toFloat()
+    }
     var msg by mutableStateOf<Pair<String, String>?>(null)
     var choices by mutableStateOf<List<String>?>(null)
     var busy by mutableStateOf(false)
@@ -156,6 +171,7 @@ class Game(val p: Project) {
         val pg = page(e) ?: return
         busy = true
         if (faceMe && pg.graphic != "none") face[e.id] = opposite(dir)
+        if (goalMap == mapId && goalEv == e.id) { goalMap = -1; goalEv = -1 }
         try { exec(pg.commands, e) } finally { face.remove(e.id); msg = null; choices = null; busy = false }
     }
 
@@ -177,6 +193,7 @@ class Game(val p: Project) {
                     if (!dark) fade.animateTo(0f, tween(260))
                 }
                 "move" -> moveRoute(c.target, c.route, self)
+                "goal" -> { val id = c.target.toIntOrNull(); if (id == null) { goalMap = -1; goalEv = -1 } else { goalMap = if (c.map > 0) c.map else mapId; goalEv = id } }
                 "item" -> if (c.name.isNotBlank()) items[c.name] = max(0, (items[c.name] ?: 0) + c.amount)
                 "wait" -> delay(c.ms.toLong().coerceIn(0, 60000))
                 "fade" -> fade.animateTo(if (c.out) 1f else 0f, tween(450))
@@ -251,6 +268,8 @@ fun PlayScreen(p: Project, onExit: () -> Unit) {
     val scope = rememberCoroutineScope()
     var held by remember { mutableStateOf<Int?>(null) }
     var bag by remember { mutableStateOf(false) }
+    val bounce by androidx.compose.animation.core.rememberInfiniteTransition(label = "goal").animateFloat(0f, 1f,
+        androidx.compose.animation.core.infiniteRepeatable(tween(520), androidx.compose.animation.core.RepeatMode.Reverse), label = "b")
     // F3: 초당 프레임 보기 (PC)
     var showFps by remember { mutableStateOf(false) }
     var fps by remember { mutableIntStateOf(0) }
@@ -327,6 +346,7 @@ fun PlayScreen(p: Project, onExit: () -> Unit) {
                     sprites.sortedWith(compareBy<Triple<Float, Float, () -> Unit>>({ it.first }, { it.second })).forEach { it.third() }
                 }
             }
+            game.goalTile()?.let { (gx, gy) -> drawGoal(gx * ts - kotlin.math.round(camX), gy * ts - kotlin.math.round(camY), ts, bounce) }
             if (game.fade.value > 0f) drawRect(Color.Black.copy(alpha = game.fade.value))
         }
         if (showFps) Text("${fps} fps" + (if (Plat.gfx.isNotEmpty()) " · ${Plat.gfx}" else ""), color = Color.Yellow, fontSize = 14.sp,
@@ -431,4 +451,28 @@ private fun DPad(onDir: (Int?) -> Unit) {
             }
         }
     }
+}
+
+/** 목적지 화살표. 칸이 화면 안이면 그 위에서 통통 튀는 ▼, 밖이면 화면 가장자리에서 그쪽을 가리킴. */
+private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawGoal(x: Float, y: Float, ts: Float, b: Float) {
+    val r = ts * 0.32f
+    val tx = x + ts / 2; val ty = y - ts * 0.15f - b * ts * 0.18f
+    val m = r * 1.6f
+    fun tri(cx: Float, cy: Float, ang: Float) {
+        // ang: 화살 끝이 향하는 방향(라디안), 기본 아래
+        val path = androidx.compose.ui.graphics.Path()
+        fun pt(dx: Float, dy: Float): Offset {
+            val c = kotlin.math.cos(ang - (Math.PI / 2).toFloat()); val s = kotlin.math.sin(ang - (Math.PI / 2).toFloat())
+            return Offset(cx + dx * c - dy * s, cy + dx * s + dy * c)
+        }
+        val a = pt(0f, r); val l = pt(-r, -r * 0.6f); val rr = pt(r, -r * 0.6f)
+        path.moveTo(a.x, a.y); path.lineTo(l.x, l.y); path.lineTo(rr.x, rr.y); path.close()
+        drawPath(path, Color(0xFFFFD54F))
+        drawPath(path, Color(0xFF5D4037), style = androidx.compose.ui.graphics.drawscope.Stroke(width = maxOf(2f, ts * 0.05f)))
+    }
+    if (tx in m..size.width - m && ty in m..size.height - m) { tri(tx, ty, (Math.PI / 2).toFloat()); return }
+    val cx = size.width / 2; val cy = size.height / 2
+    val ang = kotlin.math.atan2(ty + ts * 0.5f - cy, tx - cx)
+    val ex = tx.coerceIn(m, size.width - m); val ey = (ty + ts * 0.5f).coerceIn(m, size.height - m)
+    tri(ex - kotlin.math.cos(ang) * b * r * 0.5f, ey - kotlin.math.sin(ang) * b * r * 0.5f, ang)
 }

@@ -43,6 +43,7 @@ class Cmd(var type: String) {
             "fade" -> o.put("out", out)
             "item" -> o.put("name", name).put("amount", amount)
             "move" -> o.put("target", target).put("route", route)
+            "goal" -> o.put("map", map).put("target", target)
         }
         return o
     }
@@ -50,7 +51,7 @@ class Cmd(var type: String) {
     fun copy(): Cmd = from(toJson())
 
     companion object {
-        val TYPES = listOf("text", "choice", "switch", "if", "transfer", "move", "item", "wait", "fade", "end")
+        val TYPES = listOf("text", "choice", "switch", "if", "transfer", "move", "goal", "item", "wait", "fade", "end")
 
         fun label(type: String) = when (type) {
             "text" -> "대사"
@@ -59,6 +60,7 @@ class Cmd(var type: String) {
             "if" -> "조건 분기"
             "transfer" -> "장소 이동"
             "move" -> "이동 경로"
+            "goal" -> "목적지 표시"
             "item" -> "아이템"
             "wait" -> "기다리기"
             "fade" -> "화면 어둡게/밝게"
@@ -111,6 +113,7 @@ class Cmd(var type: String) {
         "switch" -> "스위치 [$name] = ${if (on) "켜기" else "끄기"}"
         "if" -> if (cond == "item") "만약 아이템 [$name] 있으면" else "만약 스위치 [$name] ${if (on) "켜짐" else "꺼짐"}"
         "transfer" -> "이동: ${p?.map(map)?.name ?: "맵 $map"} ($x, $y)"
+        "goal" -> if (target == "off" || target.toIntOrNull() == null) "목적지 표시 끄기" else "목적지: " + (p?.map(map)?.let { m -> m.name + " · " + (m.event(target.toInt())?.name?.ifBlank { null } ?: "이벤트 #$target") } ?: "맵 $map 이벤트 #$target")
         "move" -> "이동 경로 [" + (when (target) { "player" -> "주인공"; "this" -> "이 이벤트"; else -> "이벤트 #$target" }) + "] " + routeText(route)
         "item" -> "아이템 [$name] ${if (amount >= 0) "+$amount" else "$amount"}"
         "wait" -> "기다리기 ${ms}ms"
