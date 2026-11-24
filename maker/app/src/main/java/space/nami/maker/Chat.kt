@@ -1,0 +1,158 @@
+package space.nami.maker
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowUpward
+import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Build
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.EditNote
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.launch
+
+@Composable
+fun ChatPane(chat: AiChat, mapId: Int, modifier: Modifier, onSettings: () -> Unit, onClose: (() -> Unit)?) {
+    val scope = rememberCoroutineScope()
+    var input by remember { mutableStateOf("") }
+    val list = rememberLazyListState()
+    LaunchedEffect(chat.items.size, chat.busy) { if (chat.items.isNotEmpty()) list.animateScrollToItem((chat.items.size + (if (chat.busy) 1 else 0) - 1).coerceAtLeast(0)) }
+    fun send(t: String) {
+        val s = t.trim(); if (s.isEmpty() || chat.busy) return
+        input = ""
+        scope.launch { chat.send(s, mapId) }
+    }
+
+    Column(modifier.imePadding()) {
+        Row(Modifier.fillMaxWidth().padding(start = 14.dp, end = 4.dp, top = 6.dp, bottom = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Filled.AutoAwesome, null, tint = K.accent, modifier = Modifier.size(18.dp))
+            Text("  AI", fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = K.text)
+            Spacer(Modifier.weight(1f))
+            IconBtn(Icons.Filled.EditNote, "새 대화", enabled = !chat.busy) { chat.clear() }
+            if (onClose != null) IconBtn(Icons.Filled.Close, "닫기") { onClose() } else IconBtn(Icons.Filled.Settings, "설정") { onSettings() }
+        }
+        LazyColumn(Modifier.weight(1f).fillMaxWidth(), state = list, contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 14.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (chat.items.isEmpty()) {
+                item {
+                    Column(Modifier.fillMaxWidth().padding(top = 40.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("무엇을 만들어볼까요?", fontSize = 24.sp, fontFamily = FontFamily.Serif, color = K.text)
+                        Spacer(Modifier.padding(4.dp))
+                        Text("AI가 지금 맵을 보면서 직접 고쳐요", fontSize = 13.sp, color = K.sub)
+                        Spacer(Modifier.padding(10.dp))
+                        listOf("이 맵을 보고 어떤지 말해줘", "집 안 맵을 만들고 문으로 연결해줘", "마을 사람 3명 놓고 대사 써줘", "상자를 열면 열쇠가 나오게 해줘").forEach { s ->
+                            Text(s, fontSize = 14.sp, color = K.text, modifier = Modifier.padding(vertical = 4.dp).clip(RoundedCornerShape(14.dp))
+                                .border(1.dp, K.line, RoundedCornerShape(14.dp)).background(K.card).clickable { send(s) }
+                                .padding(horizontal = 14.dp, vertical = 10.dp))
+                        }
+                    }
+                }
+            }
+            itemsIndexed(chat.items) { _, it ->
+                when (it.role) {
+                    "user" -> Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
+                        Text(it.text, fontSize = 15.sp, color = K.text, modifier = Modifier.widthIn(max = 320.dp)
+                            .clip(RoundedCornerShape(18.dp)).background(K.bubble).padding(horizontal = 14.dp, vertical = 10.dp))
+                    }
+                    "ai" -> Text(it.text, fontSize = 15.sp, color = K.text, lineHeight = 22.sp, modifier = Modifier.padding(end = 12.dp))
+                    "tool" -> Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Filled.Build, null, tint = K.sub, modifier = Modifier.size(13.dp))
+                        Text("  " + it.text, fontSize = 12.sp, color = K.sub)
+                    }
+                    else -> Text(it.text, fontSize = 13.sp, color = K.danger, modifier = Modifier.clip(RoundedCornerShape(10.dp))
+                        .background(Color(0xFFFBE9E7)).padding(horizontal = 12.dp, vertical = 8.dp))
+                }
+            }
+            if (chat.busy) item {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    CircularProgressIndicator(Modifier.size(16.dp), color = K.accent, strokeWidth = 2.dp)
+                    Text("  작업하는 중…", fontSize = 13.sp, color = K.sub)
+                }
+            }
+        }
+        Row(
+            Modifier.fillMaxWidth().padding(10.dp).clip(RoundedCornerShape(24.dp)).background(K.card)
+                .border(1.dp, K.line, RoundedCornerShape(24.dp)).padding(start = 16.dp, end = 6.dp, top = 6.dp, bottom = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(Modifier.weight(1f).padding(vertical = 6.dp)) {
+                if (input.isEmpty()) Text("AI에게 부탁하기", fontSize = 15.sp, color = K.sub)
+                BasicTextField(input, { input = it }, Modifier.fillMaxWidth().heightIn(max = 140.dp),
+                    textStyle = TextStyle(fontSize = 15.sp, color = K.text), cursorBrush = SolidColor(K.accent))
+            }
+            val can = input.isNotBlank() && !chat.busy
+            Box(Modifier.size(36.dp).clip(CircleShape).background(if (can) K.accent else K.line).clickable(enabled = can) { send(input) },
+                contentAlignment = Alignment.Center) {
+                Icon(Icons.Filled.ArrowUpward, "보내기", tint = Color.White, modifier = Modifier.size(20.dp))
+            }
+        }
+    }
+}
+
+@Composable
+fun SettingsDialog(onClose: () -> Unit) {
+    val ctx = LocalContext.current
+    var key by remember { mutableStateOf(AiPrefs.key(ctx)) }
+    var model by remember { mutableStateOf(AiPrefs.model(ctx)) }
+    AlertDialog(
+        onDismissRequest = onClose, containerColor = K.bg,
+        title = { Text("AI 설정") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                androidx.compose.material3.OutlinedTextField(
+                    key, { key = it }, label = { Text("Anthropic API 키") }, singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp),
+                )
+                Text("console.anthropic.com에서 만든 키. 이 폰에만 저장돼요.", fontSize = 12.sp, color = K.sub)
+                Text("모델", fontSize = 13.sp, color = K.sub, fontWeight = FontWeight.SemiBold)
+                Seg(AiPrefs.MODELS.map { it.second }, AiPrefs.MODELS.indexOfFirst { it.first == model }.coerceAtLeast(0)) { model = AiPrefs.MODELS[it].first }
+                Text("Sonnet이 기본. Opus는 더 똑똑하지만 비싸고, Haiku는 싸고 빨라요.", fontSize = 12.sp, color = K.sub)
+            }
+        },
+        confirmButton = { TextButton(onClick = { AiPrefs.setKey(ctx, key); AiPrefs.setModel(ctx, model); onClose() }) { Text("저장") } },
+        dismissButton = { TextButton(onClick = onClose) { Text("취소", color = K.sub) } },
+    )
+}
