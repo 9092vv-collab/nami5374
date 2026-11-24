@@ -12,6 +12,7 @@ class MainActivity : ComponentActivity() {
         Api.init(this)
         Prompts.init(this)
         Chars.init(this)
+        Logs.init(this)
         val t = android.graphics.Color.TRANSPARENT
         enableEdgeToEdge(SystemBarStyle.light(t, t), SystemBarStyle.light(t, t))
         setContent { MakerTheme { App() } }

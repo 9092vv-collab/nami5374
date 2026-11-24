@@ -252,10 +252,15 @@ object Api {
             .put("generationConfig", JSONObject().put("responseModalities", JSONArray().put("TEXT").put("IMAGE"))
                 .also { if (aspect) it.put("imageConfig", JSONObject().put("aspectRatio", "3:4")) })
         val url = c.base + "/models/${URLEncoder.encode(modelId.trim(), "UTF-8")}:generateContent"
-        val o = JSONObject(try { http("POST", url, c.headers, body(true).toString(), 240_000) } catch (e: ApiError) {
+        val t0 = System.currentTimeMillis()
+        val rec = Logs.Rec(); rec.body = body(true)
+        val o = try { JSONObject(try { http("POST", url, c.headers, body(true).toString(), 240_000) } catch (e: ApiError) {
             // 비율 설정을 모르는 모델이면 빼고 한 번 더
-            if (Regex("imageConfig|aspect", RegexOption.IGNORE_CASE).containsMatchIn(e.message ?: "")) http("POST", url, c.headers, body(false).toString(), 240_000) else throw e
-        })
+            if (Regex("imageConfig|aspect", RegexOption.IGNORE_CASE).containsMatchIn(e.message ?: "")) { rec.body = body(false); http("POST", url, c.headers, body(false).toString(), 240_000) } else throw e
+        }) } catch (e: kotlinx.coroutines.CancellationException) { throw e
+        } catch (e: Exception) { Logs.add("error", modelId.trim(), p.optString("name"), rec.body, null, System.currentTimeMillis() - t0, null, e.message ?: e.javaClass.simpleName); throw e }
+        geminiUsage(o.optJSONObject("usageMetadata"), rec)
+        Logs.add("image", modelId.trim(), p.optString("name"), rec.body, o, System.currentTimeMillis() - t0, rec.usage)
         val cand = o.optJSONArray("candidates")?.optJSONObject(0)
         val ps = cand?.optJSONObject("content")?.optJSONArray("parts") ?: JSONArray()
         for (i in 0 until ps.length()) {
@@ -347,7 +352,37 @@ object Api {
         val p = provider(m.optString("providerId")) ?: throw ApiError("모델에 연결된 프로바이더가 없어요")
         val c = connect(p)
         val cb = if (atOnce(m)) Live() else live
-        return if (c.format == "gemini") geminiTurn(c, m, system, tools, messages, cb, json) else anthropicTurn(c, m, system, tools, messages, cb)
+        val rec = Logs.Rec(); val t0 = System.currentTimeMillis()
+        try {
+            val t = if (c.format == "gemini") geminiTurn(c, m, system, tools, messages, cb, json, rec) else anthropicTurn(c, m, system, tools, messages, cb, rec)
+            Logs.add("chat", m.optString("modelId"), p.optString("name"), rec.body,
+                JSONObject().put("blocks", t.blocks).put("reasoning", t.reasoning).put("finish", rec.finish), System.currentTimeMillis() - t0, rec.usage)
+            return t
+        } catch (e: kotlinx.coroutines.CancellationException) { throw e
+        } catch (e: Exception) {
+            Logs.add("error", m.optString("modelId"), p.optString("name"), rec.body, null, System.currentTimeMillis() - t0, rec.usage, e.message ?: e.javaClass.simpleName)
+            throw e
+        }
+    }
+
+    private fun anthropicUsage(u: JSONObject?, rec: Logs.Rec) {
+        if (u == null) return
+        if (u.has("input_tokens")) {
+            // 캐시 읽기·쓰기도 입력에 포함해서 보여줌
+            val cr = u.optInt("cache_read_input_tokens"); val cw = u.optInt("cache_creation_input_tokens")
+            rec.usage.put("input", u.optInt("input_tokens") + cr + cw)
+            if (cr > 0) rec.usage.put("cached", cr)
+            if (cw > 0) rec.usage.put("cacheWrite", cw)
+        }
+        if (u.has("output_tokens")) rec.usage.put("output", u.optInt("output_tokens"))
+    }
+
+    private fun geminiUsage(u: JSONObject?, rec: Logs.Rec) {
+        if (u == null) return
+        if (u.has("promptTokenCount")) rec.usage.put("input", u.optInt("promptTokenCount"))
+        if (u.has("cachedContentTokenCount")) rec.usage.put("cached", u.optInt("cachedContentTokenCount"))
+        if (u.has("candidatesTokenCount")) rec.usage.put("output", u.optInt("candidatesTokenCount"))
+        if (u.has("thoughtsTokenCount")) rec.usage.put("thinking", u.optInt("thoughtsTokenCount"))
     }
 
     /** POST that reads a server-sent-event stream; onData gets each event's data. */
@@ -376,7 +411,7 @@ object Api {
         } finally { c.disconnect() }
     }
 
-    private suspend fun anthropicTurn(c: Conn, m: JSONObject, system: String, tools: JSONArray?, messages: JSONArray, live: Live): Turn {
+    private suspend fun anthropicTurn(c: Conn, m: JSONObject, system: String, tools: JSONArray?, messages: JSONArray, live: Live, rec: Logs.Rec): Turn {
         // role + content only; back-to-back messages of the same role (after a deleted answer) are merged
         val clean = JSONArray()
         for (i in 0 until messages.length()) {
@@ -397,19 +432,23 @@ object Api {
             if (maxTokens <= budget) maxTokens = budget + 4000
         }
         body.put("max_tokens", maxTokens)
+        rec.body = body
         if (!stream(m)) {
             val o = JSONObject(http("POST", c.base + "/messages", c.headers, body.toString()))
+            anthropicUsage(o.optJSONObject("usage"), rec); rec.finish = o.optString("stop_reason")
             val a = o.optJSONArray("content") ?: JSONArray()
             val r = StringBuilder()
             for (i in 0 until a.length()) a.getJSONObject(i).takeIf { it.optString("type") == "thinking" }?.let { r.append(it.optString("thinking")) }
             return Turn(a, null, o.optString("stop_reason") == "tool_use", r.toString())
         }
         body.put("stream", true)
+        rec.body = body
         val blocks = sortedMapOf<Int, JSONObject>(); val json = mutableMapOf<Int, StringBuilder>()
         val reasoning = StringBuilder(); var stop = ""
         sse(c.base + "/messages", c.headers, body.toString()) { d ->
             val o = runCatching { JSONObject(d) }.getOrNull() ?: return@sse
             when (o.optString("type")) {
+                "message_start" -> anthropicUsage(o.optJSONObject("message")?.optJSONObject("usage"), rec)
                 "content_block_start" -> {
                     val i = o.optInt("index"); val cb = o.getJSONObject("content_block")
                     when (cb.optString("type")) {
@@ -432,7 +471,7 @@ object Api {
                     val i = o.optInt("index")
                     json[i]?.let { sb -> blocks[i]?.put("input", runCatching { JSONObject(sb.toString().ifBlank { "{}" }) }.getOrDefault(JSONObject())) }
                 }
-                "message_delta" -> o.optJSONObject("delta")?.optString("stop_reason")?.takeIf { it.isNotBlank() }?.let { stop = it }
+                "message_delta" -> { o.optJSONObject("delta")?.optString("stop_reason")?.takeIf { it.isNotBlank() }?.let { stop = it; rec.finish = it }; anthropicUsage(o.optJSONObject("usage"), rec) }
                 "error" -> throw ApiError(o.optJSONObject("error")?.optString("message") ?: "Anthropic 스트림 오류")
             }
         }
@@ -442,7 +481,7 @@ object Api {
 
     private val BLOCKS = setOf("SAFETY", "PROHIBITED_CONTENT", "BLOCKLIST", "SPII", "IMAGE_SAFETY", "RECITATION", "OTHER")
 
-    private suspend fun geminiTurn(c: Conn, m: JSONObject, system: String, tools: JSONArray?, messages: JSONArray, live: Live, json: Boolean): Turn {
+    private suspend fun geminiTurn(c: Conn, m: JSONObject, system: String, tools: JSONArray?, messages: JSONArray, live: Live, json: Boolean, rec: Logs.Rec): Turn {
         val id = m.optString("modelId")
         val decl = JSONArray()
         for (i in 0 until (tools?.length() ?: 0)) {
@@ -471,14 +510,16 @@ object Api {
                 listOf("HARM_CATEGORY_HARASSMENT", "HARM_CATEGORY_HATE_SPEECH", "HARM_CATEGORY_SEXUALLY_EXPLICIT", "HARM_CATEGORY_DANGEROUS_CONTENT")
                     .forEach { a.put(JSONObject().put("category", it).put("threshold", "BLOCK_NONE")) }
             })
+        rec.body = body
         val model = URLEncoder.encode(id, "UTF-8")
         val parts = mutableListOf<JSONObject>()
         var finish = ""
         fun take(o: JSONObject) {
             o.optJSONObject("promptFeedback")?.optString("blockReason")?.takeIf { it.isNotBlank() }?.let { throw ApiError("구글 안전 필터에 막혔어요 (사유: $it)") }
             o.optJSONObject("error")?.let { throw ApiError(it.optString("message", "Gemini 오류")) }
+            geminiUsage(o.optJSONObject("usageMetadata"), rec)
             val cand = o.optJSONArray("candidates")?.optJSONObject(0) ?: return
-            cand.optString("finishReason").takeIf { it.isNotBlank() }?.let { finish = it }
+            cand.optString("finishReason").takeIf { it.isNotBlank() }?.let { finish = it; rec.finish = it }
             val ps = cand.optJSONObject("content")?.optJSONArray("parts") ?: return
             for (i in 0 until ps.length()) {
                 val pt = ps.getJSONObject(i)

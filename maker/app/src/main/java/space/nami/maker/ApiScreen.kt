@@ -64,7 +64,7 @@ fun SettingsDialog(onClose: () -> Unit) {
     Dialog(onDismissRequest = { back() },
         properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
         Box(Modifier.fillMaxSize().background(K.bg).safeDrawingPadding().imePadding()) {
-            @Suppress("UNUSED_VARIABLE") val rev = Api.rev + Prompts.rev
+            @Suppress("UNUSED_VARIABLE") val rev = Api.rev + Prompts.rev + Logs.rev
             val r = stack.lastOrNull() ?: ""
             val parts = r.split(":")
             when {
@@ -72,7 +72,8 @@ fun SettingsDialog(onClose: () -> Unit) {
                 parts[0] == "m" && Api.model(parts[1]) != null -> ModelPage(parts[1], onBack = { back() })
                 parts[0] == "ps" && Prompts.preset(parts[1]) != null -> PresetPage(parts[1], onBack = { back() }, onBlock = { go("b:${parts[1]}:$it") })
                 parts[0] == "b" && parts.size == 3 && Prompts.preset(parts[1]) != null -> BlockPage(parts[1], parts[2], onBack = { back() })
-                else -> ApiHome(onClose = onClose, onOpen = { go("p:$it") }, onModel = { go("m:$it") }, onPreset = { go("ps:$it") })
+                r == "logs" -> LogsPage(onBack = { back() })
+                else -> ApiHome(onClose = onClose, onOpen = { go("p:$it") }, onModel = { go("m:$it") }, onPreset = { go("ps:$it") }, onLogs = { go("logs") })
             }
         }
     }
@@ -132,7 +133,7 @@ private fun Radio(on: Boolean) {
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun ApiHome(onClose: () -> Unit, onOpen: (String) -> Unit, onModel: (String) -> Unit, onPreset: (String) -> Unit) {
+private fun ApiHome(onClose: () -> Unit, onOpen: (String) -> Unit, onModel: (String) -> Unit, onPreset: (String) -> Unit, onLogs: () -> Unit) {
     @Suppress("UNUSED_VARIABLE") val rev = Api.rev + Prompts.rev
     val clip = LocalClipboardManager.current
     var presetMsg by remember { mutableStateOf<Pair<Boolean?, String>>(null to "") }
@@ -159,6 +160,17 @@ private fun ApiHome(onClose: () -> Unit, onOpen: (String) -> Unit, onModel: (Str
                     }
                 }
                 if (models.isNotEmpty()) Hint("동그라미 = AI가 쓸 모델. 카드를 누르면 스트리밍·추론 설정이에요.")
+                Card(onClick = onLogs) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("요청 로그", fontSize = 15.sp, color = K.text)
+                            val last = Logs.entries().firstOrNull()
+                            Text(if (last == null) "AI에 보낸 요청과 응답 · 토큰·캐시" else "최근: " + (Logs.usageLine(last.optJSONObject("usage")).ifBlank { last.optString("model") }),
+                                fontSize = 12.sp, color = K.sub, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                        }
+                        Text("열기 ›", fontSize = 13.sp, color = K.sub)
+                    }
+                }
                 Label("프롬프트에 유저 설정 ({{user}})")
                 var uname by remember { mutableStateOf(Prompts.userName()) }
                 Input(uname, { uname = it; Prompts.setUserName(it) }, "예: 자기")
@@ -680,5 +692,74 @@ fun ImagePage(modifier: Modifier = Modifier) {
         }
         Spacer(Modifier.height(40.dp))
       }
+    }
+}
+
+
+/** 요청 로그 (next처럼): 누르면 펼치고, 복사 버튼으로 바로 복사 */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun LogsPage(onBack: () -> Unit) {
+    @Suppress("UNUSED_VARIABLE") val rev = Logs.rev
+    val clip = LocalClipboardManager.current
+    var openId by remember { mutableStateOf<String?>(null) }
+    var confirm by remember { mutableStateOf(false) }
+    var copied by remember { mutableStateOf("") }
+    var maxText by remember { mutableStateOf(Logs.max().toString()) }
+    fun copy(what: String, t: String) { clip.setText(androidx.compose.ui.text.AnnotatedString(t)); copied = what }
+    val kinds = mapOf("chat" to "채팅", "image" to "그림", "error" to "오류")
+    Column(Modifier.fillMaxSize()) {
+        Header("요청 로그", back = true, onClick = onBack)
+        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 18.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Column(Modifier.widthIn(max = 760.dp).fillMaxWidth()) {
+                SwitchRow("로그 기록", "AI에 보낸 요청과 받은 응답을 남겨요. 그림 데이터는 줄여서 적어요.", Logs.enabled()) { Logs.setEnabled(it) }
+                Label("보관할 개수")
+                Input(maxText, { v -> maxText = v.filter(Char::isDigit).take(3); maxText.toIntOrNull()?.let { Logs.setMax(it) } }, "50")
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("${Logs.entries().size}개", fontSize = 13.sp, color = K.sub, modifier = Modifier.weight(1f))
+                    if (Logs.entries().isNotEmpty()) Btn(if (confirm) "정말 지울까요?" else "모두 지우기") { if (!confirm) confirm = true else { Logs.clear(); confirm = false } }
+                }
+                Result(if (copied.isNotEmpty()) true else null, if (copied.isNotEmpty()) "$copied 복사했어요" else "")
+                Spacer(Modifier.height(8.dp))
+                if (Logs.entries().isEmpty()) Hint("아직 기록이 없어요.")
+                Logs.entries().forEach { e ->
+                    val id = e.optString("id"); val open = openId == id
+                    val time = java.text.SimpleDateFormat("MM.dd HH:mm:ss", java.util.Locale.KOREA).format(java.util.Date(e.optLong("at")))
+                    val err = e.optString("kind") == "error"
+                    Card(onClick = { openId = if (open) null else id }) {
+                        Column {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(kinds[e.optString("kind")] ?: e.optString("kind"), fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
+                                    color = if (err) K.danger else K.accent,
+                                    modifier = Modifier.clip(RoundedCornerShape(50)).background(if (err) Color(0xFFFBE9E7) else K.accentSoft).padding(horizontal = 8.dp, vertical = 3.dp))
+                                Spacer(Modifier.width(8.dp))
+                                Text(e.optString("model") + " · " + "%.1f초".format(e.optLong("ms") / 1000.0), fontSize = 12.sp, color = K.sub, modifier = Modifier.weight(1f),
+                                    maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                                Text(time, fontSize = 12.sp, color = K.sub)
+                            }
+                            Logs.usageLine(e.optJSONObject("usage")).takeIf { it.isNotBlank() }?.let { Text(it, fontSize = 12.sp, color = K.text, modifier = Modifier.padding(top = 6.dp)) }
+                            e.optString("error").takeIf { it.isNotBlank() }?.let { Text(it, fontSize = 12.sp, color = K.danger, modifier = Modifier.padding(top = 4.dp)) }
+                            if (open) {
+                                val req = e.optJSONObject("request"); val res = e.optJSONObject("response")
+                                Spacer(Modifier.height(10.dp))
+                                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    Btn("전체 복사", filled = true) { copy("요청과 응답을", Logs.full(e)) }
+                                    if (req != null) Btn("프롬프트 복사") { copy("프롬프트를", Logs.readable(req)) }
+                                    if (res != null) Btn("응답 복사") { copy("응답을", Logs.answer(res)) }
+                                    if (req != null) Btn("요청 JSON") { copy("요청 JSON을", req.toString(2)) }
+                                    if (res != null) Btn("응답 JSON") { copy("응답 JSON을", res.toString(2)) }
+                                }
+                                val preview = androidx.compose.runtime.remember(id) { Logs.full(e).take(20000) }
+                                androidx.compose.foundation.text.selection.SelectionContainer {
+                                    Text(preview, fontSize = 12.sp, lineHeight = 17.sp, color = K.text, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                                        modifier = Modifier.padding(top = 10.dp).fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(K.panel).padding(10.dp))
+                                }
+                            }
+                        }
+                    }
+                }
+                Spacer(Modifier.height(40.dp))
+            }
+        }
     }
 }
