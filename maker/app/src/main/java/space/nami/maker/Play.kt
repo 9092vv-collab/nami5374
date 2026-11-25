@@ -13,6 +13,12 @@ import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -365,7 +371,9 @@ fun PlayScreen(p: Project, onExit: () -> Unit) {
     var sel by remember { mutableIntStateOf(0) }
     LaunchedEffect(game.choices) { sel = 0 }
     fun pressA() { if (game.msg != null && game.choices == null) game.advance() else if (game.msg == null) scope.launch { game.interact() } }
-    Box(Modifier.fillMaxSize().background(Color.Black)
+    // MV/MZ look: a fixed 816×624 game screen (17×13 tiles of 48px) scaled to fit, black around it
+    androidx.activity.compose.BackHandler(enabled = bag) { bag = false }
+    BoxWithConstraints(Modifier.fillMaxSize().background(Color.Black)
         .focusRequester(focus).focusable()
         .onKeyEvent { e ->
             val d = when (e.key) {
@@ -375,93 +383,186 @@ fun PlayScreen(p: Project, onExit: () -> Unit) {
             val ch = game.choices
             when {
                 ch != null && (d == 0 || d == 3) -> { if (e.type == KeyEventType.KeyDown) sel = (sel + (if (d == 0) 1 else -1) + ch.size) % ch.size; true }
-                d >= 0 && e.type == KeyEventType.KeyDown -> { held = d; true }
+                bag && e.type == KeyEventType.KeyDown && (e.key == Key.X || e.key == Key.Z || e.key == Key.Enter || e.key == Key.Spacebar) -> { bag = false; true }
+                d >= 0 && e.type == KeyEventType.KeyDown -> { if (!bag) held = d; true }
                 d >= 0 && e.type == KeyEventType.KeyUp -> { if (held == d) held = null; true }
                 e.type == KeyEventType.KeyDown && e.key == Key.F3 -> { showFps = !showFps; true }
+                e.type == KeyEventType.KeyDown && (e.key == Key.X || e.key == Key.Insert) -> { if (game.msg == null && !game.busy) { held = null; bag = true }; true }
                 e.type == KeyEventType.KeyDown && (e.key == Key.Z || e.key == Key.Enter || e.key == Key.Spacebar) -> {
                     if (ch != null) game.pick(sel.coerceIn(0, ch.size - 1)) else pressA(); true
                 }
                 else -> false
             }
         }) {
-        Canvas(Modifier.fillMaxSize()) {
-            val m = game.map
-            val ts = min(sqrt(size.width * size.height / 150f), size.width / 8f)
-            val t = game.prog.value
-            val cx = game.fx + (game.px - game.fx) * t
-            val cy = game.fy + (game.py - game.fy) * t
-            val mw = m.w * ts; val mh = m.h * ts
-            val camX = if (mw <= size.width) (mw - size.width) / 2f else (cx * ts + ts / 2 - size.width / 2).coerceIn(0f, mw - size.width)
-            val camY = if (mh <= size.height) (mh - size.height) / 2f else (cy * ts + ts / 2 - size.height / 2).coerceIn(0f, mh - size.height)
-            // 카메라를 정수 픽셀에 맞춤(도트가 반 픽셀씩 흔들려 끊겨 보이는 것 방지)
-            translate(-kotlin.math.round(camX), -kotlin.math.round(camY)) {
-                drawImage(ib, IntOffset.Zero, IntSize(img.bmp.width, img.bmp.height), IntOffset.Zero, IntSize(mw.toInt() + 1, mh.toInt() + 1), filterQuality = FilterQuality.None)
-                drawIntoCanvas { c ->
-                    val nc = c.art()
-                    val sprites = mutableListOf<Triple<Float, Float, () -> Unit>>()
-                    m.events.forEach { e ->
-                        val pg = game.page(e) ?: return@forEach
-                        if (pg.graphic == "none") return@forEach
-                        val (ex, ey) = game.evPos[e.id] ?: (e.x.toFloat() to e.y.toFloat())
-                        val mv = game.evPos[e.id]
-                        // 걷는 중: 칸 앞쪽 절반은 발 내딛기(번갈아 왼발·오른발), 뒤쪽 절반은 서 있기
-                        val fr = if (mv == null) 1 else {
-                            val f = ((mv.first + mv.second) % 1f + 1f) % 1f
-                            if (f > 0.001f && f < 0.5f) (if ((kotlin.math.floor(mv.first + mv.second).toInt() and 1) == 0) 0 else 2) else 1
+        val dens = androidx.compose.ui.platform.LocalDensity.current
+        val k = min(constraints.maxWidth / MV_W, constraints.maxHeight / MV_H)   // screen px per game px
+        fun gdp(v: Float) = (v * k / dens.density).dp
+        fun gsp(v: Float) = (v * k / (dens.density * dens.fontScale)).sp
+        Box(Modifier.size(gdp(MV_W), gdp(MV_H)).align(Alignment.Center).clipToBounds()) {
+            Canvas(Modifier.fillMaxSize()) {
+                val m = game.map
+                val ts = size.width / 17f
+                val t = game.prog.value
+                val cx = game.fx + (game.px - game.fx) * t
+                val cy = game.fy + (game.py - game.fy) * t
+                val mw = m.w * ts; val mh = m.h * ts
+                val camX = if (mw <= size.width) (mw - size.width) / 2f else (cx * ts + ts / 2 - size.width / 2).coerceIn(0f, mw - size.width)
+                val camY = if (mh <= size.height) (mh - size.height) / 2f else (cy * ts + ts / 2 - size.height / 2).coerceIn(0f, mh - size.height)
+                // 카메라를 정수 픽셀에 맞춤(도트가 반 픽셀씩 흔들려 끊겨 보이는 것 방지)
+                translate(-kotlin.math.round(camX), -kotlin.math.round(camY)) {
+                    drawImage(ib, IntOffset.Zero, IntSize(img.bmp.width, img.bmp.height), IntOffset.Zero, IntSize(mw.toInt() + 1, mh.toInt() + 1), filterQuality = FilterQuality.None)
+                    drawIntoCanvas { c ->
+                        val nc = c.art()
+                        val sprites = mutableListOf<Triple<Float, Float, () -> Unit>>()
+                        m.events.forEach { e ->
+                            val pg = game.page(e) ?: return@forEach
+                            if (pg.graphic == "none") return@forEach
+                            val (ex, ey) = game.evPos[e.id] ?: (e.x.toFloat() to e.y.toFloat())
+                            val mv = game.evPos[e.id]
+                            // 걷는 중: 칸 앞쪽 절반은 발 내딛기(번갈아 왼발·오른발), 뒤쪽 절반은 서 있기
+                            val fr = if (mv == null) 1 else {
+                                val f = ((mv.first + mv.second) % 1f + 1f) % 1f
+                                if (f > 0.001f && f < 0.5f) (if ((kotlin.math.floor(mv.first + mv.second).toInt() and 1) == 0) 0 else 2) else 1
+                            }
+                            sprites.add(Triple(ey, 0f) { Art.sprite(nc, pg.graphic, game.face[e.id] ?: game.turned[e.id] ?: pg.dir, ex * ts, ey * ts, ts, frame = fr) })
                         }
-                        sprites.add(Triple(ey, 0f) { Art.sprite(nc, pg.graphic, game.face[e.id] ?: game.turned[e.id] ?: pg.dir, ex * ts, ey * ts, ts, frame = fr) })
+                        val bob = if (game.walking && game.steps % 2 == 0) 1 else 0
+                        val hf = if (game.walking && game.prog.value < 0.5f) (if (game.steps % 2 == 0) 0 else 2) else 1
+                        sprites.add(Triple(cy, 1f) { Art.sprite(nc, game.p.hero, game.dir, cx * ts, cy * ts, ts, bob, hf) })
+                        sprites.sortedWith(compareBy<Triple<Float, Float, () -> Unit>>({ it.first }, { it.second })).forEach { it.third() }
                     }
-                    val bob = if (game.walking && game.steps % 2 == 0) 1 else 0
-                    val hf = if (game.walking && game.prog.value < 0.5f) (if (game.steps % 2 == 0) 0 else 2) else 1
-                    sprites.add(Triple(cy, 1f) { Art.sprite(nc, game.p.hero, game.dir, cx * ts, cy * ts, ts, bob, hf) })
-                    sprites.sortedWith(compareBy<Triple<Float, Float, () -> Unit>>({ it.first }, { it.second })).forEach { it.third() }
                 }
+                game.goalTile()?.let { (gx, gy) -> drawGoal(gx * ts - kotlin.math.round(camX), gy * ts - kotlin.math.round(camY), ts, bounce) }
+                if (game.fade.value > 0f) drawRect(Color.Black.copy(alpha = game.fade.value))
             }
-            game.goalTile()?.let { (gx, gy) -> drawGoal(gx * ts - kotlin.math.round(camX), gy * ts - kotlin.math.round(camY), ts, bounce) }
-            if (game.fade.value > 0f) drawRect(Color.Black.copy(alpha = game.fade.value))
-        }
-        if (showFps) Text("${fps} fps" + (if (Plat.gfx.isNotEmpty()) " · ${Plat.gfx}" else ""), color = Color.Yellow, fontSize = 14.sp,
-            modifier = Modifier.align(Alignment.BottomStart).background(Color.Black.copy(alpha = 0.6f)).padding(6.dp))
 
-        Row(Modifier.fillMaxWidth().padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
-            RoundBtn { Icon(Icons.Filled.Close, "끝내기", tint = Color.White, modifier = Modifier.size(22.dp).clickable { onExit() }) }
-            Spacer(Modifier.weight(1f))
-            RoundBtn { Icon(Icons.Filled.Work, "가방", tint = Color.White, modifier = Modifier.size(22.dp).clickable { bag = !bag }) }
-        }
-        if (bag) {
-            Column(
-                Modifier.align(Alignment.TopEnd).padding(top = 64.dp, end = 12.dp).widthIn(min = 160.dp).clip(RoundedCornerShape(14.dp))
-                    .background(Color(0xE6202024)).padding(14.dp),
-            ) {
-                Text("가방", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
-                val have = game.items.filter { it.value > 0 }
-                if (have.isEmpty()) Text("비어 있어요", color = Color(0xFFAAAAAA), fontSize = 14.sp, modifier = Modifier.padding(top = 6.dp))
-                have.forEach { (k, v) -> Text("$k × $v", color = Color.White, fontSize = 14.sp, modifier = Modifier.padding(top = 6.dp)) }
-            }
-        }
-
-        Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth()) {
-            game.choices?.let { opts ->
-                Column(
-                    Modifier.align(Alignment.End).padding(end = 16.dp, bottom = 8.dp).widthIn(min = 160.dp).clip(RoundedCornerShape(14.dp))
-                        .background(Color(0xEE202024)).border(1.dp, Color(0x55FFFFFF), RoundedCornerShape(14.dp)).padding(6.dp),
-                ) {
-                    opts.forEachIndexed { i, o ->
-                        Text(o, color = Color.White, fontSize = 17.sp, modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp))
-                            .background(if (i == sel) Color(0x33FFFFFF) else Color.Transparent)
-                            .clickable { game.pick(i) }.padding(horizontal = 14.dp, vertical = 10.dp))
+            // ---- MV windows (positions in game pixels) ----
+            val msg = game.msg
+            if (msg != null) {
+                // message window: full width, 4 lines, at the bottom
+                val msgH = MV_PAD * 2 + MV_LINE * 4
+                if (msg.first.isNotBlank()) {
+                    // MZ name box above the message window, left
+                    MvWindow(k, Modifier.offset(x = gdp(0f), y = gdp(MV_H - msgH - 60f)).height(gdp(60f)).widthIn(min = gdp(120f))) {
+                        Text(msg.first, color = MV_NAME, fontSize = gsp(MV_FONT), style = mvText(k), maxLines = 1,
+                            modifier = Modifier.align(Alignment.CenterStart).padding(horizontal = gdp(MV_PAD)))
+                    }
+                }
+                MvMessage(msg.second, choosing = game.choices != null, k = k, gdp = ::gdp, gsp = ::gsp,
+                    modifier = Modifier.offset(y = gdp(MV_H - msgH)).size(gdp(MV_W), gdp(msgH))) { game.advance() }
+                game.choices?.let { opts ->
+                    // choice window: right side, just above the message window
+                    val h = MV_PAD * 2 + MV_LINE * opts.size
+                    MvWindow(k, Modifier.align(Alignment.TopEnd).offset(y = gdp(MV_H - msgH - h)).height(gdp(h)).widthIn(min = gdp(240f))) {
+                        Column(Modifier.padding(gdp(MV_PAD - 6f))) {
+                            opts.forEachIndexed { i, o ->
+                                Box(Modifier.height(gdp(MV_LINE)).widthIn(min = gdp(200f))
+                                    .then(if (i == sel) Modifier.drawBehind { mvCursor(k) } else Modifier)
+                                    .clickable { if (i == sel) game.pick(i) else sel = i }
+                                    .padding(horizontal = gdp(12f)), contentAlignment = Alignment.CenterStart) {
+                                    Text(o, color = Color.White, fontSize = gsp(MV_FONT), style = mvText(k), maxLines = 1)
+                                }
+                            }
+                        }
                     }
                 }
             }
-            game.msg?.let { m -> MessageBox(m.first, m.second, choosing = game.choices != null) { game.advance() } }
-            Row(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+            if (bag) {
+                // simple MV-style item menu
+                val have = game.items.filter { it.value > 0 }.toList()
+                MvWindow(k, Modifier.align(Alignment.TopEnd).offset(x = gdp(-24f), y = gdp(24f)).width(gdp(360f))
+                    .height(gdp(MV_PAD * 2 + MV_LINE * (have.size.coerceAtLeast(1) + 1)))) {
+                    Column(Modifier.padding(gdp(MV_PAD))) {
+                        Text("아이템", color = MV_SYS, fontSize = gsp(MV_FONT), style = mvText(k), modifier = Modifier.height(gdp(MV_LINE)))
+                        if (have.isEmpty()) Text("비어 있어요", color = Color(0xFFB0B8C8), fontSize = gsp(MV_FONT), style = mvText(k), modifier = Modifier.height(gdp(MV_LINE)))
+                        have.forEach { (name, n) ->
+                            Row(Modifier.height(gdp(MV_LINE)).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                Text(name, color = Color.White, fontSize = gsp(MV_FONT), style = mvText(k), modifier = Modifier.weight(1f), maxLines = 1)
+                                Text(":${n}", color = Color.White, fontSize = gsp(MV_FONT), style = mvText(k))
+                            }
+                        }
+                    }
+                }
+            }
+            if (showFps) Text("${fps} fps" + (if (Plat.gfx.isNotEmpty()) " · ${Plat.gfx}" else ""), color = Color.Yellow, fontSize = 14.sp,
+                modifier = Modifier.align(Alignment.TopStart).background(Color.Black.copy(alpha = 0.6f)).padding(6.dp))
+        }
+
+        // touch controls (phone) — PC plays with the keyboard (방향키/WASD, Z·Enter·Space, X 메뉴, Esc 끝내기)
+        if (!Plat.desktop) {
+            Row(Modifier.fillMaxWidth().padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                RoundBtn { Icon(Icons.Filled.Close, "끝내기", tint = Color.White, modifier = Modifier.size(22.dp).clickable { onExit() }) }
+                Spacer(Modifier.weight(1f))
+                RoundBtn { Icon(Icons.Filled.Work, "메뉴", tint = Color.White, modifier = Modifier.size(22.dp).clickable { bag = !bag }) }
+            }
+            Row(Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(horizontal = 18.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
                 DPad { held = it }
                 Spacer(Modifier.weight(1f))
                 Box(
-                    Modifier.size(78.dp).clip(CircleShape).background(Color(0x66FFFFFF)).border(2.dp, Color(0x88FFFFFF), CircleShape)
-                        .clickable { pressA() },
+                    Modifier.size(78.dp).clip(CircleShape).background(Color(0x44FFFFFF)).border(2.dp, Color(0x66FFFFFF), CircleShape)
+                        .clickable { if (bag) bag = false else pressA() },
                     contentAlignment = Alignment.Center,
                 ) { Text("A", color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.Bold) }
+            }
+        }
+    }
+}
+
+// ---------- MV/MZ look ----------
+private const val MV_W = 816f
+private const val MV_H = 624f
+private const val MV_PAD = 18f      // window padding
+private const val MV_LINE = 36f     // line height
+private const val MV_FONT = 26f     // MZ default font size
+private val MV_NAME = Color(0xFFFFE08A)  // name text
+private val MV_SYS = Color(0xFF84AAFF)   // system text (MV text color 16)
+
+/** White text with the dark outline MV/MZ draws around letters. */
+private fun mvText(k: Float) = androidx.compose.ui.text.TextStyle(
+    shadow = androidx.compose.ui.graphics.Shadow(Color(0xE6000000), Offset.Zero, blurRadius = 4f * k),
+    lineHeight = androidx.compose.ui.unit.TextUnit.Unspecified,
+)
+
+/** MV window skin look: translucent dark blue gradient, bright frame with rounded corners. */
+private fun androidx.compose.ui.graphics.drawscope.DrawScope.mvFrame(k: Float) {
+    val r = androidx.compose.ui.geometry.CornerRadius(6f * k)
+    val inset = 2f * k
+    drawRoundRect(androidx.compose.ui.graphics.Brush.verticalGradient(listOf(Color(0xD8283C74), Color(0xD8101C40))),
+        topLeft = Offset(inset, inset), size = androidx.compose.ui.geometry.Size(size.width - inset * 2, size.height - inset * 2), cornerRadius = r)
+    drawRoundRect(Color(0xFFEFF2F8), topLeft = Offset(inset, inset), size = androidx.compose.ui.geometry.Size(size.width - inset * 2, size.height - inset * 2),
+        cornerRadius = r, style = androidx.compose.ui.graphics.drawscope.Stroke(2.6f * k))
+    drawRoundRect(Color(0x66000000), topLeft = Offset(inset * 2.6f, inset * 2.6f), size = androidx.compose.ui.geometry.Size(size.width - inset * 5.2f, size.height - inset * 5.2f),
+        cornerRadius = r, style = androidx.compose.ui.graphics.drawscope.Stroke(1f * k))
+}
+
+/** The selection cursor of MV choice windows: soft white box. */
+private fun androidx.compose.ui.graphics.drawscope.DrawScope.mvCursor(k: Float) {
+    val r = androidx.compose.ui.geometry.CornerRadius(4f * k)
+    drawRoundRect(Color(0x40FFFFFF), cornerRadius = r)
+    drawRoundRect(Color(0xB3FFFFFF), cornerRadius = r, style = androidx.compose.ui.graphics.drawscope.Stroke(1.5f * k))
+}
+
+@Composable
+private fun MvWindow(k: Float, modifier: Modifier, content: @Composable androidx.compose.foundation.layout.BoxScope.() -> Unit) {
+    Box(modifier.drawBehind { mvFrame(k) }, content = content)
+}
+
+@Composable
+private fun MvMessage(text: String, choosing: Boolean, k: Float, gdp: (Float) -> androidx.compose.ui.unit.Dp,
+                      gsp: (Float) -> androidx.compose.ui.unit.TextUnit, modifier: Modifier, onNext: () -> Unit) {
+    var shown by remember(text) { mutableIntStateOf(0) }
+    LaunchedEffect(text) { while (shown < text.length) { delay(16); shown++ } }   // MV: about one letter per frame
+    val blink by androidx.compose.animation.core.rememberInfiniteTransition(label = "pause").animateFloat(0.35f, 1f,
+        androidx.compose.animation.core.infiniteRepeatable(tween(420), androidx.compose.animation.core.RepeatMode.Reverse), label = "p")
+    MvWindow(k, modifier.clickable(enabled = !choosing, indication = null,
+        interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }) { if (shown < text.length) shown = text.length else onNext() }) {
+        Text(text.take(shown), color = Color.White, fontSize = gsp(MV_FONT), style = mvText(k).copy(lineHeight = gsp(MV_LINE)),
+            modifier = Modifier.padding(horizontal = gdp(MV_PAD + 6f), vertical = gdp(MV_PAD)))
+        if (shown >= text.length && !choosing) {
+            // the little "next" arrow at the bottom middle
+            Canvas(Modifier.align(Alignment.BottomCenter).padding(bottom = gdp(6f)).size(gdp(22f), gdp(14f))) {
+                val path = androidx.compose.ui.graphics.Path().apply { moveTo(0f, 0f); lineTo(size.width, 0f); lineTo(size.width / 2, size.height); close() }
+                drawPath(path, Color.White.copy(alpha = blink))
             }
         }
     }
@@ -470,22 +571,6 @@ fun PlayScreen(p: Project, onExit: () -> Unit) {
 @Composable
 private fun RoundBtn(content: @Composable () -> Unit) {
     Box(Modifier.size(42.dp).clip(CircleShape).background(Color(0x66000000)), contentAlignment = Alignment.Center) { content() }
-}
-
-@Composable
-private fun MessageBox(speaker: String, text: String, choosing: Boolean, onNext: () -> Unit) {
-    var shown by remember(speaker, text) { mutableIntStateOf(0) }
-    LaunchedEffect(speaker, text) { while (shown < text.length) { delay(24); shown++ } }
-    Column(
-        Modifier.fillMaxWidth().padding(horizontal = 12.dp).heightIn(min = 110.dp).clip(RoundedCornerShape(16.dp))
-            .background(Color(0xEE1C1C22)).border(1.dp, Color(0x55FFFFFF), RoundedCornerShape(16.dp))
-            .clickable(enabled = !choosing) { if (shown < text.length) shown = text.length else onNext() }
-            .padding(horizontal = 18.dp, vertical = 14.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp),
-    ) {
-        if (speaker.isNotBlank()) Text(speaker, color = Color(0xFFF2B89E), fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-        Text(text.take(shown), color = Color.White, fontSize = 17.sp, lineHeight = 25.sp)
-    }
 }
 
 @Composable
