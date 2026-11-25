@@ -362,7 +362,7 @@ fun PlayScreen(p: Project, onExit: () -> Unit) {
         }
     }
 
-    val img = remember(game.mapId) { MapImage(game.map).also { it.all() } }
+    val img = remember(game.mapId, TileSkin.rev) { MapImage(game.map, TileSkin.mapTs()).also { it.all() } }
     val ib = remember(img) { img.bmp.asImageBitmap() }
 
     // keyboard (PC): arrows/WASD move, Z/Enter/Space = A

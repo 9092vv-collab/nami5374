@@ -1,6 +1,11 @@
 package space.nami.maker
 
 import androidx.compose.foundation.background
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -695,6 +700,7 @@ fun ImagePage(modifier: Modifier = Modifier) {
                 }
             }
         }
+        TileSkinSection()
         Spacer(Modifier.height(40.dp))
       }
     }
@@ -764,6 +770,115 @@ private fun LogsPage(onBack: () -> Unit) {
                     }
                 }
                 Spacer(Modifier.height(40.dp))
+            }
+        }
+    }
+}
+
+
+/** 이미지 탭 › 타일 그림: 타일셋 불러오기 + 기호마다 그림 고르기. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun TileSkinSection() {
+    @Suppress("UNUSED_VARIABLE") val trev = TileSkin.rev
+    var msg by remember { mutableStateOf<Pair<Boolean?, String>>(null to "") }
+    var sheetSel by remember { mutableStateOf<String?>(null) }
+    var picking by remember { mutableStateOf<Int?>(null) }
+    val pick = rememberFilePicker { name, bytes ->
+        val n = runCatching { TileSkin.import(name, bytes) }.getOrDefault(0)
+        msg = if (n > 0) true to "타일셋 ${n}장을 넣었어요. 아래에서 기호마다 그림을 골라 주세요." else false to "타일셋 그림(PNG)을 찾지 못했어요."
+    }
+    Label("타일 그림")
+    Hint("Pipoya 타일셋 zip을 그대로 고르면 안의 PNG를 다 넣어요. 그다음 기호([G] 풀, [W] 벽 …)를 누르고 쓸 칸을 고르면, 맵·플레이 화면이 그 그림으로 바뀌어요. AI가 보는 기호는 그대로예요.")
+    Btn("타일셋 zip·PNG 불러오기", filled = true) { pick() }
+    Result(msg.first, msg.second)
+    val sheets = TileSkin.sheets()
+    if (sheets.isNotEmpty()) {
+        Hint("불러온 타일셋 ${sheets.size}장 · 누르면 칸 크기·지우기")
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            sheets.forEach { n -> Pill("$n · ${TileSkin.cell(n)}", on = sheetSel == n) { sheetSel = if (sheetSel == n) null else n } }
+        }
+        sheetSel?.takeIf { it in sheets }?.let { n ->
+            Row(Modifier.padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("칸 크기  ", fontSize = 13.sp, color = K.sub)
+                listOf(16, 32, 48).forEach { c -> Pill("${c}px", on = TileSkin.cell(n) == c) { TileSkin.setCell(n, c) }; Spacer(Modifier.width(6.dp)) }
+                Spacer(Modifier.weight(1f))
+                Text("지우기", fontSize = 13.sp, color = K.danger, modifier = Modifier.clip(RoundedCornerShape(50)).clickable { TileSkin.delete(n); sheetSel = null }.padding(8.dp))
+            }
+        }
+        Label("기호마다 그림")
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Tiles.list.forEach { t ->
+                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(64.dp).clip(RoundedCornerShape(8.dp)).clickable { picking = t.id }.padding(2.dp)) {
+                    androidx.compose.foundation.Canvas(Modifier.size(44.dp).clip(RoundedCornerShape(6.dp)).background(K.panel)
+                        .border(if (TileSkin.of(t.id) != null) 2.dp else 1.dp, if (TileSkin.of(t.id) != null) K.accent else K.line, RoundedCornerShape(6.dp))) {
+                        drawIntoCanvas { c ->
+                            if (t.upper) Art.tile(c.art(), 1, 0f, 0f, size.width, 0, 0)
+                            Art.tile(c.art(), t.id, 0f, 0f, size.width, 3, 5)
+                        }
+                    }
+                    Text("[${t.ch}] ${t.name}", fontSize = 10.sp, color = K.sub, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                }
+            }
+        }
+        Hint("주황 테두리 = 그림을 정한 기호. 위층 기호(나무·문 …)는 배경이 투명한 칸을 고르세요.")
+    }
+    picking?.let { id -> TilePicker(id, onDismiss = { picking = null }) }
+}
+
+/** 타일셋에서 칸 하나 고르기. 크게 보여 주고 누르면 그 칸. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun TilePicker(tileId: Int, onDismiss: () -> Unit) {
+    val t = Tiles.get(tileId)
+    val sheets = TileSkin.sheets()
+    val cur = TileSkin.of(tileId)
+    var sheet by remember { mutableStateOf(cur?.first ?: sheets.firstOrNull()) }
+    var zoom by remember { mutableStateOf(2) }
+    androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss,
+        properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
+        Column(Modifier.fillMaxSize().background(K.bg).safeDrawingPadding()) {
+            Header("[${t.ch}] ${t.name} 그림 고르기", back = false, onClick = onDismiss)
+            Column(Modifier.padding(horizontal = 18.dp)) {
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    sheets.forEach { n -> Pill(n, on = sheet == n) { sheet = n } }
+                }
+                Row(Modifier.padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    listOf(1, 2, 3).forEach { z -> Pill("×$z", on = zoom == z) { zoom = z }; Spacer(Modifier.width(6.dp)) }
+                    Spacer(Modifier.weight(1f))
+                    if (cur != null) Btn("도형으로 되돌리기") { TileSkin.clear(tileId); onDismiss() }
+                }
+            }
+            val n = sheet
+            val bmp = n?.let { TileSkin.sheet(it) }
+            if (n == null || bmp == null) { Hint("불러온 타일셋이 없어요"); return@Column }
+            val c = TileSkin.cell(n); val cols = bmp.width / c; val rows = bmp.height / c
+            val ib = remember(n, bmp) { bmp.asImageBitmap() }
+            val dens = androidx.compose.ui.platform.LocalDensity.current
+            val cellPx = c * zoom
+            Box(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).horizontalScroll(rememberScrollState()).padding(18.dp)) {
+                androidx.compose.foundation.Canvas(
+                    Modifier.size(with(dens) { (cols * cellPx).toDp() }, with(dens) { (rows * cellPx).toDp() })
+                        .background(androidx.compose.ui.graphics.Color(0xFFDDD9CF))
+                        .pointerInput(n, zoom) {
+                            detectTapGestures { o ->
+                                val cx = (o.x / cellPx).toInt(); val cy = (o.y / cellPx).toInt()
+                                if (cx in 0 until cols && cy in 0 until rows) { TileSkin.assign(tileId, n, cy * cols + cx); onDismiss() }
+                            }
+                        }
+                ) {
+                    drawImage(ib, androidx.compose.ui.unit.IntOffset.Zero, androidx.compose.ui.unit.IntSize(cols * c, rows * c),
+                        androidx.compose.ui.unit.IntOffset.Zero, androidx.compose.ui.unit.IntSize(cols * cellPx, rows * cellPx),
+                        filterQuality = androidx.compose.ui.graphics.FilterQuality.None)
+                    val line = androidx.compose.ui.graphics.Color(0x33000000)
+                    for (x in 0..cols) drawLine(line, Offset(x * cellPx.toFloat(), 0f), Offset(x * cellPx.toFloat(), rows * cellPx.toFloat()), 1f)
+                    for (y in 0..rows) drawLine(line, Offset(0f, y * cellPx.toFloat()), Offset(cols * cellPx.toFloat(), y * cellPx.toFloat()), 1f)
+                    if (cur != null && cur.first == n) {
+                        val i = cur.second
+                        drawRect(K.accent, Offset((i % cols) * cellPx.toFloat(), (i / cols) * cellPx.toFloat()),
+                            androidx.compose.ui.geometry.Size(cellPx.toFloat(), cellPx.toFloat()), style = androidx.compose.ui.graphics.drawscope.Stroke(3f))
+                    }
+                }
             }
         }
     }

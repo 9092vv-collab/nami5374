@@ -30,6 +30,7 @@ fun main() {
     Api.init(DesktopApp.ctx)
     Prompts.init(DesktopApp.ctx)
     Chars.init(DesktopApp.ctx)
+    TileSkin.init(DesktopApp.ctx)
     Logs.init(DesktopApp.ctx)
     application {
         val state = rememberWindowState(width = 1440.dp, height = 920.dp)

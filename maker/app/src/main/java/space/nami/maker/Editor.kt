@@ -200,6 +200,7 @@ private fun EditorPane(
             contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp),
         ) {
             items(Tiles.list.drop(1)) { t ->
+                @Suppress("UNUSED_VARIABLE") val sr = TileSkin.rev
                 val sel = t.id == tile
                 Canvas(
                     Modifier.size(46.dp).clip(RoundedCornerShape(10.dp))
@@ -228,14 +229,15 @@ private class StrokeState {
 @Composable
 private fun MapCanvas(doc: Doc, map: GameMap, tool: Tool, tile: Int, onEditEvent: (Int) -> Unit) {
     val rev = doc.rev
-    val img = remember(map.id, map.w, map.h) { MapImage(map) }
+    val skinRev = TileSkin.rev
+    val img = remember(map.id, map.w, map.h, skinRev) { MapImage(map, TileSkin.mapTs()) }
     img.map = map
-    remember(rev, map) { img.all(); 0 }
+    remember(rev, map, img) { img.all(); 0 }
     val mapNow by rememberUpdatedState(map)
     val imgNow by rememberUpdatedState(img)
     var tick by remember { mutableIntStateOf(0) }
     // phone: wraps the same pixels (cheap). PC: a fresh snapshot, so every stroke/AI edit shows right away.
-    val ib = remember(img, tick, rev) { img.bmp.asImageBitmap() }
+    val ib = remember(img, tick, rev, skinRev) { img.bmp.asImageBitmap() }
     var scale by remember(map.id) { mutableFloatStateOf(0f) }
     var off by remember(map.id) { mutableStateOf(Offset.Zero) }
     var box by remember { mutableStateOf(IntSize.Zero) }
@@ -404,7 +406,7 @@ private fun MapCanvas(doc: Doc, map: GameMap, tool: Tool, tile: Int, onEditEvent
         if (scale == 0f) return@Canvas
         val m = map
         withTransform({ translate(off.x, off.y); scale(scale, scale, Offset.Zero) }) {
-            drawImage(ib, IntOffset.Zero, IntSize(img.bmp.width, img.bmp.height), IntOffset.Zero, IntSize(img.bmp.width, img.bmp.height), filterQuality = FilterQuality.None)
+            drawImage(ib, IntOffset.Zero, IntSize(img.bmp.width, img.bmp.height), IntOffset.Zero, IntSize(map.w * 32, map.h * 32), filterQuality = FilterQuality.None)
             if (scale * 32f > 16f) {
                 val gc = Color(0x1A000000); val sw = 1f / scale
                 for (x in 0..m.w) drawLine(gc, Offset(x * 32f, 0f), Offset(x * 32f, m.h * 32f), sw)

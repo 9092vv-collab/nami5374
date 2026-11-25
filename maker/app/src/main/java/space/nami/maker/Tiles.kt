@@ -79,6 +79,7 @@ object Art {
     }
 
     fun tile(cv: Canvas, id: Int, x0: Float, y0: Float, s: Float, gx: Int, gy: Int) {
+        if (TileSkin.draw(cv, id, x0, y0, s)) return   // 불러온 타일셋 그림을 정해 둔 기호
         fun r(col: Int, l: Float, t: Float, rr: Float, b: Float) {
             p.style = Paint.Style.FILL; p.color = col; cv.drawRect(x0 + l * s, y0 + t * s, x0 + rr * s, y0 + b * s, p)
         }
