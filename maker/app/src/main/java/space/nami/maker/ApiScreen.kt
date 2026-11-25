@@ -1,6 +1,9 @@
 package space.nami.maker
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.awaitLongPressOrCancellation
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.pointer.pointerInput
@@ -832,9 +835,11 @@ private fun TileSkinSection() {
 private fun TilePicker(tileId: Int, onDismiss: () -> Unit) {
     val t = Tiles.get(tileId)
     val sheets = TileSkin.sheets()
-    val cur = TileSkin.of(tileId)
+    val curPick = TileSkin.pick(tileId)
+    val cur = curPick?.let { it.sheet to it.i }
     var sheet by remember { mutableStateOf(cur?.first ?: sheets.firstOrNull()) }
     var zoom by remember { mutableStateOf(2) }
+    var drag by remember { mutableStateOf<IntArray?>(null) }   // 꾹 눌러 끄는 중인 사각형: x0, y0, x1, y1 (칸)
     androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss,
         properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
         Column(Modifier.fillMaxSize().background(K.bg).safeDrawingPadding()) {
@@ -843,6 +848,7 @@ private fun TilePicker(tileId: Int, onDismiss: () -> Unit) {
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     sheets.forEach { n -> Pill(n, on = sheet == n) { sheet = n } }
                 }
+                Hint("누르면 한 칸 · 꾹 눌러 끌면 여러 칸(나무·건물처럼 큰 그림). 큰 그림은 그 기호 칸을 왼쪽 아래로 해서 위·오른쪽으로 그려져요.")
                 Row(Modifier.padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                     listOf(1, 2, 3).forEach { z -> Pill("×$z", on = zoom == z) { zoom = z }; Spacer(Modifier.width(6.dp)) }
                     Spacer(Modifier.weight(1f))
@@ -861,9 +867,34 @@ private fun TilePicker(tileId: Int, onDismiss: () -> Unit) {
                     Modifier.size(with(dens) { (cols * cellPx).toDp() }, with(dens) { (rows * cellPx).toDp() })
                         .background(androidx.compose.ui.graphics.Color(0xFFDDD9CF))
                         .pointerInput(n, zoom) {
-                            detectTapGestures { o ->
-                                val cx = (o.x / cellPx).toInt(); val cy = (o.y / cellPx).toInt()
-                                if (cx in 0 until cols && cy in 0 until rows) { TileSkin.assign(tileId, n, cy * cols + cx); onDismiss() }
+                            fun at(o: Offset) = (o.x / cellPx).toInt().coerceIn(0, cols - 1) to (o.y / cellPx).toInt().coerceIn(0, rows - 1)
+                            awaitEachGesture {
+                                val down = awaitFirstDown()
+                                val lp = awaitLongPressOrCancellation(down.id)
+                                if (lp == null) {
+                                    // 그냥 누름(떼었으면 한 칸). 끌었으면 스크롤이니 아무것도 안 함
+                                    if (currentEvent.changes.all { !it.pressed } && currentEvent.changes.none { it.isConsumed }) {
+                                        val (cx, cy) = at(down.position); TileSkin.assign(tileId, n, cy * cols + cx); onDismiss()
+                                    }
+                                    return@awaitEachGesture
+                                }
+                                val (sx, sy) = at(lp.position)
+                                drag = intArrayOf(sx, sy, sx, sy)
+                                lp.consume()
+                                while (true) {
+                                    val ev = awaitPointerEvent()
+                                    val ch = ev.changes.firstOrNull { it.id == down.id } ?: break
+                                    if (!ch.pressed) break
+                                    val (ex, ey) = at(ch.position)
+                                    drag = intArrayOf(sx, sy, ex, ey)
+                                    ch.consume()
+                                }
+                                val d = drag; drag = null
+                                if (d != null) {
+                                    val x0 = minOf(d[0], d[2]); val y0 = minOf(d[1], d[3])
+                                    val w = (kotlin.math.abs(d[2] - d[0]) + 1).coerceAtMost(8); val h = (kotlin.math.abs(d[3] - d[1]) + 1).coerceAtMost(8)
+                                    TileSkin.assign(tileId, n, y0 * cols + x0, w, h); onDismiss()
+                                }
                             }
                         }
                 ) {
@@ -873,10 +904,17 @@ private fun TilePicker(tileId: Int, onDismiss: () -> Unit) {
                     val line = androidx.compose.ui.graphics.Color(0x33000000)
                     for (x in 0..cols) drawLine(line, Offset(x * cellPx.toFloat(), 0f), Offset(x * cellPx.toFloat(), rows * cellPx.toFloat()), 1f)
                     for (y in 0..rows) drawLine(line, Offset(0f, y * cellPx.toFloat()), Offset(cols * cellPx.toFloat(), y * cellPx.toFloat()), 1f)
-                    if (cur != null && cur.first == n) {
-                        val i = cur.second
+                    if (curPick != null && curPick.sheet == n) {
+                        val i = curPick.i
                         drawRect(K.accent, Offset((i % cols) * cellPx.toFloat(), (i / cols) * cellPx.toFloat()),
-                            androidx.compose.ui.geometry.Size(cellPx.toFloat(), cellPx.toFloat()), style = androidx.compose.ui.graphics.drawscope.Stroke(3f))
+                            androidx.compose.ui.geometry.Size(cellPx.toFloat() * curPick.w, cellPx.toFloat() * curPick.h), style = androidx.compose.ui.graphics.drawscope.Stroke(3f))
+                    }
+                    drag?.let { d ->
+                        val x0 = minOf(d[0], d[2]); val y0 = minOf(d[1], d[3])
+                        val w = kotlin.math.abs(d[2] - d[0]) + 1; val h = kotlin.math.abs(d[3] - d[1]) + 1
+                        drawRect(K.accent.copy(alpha = 0.25f), Offset(x0 * cellPx.toFloat(), y0 * cellPx.toFloat()), androidx.compose.ui.geometry.Size(w * cellPx.toFloat(), h * cellPx.toFloat()))
+                        drawRect(K.accent, Offset(x0 * cellPx.toFloat(), y0 * cellPx.toFloat()), androidx.compose.ui.geometry.Size(w * cellPx.toFloat(), h * cellPx.toFloat()),
+                            style = androidx.compose.ui.graphics.drawscope.Stroke(3f))
                     }
                 }
             }

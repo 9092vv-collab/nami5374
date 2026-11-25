@@ -290,9 +290,23 @@ class MapImage(var map: GameMap, val ts: Int = 32) {
     val bmp: Bitmap = Bitmap.createBitmap(w * ts, h * ts, Bitmap.Config.ARGB_8888)
     private val cv = Canvas(bmp)
 
-    fun all() { for (y in 0 until h) for (x in 0 until w) cell(x, y) }
+    fun all() {
+        TileSkin.stampPass = true
+        try { for (y in 0 until h) for (x in 0 until w) one(x, y) } finally { TileSkin.stampPass = false }
+        // 큰 타일 그림(여러 칸)은 다 그린 뒤 위에 얹음 — 위·오른쪽 칸으로 뻗으니까. 바닥 먼저, 그다음 위층
+        if (TileSkin.hasBig()) for (layer in 0..1) for (y in 0 until h) for (x in 0 until w) {
+            val k = map.i(x, y); val id = if (layer == 0) map.ground[k] else map.upper[k]
+            if (id != 0 || layer == 0) TileSkin.stamp(cv, id, (x * ts).toFloat(), (y * ts).toFloat(), ts.toFloat())
+        }
+    }
 
+    /** 칸 하나 다시 그리기(칠할 때). 큰 그림이 있으면 이웃 칸과 겹치니 통째로. */
     fun cell(x: Int, y: Int) {
+        if (TileSkin.hasBig()) { all(); return }
+        one(x, y)
+    }
+
+    private fun one(x: Int, y: Int) {
         if (x !in 0 until w || y !in 0 until h || !map.inside(x, y)) return
         val k = map.i(x, y)
         val px = (x * ts).toFloat(); val py = (y * ts).toFloat()

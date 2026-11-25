@@ -109,19 +109,29 @@ object TileSkin {
     fun cols(name: String) = (sheet(name)?.width ?: 0) / cell(name)
     fun rows(name: String) = (sheet(name)?.height ?: 0) / cell(name)
 
-    private fun cellBitmap(name: String, i: Int): Bitmap? = cellCache.getOrPut("$name#$i") {
+    /** 칸 i(왼쪽 위)부터 가로 w × 세로 h 칸 그림. */
+    private fun cellBitmap(name: String, i: Int, w: Int = 1, h: Int = 1): Bitmap? = cellCache.getOrPut("$name#$i#${w}x$h") {
         val s = sheet(name) ?: return@getOrPut null
         val c = cell(name); val cols = s.width / c
         if (cols <= 0) return@getOrPut null
         val x = (i % cols) * c; val y = (i / cols) * c
-        if (x + c > s.width || y + c > s.height) null else runCatching { Bitmap.createBitmap(s, x, y, c, c) }.getOrNull()
+        if (x + c * w > s.width || y + c * h > s.height) null else runCatching { Bitmap.createBitmap(s, x, y, c * w, c * h) }.getOrNull()
     }
 
-    /** 기호(타일 id)에 정한 그림: (시트, 칸 번호) 또는 null. */
-    fun of(tileId: Int): Pair<String, Int>? = mapObj().optJSONObject(tileId.toString())?.let { o ->
-        o.optString("s").takeIf { it.isNotBlank() && sheetsObj().has(it) }?.let { it to o.optInt("i") }
+    /** 기호에 정한 그림. w·h > 1이면 큰 그림(그 기호 칸을 왼쪽 아래로 위·오른쪽으로 뻗음). */
+    class Pick(val sheet: String, val i: Int, val w: Int, val h: Int) { val big get() = w > 1 || h > 1 }
+
+    fun pick(tileId: Int): Pick? = mapObj().optJSONObject(tileId.toString())?.let { o ->
+        o.optString("s").takeIf { it.isNotBlank() && sheetsObj().has(it) }?.let { Pick(it, o.optInt("i"), o.optInt("w", 1).coerceAtLeast(1), o.optInt("h", 1).coerceAtLeast(1)) }
     }
-    fun assign(tileId: Int, name: String, i: Int) { mapObj().put(tileId.toString(), JSONObject().put("s", name).put("i", i)); save() }
+    fun of(tileId: Int): Pair<String, Int>? = pick(tileId)?.let { it.sheet to it.i }
+    fun assign(tileId: Int, name: String, i: Int, w: Int = 1, h: Int = 1) {
+        mapObj().put(tileId.toString(), JSONObject().put("s", name).put("i", i).put("w", w.coerceIn(1, 8)).put("h", h.coerceIn(1, 8))); save()
+    }
+    fun hasBig(): Boolean = Tiles.list.any { pick(it.id)?.big == true }
+
+    /** 맵 그림을 그리는 동안(1차)엔 큰 그림을 건너뛰고, 다 그린 뒤 `stamp`로 위에 얹음. */
+    var stampPass = false
     fun clear(tileId: Int) { mapObj().remove(tileId.toString()); save() }
 
     /** 맵 그림 한 칸 픽셀: 정한 그림 중 가장 큰 칸 크기(48이면 MV처럼 선명하게), 없으면 32. */
@@ -131,12 +141,24 @@ object TileSkin {
         return best.coerceAtMost(48)
     }
 
-    /** 그 기호에 그림이 정해져 있으면 그려 넣고 true. */
+    /** 그 기호에 그림이 정해져 있으면 그려 넣고 true. 큰 그림은 맵 그리기 중엔 건너뛰고(나중에 stamp), 미리보기에선 한 칸에 맞춰 줄여 그림. */
     fun draw(cv: Canvas, tileId: Int, x0: Float, y0: Float, s: Float): Boolean {
-        val (n, i) = of(tileId) ?: return false
-        val b = cellBitmap(n, i) ?: return false
-        rf.set(x0, y0, x0 + s, y0 + s)
+        val p = pick(tileId) ?: return false
+        val b = cellBitmap(p.sheet, p.i, p.w, p.h) ?: return false
+        if (p.big && stampPass) return true
+        if (p.big) {
+            val k = s / maxOf(p.w, p.h); val dw = p.w * k; val dh = p.h * k
+            rf.set(x0 + (s - dw) / 2, y0 + (s - dh), x0 + (s + dw) / 2, y0 + s)
+        } else rf.set(x0, y0, x0 + s, y0 + s)
         cv.drawBitmap(b, null, rf, paint)
         return true
+    }
+
+    /** 큰 그림을 제 크기로: 기호 칸(x0, y0)이 왼쪽 아래, 위·오른쪽으로 뻗음. */
+    fun stamp(cv: Canvas, tileId: Int, x0: Float, y0: Float, s: Float) {
+        val p = pick(tileId)?.takeIf { it.big } ?: return
+        val b = cellBitmap(p.sheet, p.i, p.w, p.h) ?: return
+        rf.set(x0, y0 - (p.h - 1) * s, x0 + p.w * s, y0 + s)
+        cv.drawBitmap(b, null, rf, paint)
     }
 }
