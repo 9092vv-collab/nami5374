@@ -31,6 +31,7 @@ import androidx.compose.material.icons.automirrored.filled.Redo
 import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.AutoFixNormal
 import androidx.compose.material.icons.filled.Brush
 import androidx.compose.material.icons.filled.CropSquare
@@ -103,6 +104,7 @@ fun EditorScreen(doc: Doc, chat: AiChat, onBack: () -> Unit, onPlay: () -> Unit)
     var editEvent by remember { mutableStateOf<Int?>(null) }
     var mapSettings by remember { mutableStateOf(false) }
     var settings by remember { mutableStateOf(false) }
+    var castOpen by remember { mutableStateOf(false) }
 
     // AI chat: full screen in both layouts, closed only with the back key (or its ← button)
     androidx.activity.compose.BackHandler(enabled = showChat) { showChat = false }
@@ -111,7 +113,7 @@ fun EditorScreen(doc: Doc, chat: AiChat, onBack: () -> Unit, onPlay: () -> Unit)
     androidx.activity.compose.BackHandler(enabled = tab != 1 && !showChat) { tab = 1 }
     Column(Modifier.fillMaxSize().background(K.bg)) {
     Box(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp)) { Seg(listOf("이벤트", "맵·작업실", "이미지"), tab) { tab = it } }
-    if (tab == 0) EventsPage(doc, map, Modifier.weight(1f).fillMaxWidth(), onPickMap = { mapId = it }, onEditEvent = { editEvent = it })
+    if (tab == 0) EventsPage(doc, map, Modifier.weight(1f).fillMaxWidth(), onPickMap = { mapId = it }, onEditEvent = { editEvent = it }, onCast = { castOpen = true })
     else if (tab == 2) ImagePage(Modifier.weight(1f).fillMaxWidth())
     else BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
         val wide = maxWidth >= 700.dp
@@ -119,7 +121,7 @@ fun EditorScreen(doc: Doc, chat: AiChat, onBack: () -> Unit, onPlay: () -> Unit)
             doc, map, wide, Modifier.fillMaxSize(),
             onBack = onBack, onPlay = onPlay, onChat = { showChat = true },
             onPickMap = { mapId = it }, onEditEvent = { editEvent = it },
-            onMapSettings = { mapSettings = true }, onSettings = { settings = true },
+            onMapSettings = { mapSettings = true }, onSettings = { settings = true }, onCast = { castOpen = true },
         )
         if (showChat) {
             ChatPane(chat, map.id, Modifier.fillMaxSize().background(K.bg).pointerInput(Unit) {}, onSettings = { settings = true }, onClose = { showChat = false })
@@ -131,13 +133,14 @@ fun EditorScreen(doc: Doc, chat: AiChat, onBack: () -> Unit, onPlay: () -> Unit)
     if (ee != null) EventEditor(doc, map, ee, onClose = { editEvent = null })
     if (mapSettings) MapSettingsDialog(doc, map, onClose = { mapSettings = false }, onDeleted = { mapId = doc.p.maps[0].id; mapSettings = false })
     if (settings) SettingsDialog(onClose = { settings = false })
+    if (castOpen) CastScreen(doc, onClose = { castOpen = false })
 }
 
 @Composable
 private fun EditorPane(
     doc: Doc, map: GameMap, wide: Boolean, modifier: Modifier,
     onBack: () -> Unit, onPlay: () -> Unit, onChat: () -> Unit, onPickMap: (Int) -> Unit,
-    onEditEvent: (Int) -> Unit, onMapSettings: () -> Unit, onSettings: () -> Unit,
+    onEditEvent: (Int) -> Unit, onMapSettings: () -> Unit, onSettings: () -> Unit, onCast: () -> Unit,
 ) {
     var tool by remember { mutableStateOf(Tool.PEN) }
     var tile by remember { mutableIntStateOf(1) }
@@ -165,6 +168,7 @@ private fun EditorPane(
                         doc.p.maps.add(m); doc.changed(); onPickMap(m.id)
                     })
                     DropdownMenuItem(text = { Text("이 맵 설정…") }, onClick = { menu = false; onMapSettings() })
+                    DropdownMenuItem(text = { Text("등장인물 (${doc.p.cast.size})…") }, onClick = { menu = false; onCast() })
                 }
             }
             Spacer(Modifier.weight(1f))
@@ -478,7 +482,7 @@ private fun MapSettingsDialog(doc: Doc, map: GameMap, onClose: () -> Unit, onDel
 
 /** 왼쪽 '이벤트' 탭: 맵을 고르고 그 맵의 이벤트를 목록으로. 누르면 이벤트 편집. */
 @Composable
-private fun EventsPage(doc: Doc, map: GameMap, modifier: Modifier, onPickMap: (Int) -> Unit, onEditEvent: (Int) -> Unit) {
+private fun EventsPage(doc: Doc, map: GameMap, modifier: Modifier, onPickMap: (Int) -> Unit, onEditEvent: (Int) -> Unit, onCast: () -> Unit) {
     @Suppress("UNUSED_VARIABLE") val rev = doc.rev
     Column(modifier) {
         androidx.compose.foundation.lazy.LazyRow(contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -495,6 +499,17 @@ private fun EventsPage(doc: Doc, map: GameMap, modifier: Modifier, onPickMap: (I
                 Text(Sprites.name(doc.p.hero) + " · 시작: " + (doc.p.map(doc.p.startMap)?.name ?: "") + " (${doc.p.startX}, ${doc.p.startY})", fontSize = 12.sp, color = K.sub)
             }
             Text("바꾸기 ›", fontSize = 13.sp, color = K.sub)
+        }
+        // 등장인물(주연·조연)
+        Row(Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 8.dp).clip(androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
+            .background(K.panel).clickable { onCast() }.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(40.dp), contentAlignment = Alignment.Center) { Icon(Icons.Filled.Groups, null, tint = K.sub) }
+            Column(Modifier.weight(1f).padding(start = 10.dp)) {
+                Text("등장인물 (주연·조연)", fontSize = 15.sp, color = K.text)
+                Text(if (doc.p.cast.isEmpty()) "아직 없어요 · AI가 쓸 인물을 정해 두세요" else doc.p.cast.joinToString(", ") { it.name }, fontSize = 12.sp, color = K.sub,
+                    maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+            }
+            Text("설정 ›", fontSize = 13.sp, color = K.sub)
         }
         if (map.events.isEmpty()) Text("이 맵에는 이벤트가 없어요. 맵·작업실 탭에서 이벤트 도구로 칸을 누르거나 AI에게 부탁해 보세요.",
             fontSize = 13.sp, color = K.sub, modifier = Modifier.padding(18.dp))

@@ -13,6 +13,7 @@ class MainActivity : ComponentActivity() {
         Prompts.init(this)
         Chars.init(this)
         TileSkin.init(this)
+        Stands.init(this)
         Logs.init(this)
         val t = android.graphics.Color.TRANSPARENT
         enableEdgeToEdge(SystemBarStyle.light(t, t), SystemBarStyle.light(t, t))

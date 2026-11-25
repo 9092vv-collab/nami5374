@@ -7,6 +7,7 @@ import org.json.JSONObject
 // One class for every command type; only the fields of its type are used.
 class Cmd(var type: String) {
     var speaker = ""
+    var face = ""          // text: 스탠딩 일러스트 표정 이름(등장인물만)
     var text = ""
     var options = mutableListOf<String>()
     var branches = mutableListOf<MutableList<Cmd>>()
@@ -28,7 +29,7 @@ class Cmd(var type: String) {
     fun toJson(): JSONObject {
         val o = JSONObject().put("type", type)
         when (type) {
-            "text" -> o.put("speaker", speaker).put("text", text)
+            "text" -> { o.put("speaker", speaker).put("text", text); if (face.isNotBlank()) o.put("face", face) }
             "choice" -> {
                 o.put("options", JSONArray(options))
                 o.put("branches", JSONArray().also { a -> branches.forEach { a.put(arr(it)) } })
@@ -79,6 +80,7 @@ class Cmd(var type: String) {
         fun from(o: JSONObject): Cmd {
             val c = Cmd(o.optString("type", "text"))
             c.speaker = o.optString("speaker", "")
+            c.face = o.optString("face", "")
             c.text = o.optString("text", "")
             o.optJSONArray("options")?.let { a -> c.options = MutableList(a.length()) { a.optString(it) } }
             val br = o.optJSONArray("branches")
@@ -110,7 +112,7 @@ class Cmd(var type: String) {
 
     /** One-line Korean summary (editor rows and AI listings). */
     fun summary(p: Project?): String = when (type) {
-        "text" -> (if (speaker.isNotBlank()) "$speaker: " else "") + text.replace('\n', ' ')
+        "text" -> (if (speaker.isNotBlank()) speaker + (if (face.isNotBlank()) "($face)" else "") + ": " else "") + text.replace('\n', ' ')
         "choice" -> "선택지: " + options.joinToString(" / ")
         "switch" -> "스위치 [$name] = ${if (on) "켜기" else "끄기"}"
         "if" -> if (cond == "item") "만약 아이템 [$name] 있으면" else "만약 스위치 [$name] ${if (on) "켜짐" else "꺼짐"}"
@@ -223,6 +225,33 @@ class GameMap(var id: Int, var name: String, var w: Int, var h: Int) {
 }
 
 // ---------- project ----------
+/**
+ * 등장인물(주연·조연): 사용자가 정하고 AI가 씀. 엑스트라는 AI가 알아서 만듦.
+ * 걷기 그림(sprite)은 이벤트 그래픽 id. 스탠딩 일러스트·표정 그림은 [Stands] 파일(filesDir/stands/<id>/).
+ * face = 스탠딩에서 얼굴 영역(x, y, w, h, 픽셀). 표정 그림은 그 영역에 덮어 그림.
+ */
+class CastMember(var id: String, var name: String) {
+    var role = "main"          // main(주연) | support(조연)
+    var desc = ""
+    var sprite = ""
+    var face = intArrayOf(0, 0, 0, 0)
+    var faces = mutableListOf<String>()
+
+    fun hasFace() = face[2] > 0 && face[3] > 0
+
+    fun toJson(): JSONObject = JSONObject().put("id", id).put("name", name).put("role", role).put("desc", desc).put("sprite", sprite)
+        .put("face", JSONArray(face.toList())).put("faces", JSONArray(faces))
+
+    companion object {
+        fun from(o: JSONObject) = CastMember(o.optString("id", "c" + System.nanoTime().toString(36)), o.optString("name", "인물")).also { c ->
+            c.role = if (o.optString("role") == "support") "support" else "main"
+            c.desc = o.optString("desc"); c.sprite = o.optString("sprite")
+            o.optJSONArray("face")?.let { a -> if (a.length() == 4) c.face = IntArray(4) { a.optInt(it) } }
+            o.optJSONArray("faces")?.let { a -> c.faces = MutableList(a.length()) { a.optString(it) }.filter { it.isNotBlank() }.toMutableList() }
+        }
+    }
+}
+
 class Project(var name: String) {
     var maps = mutableListOf<GameMap>()
     /** 게임으로 옮길 소설(사용자가 붙여 넣음)과 AI가 세운 제작 계획. */
@@ -230,6 +259,9 @@ class Project(var name: String) {
     var plan = ""
     /** 주인공 그래픽 (기본 도형 "hero" 또는 불러온 캐릭터 "c:이름"). */
     var hero = "hero"
+    /** 등장인물(주연·조연). */
+    var cast = mutableListOf<CastMember>()
+    fun castBy(name: String) = cast.firstOrNull { it.name.isNotBlank() && it.name == name.trim() }
     var startMap = 1
     var startX = 1
     var startY = 1
@@ -252,11 +284,13 @@ class Project(var name: String) {
         .put("start_map", startMap).put("start_x", startX).put("start_y", startY)
         .put("maps", JSONArray().also { a -> maps.forEach { a.put(it.toJson()) } })
         .put("story", story).put("plan", plan).put("hero", hero)
+        .put("cast", JSONArray().also { a -> cast.forEach { a.put(it.toJson()) } })
 
     companion object {
         fun from(o: JSONObject): Project {
             val p = Project(o.optString("name", "새 게임"))
             p.story = o.optString("story", ""); p.plan = o.optString("plan", ""); p.hero = o.optString("hero", "hero")
+            o.optJSONArray("cast")?.let { a -> p.cast = MutableList(a.length()) { CastMember.from(a.getJSONObject(it)) } }
             p.startMap = o.optInt("start_map", 1)
             p.startX = o.optInt("start_x", 1)
             p.startY = o.optInt("start_y", 1)

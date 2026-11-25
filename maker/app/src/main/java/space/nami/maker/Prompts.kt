@@ -17,13 +17,14 @@ import java.io.File
  */
 object Prompts {
     const val SLOT = "{{slot}}"
-    val TYPE_LABELS = mapOf("text" to "텍스트", "story" to "소설·계획", "map" to "지금 맵", "command" to "사용자 메시지")
+    val TYPE_LABELS = mapOf("text" to "텍스트", "story" to "소설·계획", "cast" to "등장인물", "map" to "지금 맵", "command" to "사용자 메시지")
     /** next처럼 블록마다 역할: 시스템 / 어시스턴트 / 유저. 맨 끝 어시스턴트 블록 = 프리필 */
     val ROLES = listOf("system" to "시스템", "assistant" to "어시스턴트", "user" to "유저")
     fun roleLabel(r: String) = ROLES.firstOrNull { it.first == r }?.second ?: "시스템"
     val TYPE_DESC = mapOf(
         "text" to "직접 쓰는 고정 글. {{tiles}} = 타일 범례, {{graphics}} = 그래픽 목록으로 바뀌어요.",
         "story" to "이 게임의 소설과 AI가 세운 제작 계획이 {{slot}} 자리에 들어가요. 둘 다 비어 있으면 이 블록은 안 보내요.",
+        "cast" to "사용자가 정한 등장인물(주연·조연: 이름, 설명, 걷기 그림, 표정 목록)이 {{slot}} 자리에 들어가요. 등장인물이 없으면 이 블록은 안 보내요.",
         "map" to "지금 보고 있는 맵의 JSON(바닥·위층 기호, 이벤트, 맵 목록)이 {{slot}} 자리에 들어가요. 그림 첨부를 켜면 맵 그림도 같이 가요(기본은 꺼짐).",
         "command" to "사용자가 채팅에 쓴 말이 {{slot}} 자리에 들어가요.",
     )
@@ -111,6 +112,18 @@ object Prompts {
             }
             root.put("v", 8); save()
         }
+        if (root.optInt("v") < 9) {
+            // 9 = 등장인물 블록(지금 맵 블록 바로 앞에)
+            presets().forEach { pr ->
+                val l = blocks(pr).toMutableList()
+                if (l.none { it.optString("type") == "cast" }) {
+                    val at = l.indexOfFirst { it.optString("type") == "map" }.let { if (it < 0) l.size else it }
+                    l.add(at, castBlock())
+                    pr.put("blocks", JSONArray(l))
+                }
+            }
+            root.put("v", 9); save()
+        }
     }
 
     private const val OLD_ROLE = """너는 게임 제작 앱 "Nami Maker"(쯔꾸르 같은 2D 탑다운 게임 제작 도구) 안의 AI 조수다.
@@ -189,6 +202,7 @@ op은 위에서부터 순서대로 적용된다. 적용 뒤 앱이 문제(막힌
 - reply에는 무엇을 했는지 1~3문장. 사용자는 되돌리기 한 번으로 네 작업 전체를 취소할 수 있다."""),
         novelRules(),
         storyBlock(),
+        castBlock(),
         block("map", "user", "지금 맵", "[지금 맵]\n{{slot}}", image = false),
         block("command", "user", "사용자 메시지", "[사용자]\n{{slot}}"),
     )
@@ -199,6 +213,14 @@ op은 위에서부터 순서대로 적용된다. 적용 뒤 앱이 문제(막힌
     private const val MOVE_LINE = """- {"type":"move","target":"player|this|이벤트 id","route":"UULLR"}  (이동 경로: U D L R = 한 칸 걷기, u d l r = 그쪽 보기, . = 잠깐 쉬기. 다 걸을 때까지 기다림)"""
 
     fun storyBlock() = block("story", "user", "소설·계획", "[소설과 제작 계획]\n{{slot}}")
+
+    /** 등장인물 블록(9): 목록 + 쓰는 법. */
+    fun castBlock() = block("cast", "user", "등장인물", CAST_TEXT)
+    private const val CAST_TEXT = """[등장인물 — {{user}}가 정한 주연·조연]
+{{slot}}
+- 이 인물들은 이름 그대로 쓰고, 이벤트로 만들 때 graphic은 그 인물의 sprite를 쓴다.
+- stand가 true인 인물이 말하는 text 명령에는 "face"로 표정을 넣을 수 있다: {"type":"text","speaker":"이름","face":"표정","text":"…"} — face는 그 인물의 faces 중 하나만. 기본 표정이면 face를 빼도 된다.
+- 엑스트라(지나가는 마을 사람 등)는 목록에 없어도 알아서 만들어도 된다."""
 
     fun novelRules() = block("text", "system", "소설로 게임 만들기", """## 소설로 게임 만들기
 사용자가 소설을 넣어 두면 [소설과 제작 계획]으로 함께 온다. 소설을 쯔꾸르 게임(맵, 대사, 이동, 진행)으로 옮긴다.
@@ -301,6 +323,7 @@ op은 위에서부터 순서대로 적용된다. 적용 뒤 앱이 문제(막힌
                 "map" -> slot(t, MapJson.describe(p, m.id))
                 "story" -> if (p.story.isBlank() && p.plan.isBlank()) "" else slot(t,
                     "## 소설\n" + p.story.ifBlank { "(없음)" } + "\n\n## 제작 계획 (set_plan으로 고침)\n" + p.plan.ifBlank { "(아직 없음)" })
+                "cast" -> Stands.describe(p).let { d -> if (d.isBlank()) "" else slot(fill(t), d) }
                 "command" -> { hasCommand = true; slot(t, userText) }
                 else -> fill(t)
             }
@@ -316,7 +339,7 @@ op은 위에서부터 순서대로 적용된다. 적용 뒤 앱이 문제(막힌
         while (seq.isNotEmpty() && seq.last().first == "assistant") { pre.insert(0, seq.removeAt(seq.size - 1).third.first) }
         val content = JSONArray(); val mapIdx = JSONArray(); val roles = JSONArray()
         for ((role, type, tx) in seq) {
-            if (type == "map" || type == "story") mapIdx.put(content.length())
+            if (type == "map" || type == "story" || type == "cast") mapIdx.put(content.length())
             content.put(JSONObject().put("type", "text").put("text", tx.first)); roles.put(role)
             if (tx.second) {
                 mapIdx.put(content.length())

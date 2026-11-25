@@ -22,6 +22,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -217,6 +218,7 @@ private fun Section(t: String) = Text(t, fontSize = 13.sp, color = K.sub, fontWe
 @Composable
 private fun CmdDialog(p: Project, c: Cmd, onDone: () -> Unit, onDelete: () -> Unit) {
     var speaker by remember { mutableStateOf(c.speaker) }
+    var face by remember { mutableStateOf(c.face) }
     var text by remember { mutableStateOf(c.text) }
     var name by remember { mutableStateOf(c.name) }
     var on by remember { mutableStateOf(c.on) }
@@ -241,6 +243,17 @@ private fun CmdDialog(p: Project, c: Cmd, onDone: () -> Unit, onDelete: () -> Un
                 when (c.type) {
                     "text" -> {
                         Field(speaker, { speaker = it }, "말하는 사람 (비워도 돼요)", Modifier.fillMaxWidth())
+                        if (p.cast.isNotEmpty()) Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            p.cast.forEach { cm -> Pill(cm.name, on = speaker.trim() == cm.name) { speaker = cm.name; if (face !in cm.faces) face = "" } }
+                        }
+                        val cm = p.castBy(speaker)
+                        if (cm != null && Stands.hasBase(cm.id) && cm.hasFace() && cm.faces.isNotEmpty()) {
+                            Text("표정", fontSize = 12.sp, color = K.sub)
+                            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Pill("기본", on = face.isBlank()) { face = "" }
+                                cm.faces.forEach { f -> Pill(f, on = face == f) { face = f } }
+                            }
+                        }
                         Field(text, { text = it }, "대사", Modifier.fillMaxWidth(), singleLine = false, minLines = 3)
                     }
                     "choice" -> {
@@ -312,7 +325,7 @@ private fun CmdDialog(p: Project, c: Cmd, onDone: () -> Unit, onDelete: () -> Un
         },
         confirmButton = {
             TextButton(onClick = {
-                c.speaker = speaker.trim(); c.text = text; c.name = name.trim(); c.on = on; c.cond = cond
+                c.speaker = speaker.trim(); c.face = if (p.castBy(speaker)?.faces?.contains(face) == true) face else ""; c.text = text; c.name = name.trim(); c.on = on; c.cond = cond
                 if (c.type == "choice") {
                     c.options = options.map { it.ifBlank { "…" } }.toMutableList()
                     while (c.branches.size < c.options.size) c.branches.add(mutableListOf())

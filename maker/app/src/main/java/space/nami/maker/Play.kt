@@ -111,6 +111,8 @@ class Game(val p: Project) {
         return door.x.toFloat() to door.y.toFloat()
     }
     var msg by mutableStateOf<Pair<String, String>?>(null)
+    /** 지금 대사의 표정(등장인물 스탠딩). */
+    var msgFace by mutableStateOf("")
     var choices by mutableStateOf<List<String>?>(null)
     var busy by mutableStateOf(false)
     private var msgWait: CompletableDeferred<Unit>? = null
@@ -185,7 +187,7 @@ class Game(val p: Project) {
     private suspend fun exec(list: List<Cmd>, self: GameEvent?): Boolean {
         for ((n, c) in list.withIndex()) {
             when (c.type) {
-                "text" -> say(c.speaker, c.text, keep = list.getOrNull(n + 1)?.type == "choice")
+                "text" -> { msgFace = c.face; say(c.speaker, c.text, keep = list.getOrNull(n + 1)?.type == "choice") }
                 "choice" -> if (!exec(c.branches.getOrElse(choose(c.options)) { mutableListOf() }, self)) return false
                 "switch" -> if (c.name.isNotBlank()) switches[c.name] = c.on
                 "if" -> {
@@ -441,6 +443,17 @@ fun PlayScreen(p: Project, onExit: () -> Unit) {
             if (msg != null) {
                 // message window: full width, 4 lines, at the bottom
                 val msgH = MV_PAD * 2 + MV_LINE * 4
+                // 등장인물 스탠딩(+표정): 왼쪽 아래, 메시지 창 뒤
+                val cm = game.p.castBy(msg.first)
+                @Suppress("UNUSED_VARIABLE") val sr = Stands.rev
+                val sb = cm?.let { Stands.composed(it, game.msgFace) }
+                if (sb != null) {
+                    val sib = remember(sb) { sb.asImageBitmap() }
+                    val sh = MV_H * 0.92f
+                    val sw = sh * sb.width / sb.height.coerceAtLeast(1)
+                    androidx.compose.foundation.Image(sib, null, contentScale = androidx.compose.ui.layout.ContentScale.Fit,
+                        modifier = Modifier.offset(x = gdp(24f), y = gdp(MV_H - sh)).size(gdp(sw), gdp(sh)))
+                }
                 if (msg.first.isNotBlank()) {
                     // MZ name box above the message window, left
                     MvWindow(k, Modifier.offset(x = gdp(0f), y = gdp(MV_H - msgH - 60f)).height(gdp(60f)).widthIn(min = gdp(120f))) {
@@ -551,7 +564,7 @@ private fun MvWindow(k: Float, modifier: Modifier, content: @Composable androidx
 private fun MvMessage(text: String, choosing: Boolean, k: Float, gdp: (Float) -> androidx.compose.ui.unit.Dp,
                       gsp: (Float) -> androidx.compose.ui.unit.TextUnit, modifier: Modifier, onNext: () -> Unit) {
     var shown by remember(text) { mutableIntStateOf(0) }
-    LaunchedEffect(text) { while (shown < text.length) { delay(16); shown++ } }   // MV: about one letter per frame
+    LaunchedEffect(text) { while (shown < text.length) { delay(16); shown = (shown + 3).coerceAtMost(text.length) } }   // 한 프레임에 세 글자(빠르게)
     val blink by androidx.compose.animation.core.rememberInfiniteTransition(label = "pause").animateFloat(0.35f, 1f,
         androidx.compose.animation.core.infiniteRepeatable(tween(420), androidx.compose.animation.core.RepeatMode.Reverse), label = "p")
     MvWindow(k, modifier.clickable(enabled = !choosing, indication = null,
