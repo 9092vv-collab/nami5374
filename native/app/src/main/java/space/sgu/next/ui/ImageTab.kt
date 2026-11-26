@@ -329,16 +329,16 @@ private fun StyleTab(cid: String, openField: (String) -> Unit) {
         Spacer(Modifier.height(8.dp))
         PromptCard("퀄리티 태그 (공통 프롬프트 맨 끝)", style.s("quality"), "예: very aesthetic, masterpiece, no text") { openField("gen:style:quality") }
         Spacer(Modifier.height(8.dp))
-        PromptCard("Art style negative (그림체 네거티브)", style.s("negative"), "예: lowres, bad anatomy, text, watermark") { openField("gen:style:negative") }
+        PromptCard("Art style negative (그림체 네거티브)", style.s("negative"), "예: lowres, bad anatomy, text, watermark", disabled = negOff()) { openField("gen:style:negative") }
         StyleLibrarySection(cid)
     }
 }
 
 @Composable
-internal fun PromptCard(label: String, value: String, placeholder: String = "비어 있음 · 탭하여 편집", onClick: () -> Unit) {
-    LineCard(onClick = onClick) {
-        Column {
-            Text(label, style = MaterialTheme.typography.bodySmall, color = Sgu.Sub)
+internal fun PromptCard(label: String, value: String, placeholder: String = "비어 있음 · 탭하여 편집", disabled: Boolean = false, onClick: () -> Unit) {
+    LineCard(onClick = if (disabled) ({}) else onClick) {
+        Column(Modifier.alpha(if (disabled) 0.4f else 1f)) {
+            Text(label + if (disabled) " · V5M에서는 안 써요" else "", style = MaterialTheme.typography.bodySmall, color = Sgu.Sub)
             Spacer(Modifier.height(4.dp))
             if (value.isBlank()) Text(placeholder, style = MaterialTheme.typography.bodyMedium, color = Sgu.Sub.copy(alpha = 0.7f))
             else Text(value, style = MaterialTheme.typography.bodyMedium, maxLines = 3, overflow = TextOverflow.Ellipsis)
@@ -465,7 +465,7 @@ private fun GenCharacterTab(cid: String, openField: (String) -> Unit) {
             FieldLabel("자유 프롬프트 (테스트·아이콘용, 템플릿에는 반영되지 않아요)")
             PromptCard("자유 프롬프트 (캐릭터 프롬프트 맨 뒤에 추가)", c.s("freePrompt")) { openField("gen:free:$charId:freePrompt") }
             Spacer(Modifier.height(8.dp))
-            PromptCard("자유 네거티브 (Undesired Content 맨 뒤에 추가)", c.s("freeNegative")) { openField("gen:free:$charId:freeNegative") }
+            PromptCard("자유 네거티브 (Undesired Content 맨 뒤에 추가)", c.s("freeNegative"), disabled = negOff()) { openField("gen:free:$charId:freeNegative") }
             Spacer(Modifier.height(10.dp))
             val preview = g.sOrNull("preview")?.let { ImageGenStore.imageFile(cid, it) }?.takeIf { it.exists() }
             if (preview != null) {
@@ -541,17 +541,21 @@ private fun FolderTile(f: JsonObject, count: Int, checked: Boolean, modifier: Mo
     }
 }
 
+/** 그림체 모델이 V5M이면 네거티브는 안 씀 → 네거티브 칸·블록은 회색으로 잠금(적힌 내용은 그대로 둠). */
+internal fun negOff(): Boolean = space.sgu.next.data.GenOps.noNegatives(null)
+
 /** 네모 칸: 체크박스 + 이름만. 탭 = 내용 편집, 길게 = 메뉴. 네거티브 블록은 이름이 붉은 갈색. */
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 private fun BlockTile(b: JsonObject, checked: Boolean, enabled: Boolean, modifier: Modifier = Modifier, onToggle: () -> Unit, onClick: () -> Unit, onMenu: () -> Unit) {
-    val active = checked && enabled
     val negative = b.s("type") == "negative"
+    val locked = negative && negOff()
+    val active = checked && enabled && !locked
     Column(
-        modifier.height(84.dp).clip(RoundedCornerShape(16.dp)).background(if (negative) Sgu.AccentSoft.copy(alpha = 0.45f) else Sgu.Card).border(1.dp, Sgu.Line, RoundedCornerShape(16.dp))
-            .combinedClickable(onClick = onClick, onLongClick = onMenu).padding(start = 2.dp, end = 8.dp, bottom = 6.dp),
+        modifier.height(84.dp).alpha(if (locked) 0.4f else 1f).clip(RoundedCornerShape(16.dp)).background(if (negative) Sgu.AccentSoft.copy(alpha = 0.45f) else Sgu.Card).border(1.dp, Sgu.Line, RoundedCornerShape(16.dp))
+            .combinedClickable(onClick = { if (!locked) onClick() }, onLongClick = onMenu).padding(start = 2.dp, end = 8.dp, bottom = 6.dp),
     ) {
-        IconButton(onClick = onToggle, modifier = Modifier.size(36.dp)) {
+        IconButton(onClick = { if (!locked) onToggle() }, enabled = !locked, modifier = Modifier.size(36.dp)) {
             Icon(if (checked) Icons.Outlined.CheckBox else Icons.Outlined.CheckBoxOutlineBlank, if (checked) "켜짐" else "꺼짐",
                 tint = if (enabled) Sgu.Ink else Sgu.Sub.copy(alpha = 0.5f), modifier = Modifier.size(22.dp))
         }
@@ -602,7 +606,7 @@ private fun BlockDialog(cid: String, charId: String, b0: JsonObject, folders: Li
                     FieldLabel("종류")
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         PillChip("프롬프트", b.s("type") == "prompt") { patch("type" to JsonPrimitive("prompt")) }
-                        PillChip("네거티브", b.s("type") == "negative") { patch("type" to JsonPrimitive("negative")) }
+                        PillChip(if (negOff()) "네거티브 (V5M 안 씀)" else "네거티브", b.s("type") == "negative") { if (!negOff()) patch("type" to JsonPrimitive("negative")) }
                     }
                     Row(Modifier.padding(top = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
@@ -776,7 +780,7 @@ fun GenPresetScreen(cid: String, presetId: String, openField: (String) -> Unit, 
                                     FieldLabel("캐릭터 프롬프트 (Character Prompt 맨 아래)")
                                     PromptCard("${c.s("name")} 추가 프롬프트 (이 프리셋에서만)", pc.s("prompt")) { openField("gen:pchar:$presetId:${pc.s("id")}:prompt") }
                                     FieldLabel("캐릭터 네거티브 (Undesired Content 맨 아래)")
-                                    PromptCard("${c.s("name")} 추가 네거티브", pc.s("negative")) { openField("gen:pchar:$presetId:${pc.s("id")}:negative") }
+                                    PromptCard("${c.s("name")} 추가 네거티브", pc.s("negative"), disabled = negOff()) { openField("gen:pchar:$presetId:${pc.s("id")}:negative") }
                                 }
                             }
                         }
@@ -791,7 +795,7 @@ fun GenPresetScreen(cid: String, presetId: String, openField: (String) -> Unit, 
                 FieldLabel("에셋 프롬프트 (모든 캐릭터 공통, 그림체 프롬프트 뒤에 붙음)")
                 PromptCard("에셋 프롬프트", p.s("assetPrompt")) { openField("gen:preset:$presetId:assetPrompt") }
                 Spacer(Modifier.height(6.dp))
-                PromptCard("에셋 네거티브", p.s("assetNegative")) { openField("gen:preset:$presetId:assetNegative") }
+                PromptCard("에셋 네거티브", p.s("assetNegative"), disabled = negOff()) { openField("gen:preset:$presetId:assetNegative") }
             }
         }
     }
@@ -874,6 +878,8 @@ private fun CheckRow(b: JsonObject, checked: Boolean, enabled: Boolean, onToggle
 @Composable
 private fun BlockChip(b: JsonObject, on: Boolean, enabled: Boolean, folder: Boolean = false, onClick: () -> Unit) {
     val neg = b.s("type") == "negative"
+    if (neg && negOff()) { Row(Modifier.alpha(0.35f).clip(CircleShape).border(1.dp, Sgu.Line, CircleShape).padding(horizontal = 14.dp, vertical = 8.dp)) {
+        Text(b.s("name").ifBlank { "블록" } + " − · V5M 안 씀", color = Sgu.Sub, style = MaterialTheme.typography.labelLarge, maxLines = 1) }; return }
     val fill = when { !on -> Color.Transparent; neg -> Sgu.Danger; else -> Sgu.Ink }
     val fg = if (on) Color.White else Sgu.Ink
     Row(
