@@ -367,6 +367,8 @@ private fun GenCharacterTab(cid: String, openField: (String) -> Unit) {
     var generating by remember { mutableStateOf<Job?>(null) }
     var addedIcon by remember { mutableStateOf<String?>(null) }
     var zoomPreview by remember { mutableStateOf(false) }
+    var overwriting by remember { mutableStateOf<String?>(null) }
+    overwriting?.let { t -> ImportLookDialog(cid, target = t) { overwriting = null } }
 
     LazyColumn(contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 40.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         item(key = "chars") {
@@ -397,6 +399,7 @@ private fun GenCharacterTab(cid: String, openField: (String) -> Unit) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(c.s("name"), style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
                 TextButton(onClick = { rename = true }) { Text("이름", color = Sgu.Ink) }
+                TextButton(onClick = { overwriting = charId }) { Text("덮어쓰기", color = Sgu.Ink) }
                 TextButton(onClick = { ImageGenStore.duplicateCharacter(cid, charId) }) { Text("복사", color = Sgu.Ink) }
                 TextButton(onClick = { confirmDelete = true }) { Text("삭제", color = Sgu.Danger) }
             }
@@ -903,32 +906,46 @@ fun SeedButton(cid: String) {
         icon = if (fixed) Icons.Outlined.Lock else Icons.Outlined.Shuffle)
 }
 
-/** "다른 봇에서 외형 가져오기": 봇 고르기 → 그 봇의 이미지 캐릭터 고르기 → 새 캐릭터로 복사. */
+/**
+ * "다른 봇에서 외형 가져오기": 봇 고르기 → 그 봇의 이미지 캐릭터 고르기 → 새 캐릭터로 복사.
+ * target이 있으면 "외형 덮어쓰기": 이 봇의 다른 캐릭터나 다른 봇의 캐릭터를 골라 target 자리(프리셋 연결 그대로)에 덮어씀.
+ */
 @Composable
-private fun ImportLookDialog(cid: String, onDismiss: () -> Unit) {
+private fun ImportLookDialog(cid: String, target: String? = null, onDismiss: () -> Unit) {
     val ctx = androidx.compose.ui.platform.LocalContext.current
     var bot by remember { mutableStateOf<space.sgu.next.data.CharMeta?>(null) }
-    val bots = remember { space.sgu.next.data.CharacterStore.items.filter { it.id != cid } }
+    val self = remember { space.sgu.next.data.CharacterStore.items.firstOrNull { it.id == cid } }
+    val bots = remember { (if (target != null) listOfNotNull(self) else emptyList()) + space.sgu.next.data.CharacterStore.items.filter { it.id != cid } }
+    val tName = target?.let { t -> ImageGenStore.load(cid).arr("characters").firstOrNull { it.s("id") == t }?.s("name") }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(bot?.let { "${it.name.ifBlank { "(이름 없음)" }} · 외형 고르기" } ?: "어느 봇에서 가져올까요?") },
+        title = { Text(bot?.let { "${it.name.ifBlank { "(이름 없음)" }} · 외형 고르기" } ?: if (target != null) "'$tName' 자리에 덮어쓸 외형 · 봇 고르기" else "어느 봇에서 가져올까요?") },
         text = {
             val b = bot
             val rows: List<Pair<String, () -> Unit>> = if (b == null) bots.map { m ->
-                val n = ImageGenStore.load(m.id).arr("characters").size
-                "${m.name.ifBlank { "(이름 없음)" }}  ·  이미지 캐릭터 ${n}개" to { if (n > 0) bot = m else android.widget.Toast.makeText(ctx, "이 봇엔 이미지 캐릭터가 없어요", android.widget.Toast.LENGTH_SHORT).show() }
-            } else ImageGenStore.load(b.id).arr("characters").map { c ->
+                val n = ImageGenStore.load(m.id).arr("characters").count { it.s("id") != target }
+                (if (m.id == cid) "이 봇  ·  다른 캐릭터 ${n}개" else "${m.name.ifBlank { "(이름 없음)" }}  ·  이미지 캐릭터 ${n}개") to { if (n > 0) bot = m else android.widget.Toast.makeText(ctx, "고를 캐릭터가 없어요", android.widget.Toast.LENGTH_SHORT).show() }
+            } else ImageGenStore.load(b.id).arr("characters").filter { it.s("id") != target }.map { c ->
                 val blocks = c.arr("blocks").filter { it.s("type") != "folder" }
                 "${c.s("name").ifBlank { "(이름 없음)" }}  ·  블록 ${blocks.size}개" to {
-                    val name = ImageGenStore.importCharacter(cid, c, b.name)
-                    android.widget.Toast.makeText(ctx, "'$name' 외형을 가져왔어요", android.widget.Toast.LENGTH_SHORT).show()
+                    if (target != null) {
+                        val name = ImageGenStore.overwriteLook(cid, target, c)
+                        android.widget.Toast.makeText(ctx, "'$name' 외형으로 덮어썼어요 (프리셋 연결은 그대로)", android.widget.Toast.LENGTH_SHORT).show()
+                    } else {
+                        val name = ImageGenStore.importCharacter(cid, c, b.name)
+                        android.widget.Toast.makeText(ctx, "'$name' 외형을 가져왔어요", android.widget.Toast.LENGTH_SHORT).show()
+                    }
                     onDismiss()
                 }
             }
-            if (rows.isEmpty()) Text("가져올 봇이 없어요.", color = Sgu.Sub)
-            else LazyColumn(Modifier.heightIn(max = 420.dp)) {
-                items(rows) { (label, go) ->
-                    Text(label, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.fillMaxWidth().clickable { go() }.padding(vertical = 12.dp))
+            Column {
+                if (target != null && b == null) Text("블록은 이름으로 맞춰서 내용만 바꿔요. 프리셋에서 켜고 끈 상태는 그대로예요. 맞는 이름이 없는 블록은 새로 추가되고(프리셋에선 꺼짐), 고른 외형에 없는 블록은 내용이 비워져요.",
+                    style = MaterialTheme.typography.bodySmall, color = Sgu.Sub, modifier = Modifier.padding(bottom = 8.dp))
+                if (rows.isEmpty()) Text("가져올 봇이 없어요.", color = Sgu.Sub)
+                else LazyColumn(Modifier.heightIn(max = 420.dp)) {
+                    items(rows) { (label, go) ->
+                        Text(label, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.fillMaxWidth().clickable { go() }.padding(vertical = 12.dp))
+                    }
                 }
             }
         },

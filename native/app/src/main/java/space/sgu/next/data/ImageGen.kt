@@ -802,5 +802,43 @@ object ImageGenStore {
         return name
     }
 
+    /**
+     * 외형 덮어쓰기: target 캐릭터 자리(프리셋에 붙은 그대로)에 src의 외형 블록을 씀. 블록은 이름으로 맞춤(id 유지 → 프리셋의 켜기·끄기 그대로).
+     * 맞는 이름이 없는 src 블록은 새로 추가(프리셋에선 꺼진 채), src에 없는 target 블록은 내용만 비움. 이름도 src로(겹치면 그대로).
+     */
+    fun overwriteLook(cid: String, targetId: String, src: JsonObject): String {
+        var name = ""
+        update(cid) { g ->
+            val t = g.arr("characters").firstOrNull { it.s("id") == targetId } ?: return@update g
+            fun key(b: JsonObject) = b.s("name").trim().lowercase()
+            val tb = t.arr("blocks"); val sb = src.arr("blocks")
+            val out = mutableListOf<JsonObject>()
+            val used = mutableSetOf<String>()
+            // 폴더 id 대응: src 폴더 → target 폴더(이름 같음) 또는 새 폴더
+            val folderMap = mutableMapOf<String, String>()
+            sb.filter { it.s("type") == "folder" }.forEach { f ->
+                val m = tb.firstOrNull { it.s("type") == "folder" && key(it) == key(f) }
+                folderMap[f.s("id")] = m?.s("id") ?: newId("gb")
+            }
+            for (b in tb) {
+                val m = sb.firstOrNull { key(it) == key(b) && (it.s("type") == "folder") == (b.s("type") == "folder") && it.s("id") !in used }
+                if (m != null) { used.add(m.s("id")); out.add(if (b.s("type") == "folder") b else b.with("text" to JsonPrimitive(m.s("text")), "type" to JsonPrimitive(m.s("type").ifBlank { "prompt" }))) }
+                else out.add(if (b.s("type") == "folder") b else b.with("text" to JsonPrimitive("")))
+            }
+            for (b in sb) {
+                if (b.s("id") in used) continue
+                if (b.s("type") == "folder") { if (out.none { it.s("id") == folderMap[b.s("id")] }) out.add(b.with("id" to JsonPrimitive(folderMap[b.s("id")]!!))); continue }
+                var nb = b.with("id" to JsonPrimitive(newId("gb")))
+                nb = b.sOrNull("folderId")?.let { f -> folderMap[f]?.let { nb.with("folderId" to JsonPrimitive(it)) } } ?: JsonObject(nb - "folderId")
+                out.add(nb)
+            }
+            val taken = g.arr("characters").filter { it.s("id") != targetId }.map { it.s("name") }.toSet()
+            val newName = src.s("name").takeIf { it.isNotBlank() && it !in taken } ?: t.s("name")
+            name = newName
+            g.mapList("characters") { l -> val i = l.indexOfFirst { it.s("id") == targetId }; if (i >= 0) l[i] = t.with("name" to JsonPrimitive(newName), "blocks" to JsonArray(out)) }
+        }
+        return name
+    }
+
     fun thumb(preset: JsonObject?): JsonObject? = preset?.arr("images")?.let { l -> l.firstOrNull { it.b("selected") } ?: l.lastOrNull() }
 }
