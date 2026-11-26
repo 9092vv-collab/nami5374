@@ -939,7 +939,7 @@ private fun ImportLookDialog(cid: String, target: String? = null, onDismiss: () 
                 }
             }
             Column {
-                if (target != null && b == null) Text("블록은 이름으로 맞춰서 내용만 바꿔요. 프리셋에서 켜고 끈 상태는 그대로예요. 맞는 이름이 없는 블록은 새로 추가되고(프리셋에선 꺼짐), 고른 외형에 없는 블록은 내용이 비워져요.",
+                if (target != null && b == null) Text("블록은 이름으로 맞춰서 내용만 바꿔요. 프리셋에서 켜고 끈 상태는 그대로예요. 맞는 이름이 없는 블록은 새로 추가되고(프리셋에선 꺼짐), 고른 외형에 없는 블록은 지워져요.",
                     style = MaterialTheme.typography.bodySmall, color = Sgu.Sub, modifier = Modifier.padding(bottom = 8.dp))
                 if (rows.isEmpty()) Text("가져올 봇이 없어요.", color = Sgu.Sub)
                 else LazyColumn(Modifier.heightIn(max = 420.dp)) {

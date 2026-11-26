@@ -804,7 +804,7 @@ object ImageGenStore {
 
     /**
      * 외형 덮어쓰기: target 캐릭터 자리(프리셋에 붙은 그대로)에 src의 외형 블록을 씀. 블록은 이름으로 맞춤(id 유지 → 프리셋의 켜기·끄기 그대로).
-     * 맞는 이름이 없는 src 블록은 새로 추가(프리셋에선 꺼진 채), src에 없는 target 블록은 내용만 비움. 이름도 src로(겹치면 그대로).
+     * 맞는 이름이 없는 src 블록은 새로 추가(프리셋에선 꺼진 채), src에 없는 target 블록은 지움(프리셋 연결에서도 빠짐). 이름도 src로(겹치면 그대로).
      */
     fun overwriteLook(cid: String, targetId: String, src: JsonObject): String {
         var name = ""
@@ -823,7 +823,7 @@ object ImageGenStore {
             for (b in tb) {
                 val m = sb.firstOrNull { key(it) == key(b) && (it.s("type") == "folder") == (b.s("type") == "folder") && it.s("id") !in used }
                 if (m != null) { used.add(m.s("id")); out.add(if (b.s("type") == "folder") b else b.with("text" to JsonPrimitive(m.s("text")), "type" to JsonPrimitive(m.s("type").ifBlank { "prompt" }))) }
-                else out.add(if (b.s("type") == "folder") b else b.with("text" to JsonPrimitive("")))
+                // src에 없는 블록·폴더는 지움
             }
             for (b in sb) {
                 if (b.s("id") in used) continue
@@ -835,7 +835,17 @@ object ImageGenStore {
             val taken = g.arr("characters").filter { it.s("id") != targetId }.map { it.s("name") }.toSet()
             val newName = src.s("name").takeIf { it.isNotBlank() && it !in taken } ?: t.s("name")
             name = newName
-            g.mapList("characters") { l -> val i = l.indexOfFirst { it.s("id") == targetId }; if (i >= 0) l[i] = t.with("name" to JsonPrimitive(newName), "blocks" to JsonArray(out)) }
+            // 지워진 폴더를 가리키던 블록은 폴더 밖으로
+            val ids = out.map { it.s("id") }.toSet()
+            val fixed = out.map { b -> b.sOrNull("folderId")?.takeIf { it !in ids }?.let { JsonObject(b - "folderId") } ?: b }
+            g.mapList("characters") { l -> val i = l.indexOfFirst { it.s("id") == targetId }; if (i >= 0) l[i] = t.with("name" to JsonPrimitive(newName), "blocks" to JsonArray(fixed)) }
+                .mapList("presets") { l -> for (k in l.indices) {
+                    val p = l[k]
+                    l[k] = p.with("chars" to JsonArray(p.arr("chars").map { pc ->
+                        if (pc.s("characterId") != targetId) pc
+                        else pc.with("blockIds" to JsonArray(((pc["blockIds"] as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull } ?: emptyList()).filter { it in ids }.map { JsonPrimitive(it) }))
+                    }))
+                } }
         }
         return name
     }
