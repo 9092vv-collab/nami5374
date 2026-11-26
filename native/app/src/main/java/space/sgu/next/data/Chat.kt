@@ -152,9 +152,9 @@ object Chat {
         val provider = SettingsStore.provider(model.s("providerId"))
         val (mode, ttl) = effectiveCache(model, provider)
         return ChatReq(
-            messages = risuFlags(messages, model.b("firstSystem"), model.b("altRole")),
+            messages = risuFlags(messages, provider?.b("firstSystem") == true, provider?.b("altRole") == true),
             params = params ?: model.o("params"),
-            stream = stream ?: model.b("stream", true),
+            stream = stream ?: provider?.b("stream", true) ?: true,
             thinking = thinking ?: model.o("thinking"),
             structuredOutput = structuredOutput ?: model.s("structuredOutput").ifBlank { "auto" },
             jsonSchema = jsonSchema,

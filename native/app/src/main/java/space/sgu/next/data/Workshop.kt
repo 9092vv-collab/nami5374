@@ -674,7 +674,7 @@ object Workshop {
                 }
                 access = elevate(access)
                 // "한 번에 불러오기": 서버와는 계속 스트리밍으로 받지만 화면 갱신은 하지 않음 (결과는 끝나고 한 번에 반영됨)
-                val atOnce = SettingsStore.model(Processors.mainModelId(doc(cid)))?.b("streamAtOnce") == true
+                val atOnce = SettingsStore.model(Processors.mainModelId(doc(cid)))?.let { SettingsStore.provider(it.s("providerId")) }?.b("streamAtOnce") == true
                 suspend fun main(a: Access, table: String?): Processors.MainOut {
                     setJob(cid) { it.copy(access = a, phase = "generating", stream = "", reasoning = "") }
                     return Processors.runMain(doc(cid), sguData(cid), command, a, r.instruction,

@@ -120,6 +120,21 @@ object SettingsStore {
             }
             merged["jbRestored093"] = JsonPrimitive(true)
         }
+        // 0.9.52: 스트리밍·한 번에 불러오기·First System·Alternate Role을 모델에서 프로바이더로 (메인 모델 값 우선, 없으면 그 프로바이더의 첫 모델)
+        if (!t.b("providerFlags0952")) {
+            val models = (merged["models"] as? JsonArray)?.mapNotNull { it as? JsonObject }.orEmpty()
+            val mainId = (merged["processors"] as? JsonObject)?.o("main")?.sOrNull("modelId")
+            (merged["providers"] as? JsonArray)?.let { list ->
+                merged["providers"] = JsonArray(list.map { e ->
+                    val p = e as? JsonObject ?: return@map e
+                    val mine = models.filter { it.s("providerId") == p.s("id") }
+                    val src = mine.firstOrNull { it.s("id") == mainId } ?: mine.firstOrNull() ?: return@map p
+                    val add = listOf("stream", "streamAtOnce", "firstSystem", "altRole").mapNotNull { k -> src[k]?.let { k to it } }
+                    if (add.isEmpty()) p else JsonObject(p + add)
+                })
+            }
+            merged["providerFlags0952"] = JsonPrimitive(true)
+        }
         // 0.9.50: 세션 기록·유저 명령 → 챗 블록, JB 삭제, 앱 블록 역할 system 고정
         if (!t.b("chatBlocks0950")) {
             (merged["promptPresets"] as? JsonArray)?.let { list ->

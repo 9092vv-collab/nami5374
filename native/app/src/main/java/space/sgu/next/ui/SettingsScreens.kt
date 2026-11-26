@@ -422,6 +422,20 @@ fun ProviderScreen(id: String, open: (String) -> Unit, onBack: () -> Unit) {
         }
 
         Spacer(Modifier.height(10.dp))
+        if (!isJev && !isImage) {
+            // 0.9.52: 대화 동작은 프로바이더 단위 (이 프로바이더의 모델 전부에 적용)
+            fun setB(k: String, v: Boolean) = SettingsStore.patch("providers", id, k to JsonPrimitive(v))
+            FieldLabel("동작 (이 프로바이더의 모든 모델)")
+            GroupRow(0, 4, "스트리밍", subtitle = "진행 중인 원문을 실시간으로 표시합니다.",
+                trailing = { SguSwitch(p.b("stream", true)) { setB("stream", it) } })
+            GroupRow(1, 4, "한 번에 불러오기", subtitle = "서버에서는 스트리밍으로 받되, 화면에는 끝난 뒤 한 번에 보여줍니다. 폰 부하가 줄어요. (작업실 메인 응답)",
+                trailing = { SguSwitch(p.b("streamAtOnce")) { setB("streamAtOnce", it) } })
+            GroupRow(2, 4, "First System Prompt", subtitle = "맨 앞 시스템 메시지만 시스템 지시로 보내고, 중간 시스템 메시지는 user + \"system: \"으로 바꿉니다. 끄면 모든 시스템 메시지를 시스템 지시로 모읍니다.",
+                trailing = { SguSwitch(p.b("firstSystem")) { setB("firstSystem", it) } })
+            GroupRow(3, 4, "Alternate Role", subtitle = "같은 역할 메시지가 이어지면 한 메시지로 합칩니다(줄바꿈으로 연결).",
+                trailing = { SguSwitch(p.b("altRole")) { setB("altRole", it) } })
+            Spacer(Modifier.height(12.dp))
+        }
         PillChip(if (advanced) "고급 닫기" else "고급", selected = advanced) { advanced = !advanced }
         AnimatedVisibility(advanced) {
             Column {
@@ -545,15 +559,12 @@ fun ModelScreen(id: String, onBack: () -> Unit) {
         }
 
         FieldLabel("동작")
-        GroupRow(0, 5, "스트리밍", subtitle = "진행 중인 원문을 실시간으로 표시합니다.",
-            trailing = { SguSwitch(m.b("stream", true)) { set("stream", JsonPrimitive(it)) } })
-        GroupRow(1, 5, "한 번에 불러오기", subtitle = "서버에서는 스트리밍으로 받되, 화면에는 끝난 뒤 한 번에 보여줍니다. 폰 부하가 줄어요. (작업실 메인 응답)",
-            trailing = { SguSwitch(m.b("streamAtOnce")) { set("streamAtOnce", JsonPrimitive(it)) } })
-        GroupRow(2, 5, "비전 (이미지 입력)", subtitle = "켜면 활성화된 이미지 참고 자료를 함께 보냅니다." + if (!m.b("visionSet")) " 지금은 모델 이름으로 자동 판별했어요." else "",
+        Hint("스트리밍 · 한 번에 불러오기 · 메시지 변환(First System Prompt, Alternate Role)은 프로바이더 화면에서 정해요.")
+        GroupRow(0, 3, "비전 (이미지 입력)", subtitle = "켜면 활성화된 이미지 참고 자료를 함께 보냅니다." + if (!m.b("visionSet")) " 지금은 모델 이름으로 자동 판별했어요." else "",
             trailing = { SguSwitch(vision) { SettingsStore.patch("models", id, "vision" to JsonPrimitive(it), "visionSet" to JsonPrimitive(true)) } })
-        GroupRow(3, 5, "추론 (thinking / reasoning)", subtitle = "Anthropic thinking, Gemini thinkingConfig(2.x 예산 / 3 이상 레벨), OpenAI reasoning_effort",
+        GroupRow(1, 3, "추론 (thinking / reasoning)", subtitle = "Anthropic thinking, Gemini thinkingConfig(2.x 예산 / 3 이상 레벨), OpenAI reasoning_effort",
             trailing = { SguSwitch(thinking.b("enabled")) { setThinking("enabled", JsonPrimitive(it)) } })
-        GroupRow(4, 5, "즐겨찾기", subtitle = if (isMain) "기본값 모델은 즐겨찾기가 항상 켜져 있습니다" else "기본 모델 외 최대 2개 · 모델 목록 앞쪽에 표시",
+        GroupRow(2, 3, "즐겨찾기", subtitle = if (isMain) "기본값 모델은 즐겨찾기가 항상 켜져 있습니다" else "기본 모델 외 최대 2개 · 모델 목록 앞쪽에 표시",
             trailing = {
                 SguSwitch(isMain || m.b("favorite")) { on ->
                     if (isMain) return@SguSwitch
@@ -561,11 +572,6 @@ fun ModelScreen(id: String, onBack: () -> Unit) {
                     else set("favorite", JsonPrimitive(on))
                 }
             })
-        FieldLabel("메시지 변환 (RisuAI LLM 플래그)")
-        GroupRow(0, 2, "First System Prompt", subtitle = "맨 앞 시스템 메시지만 시스템 지시로 보내고, 중간 시스템 메시지는 user + \"system: \"으로 바꿉니다. 끄면 모든 시스템 메시지를 시스템 지시로 모읍니다.",
-            trailing = { SguSwitch(m.b("firstSystem")) { set("firstSystem", JsonPrimitive(it)) } })
-        GroupRow(1, 2, "Alternate Role", subtitle = "같은 역할 메시지가 이어지면 한 메시지로 합칩니다(줄바꿈으로 연결).",
-            trailing = { SguSwitch(m.b("altRole")) { set("altRole", JsonPrimitive(it)) } })
         AnimatedVisibility(thinking.b("enabled")) {
             Column {
                 FieldLabel("추론 토큰 예산 (Anthropic · Gemini 2.x)")
