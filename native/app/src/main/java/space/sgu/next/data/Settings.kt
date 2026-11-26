@@ -120,6 +120,19 @@ object SettingsStore {
             }
             merged["jbRestored093"] = JsonPrimitive(true)
         }
+        // 0.9.53: 기본 프리셋 메인 지시에 {{user}} 줄 추가
+        if (!t.b("userLine0953")) {
+            (merged["promptPresets"] as? JsonArray)?.let { list ->
+                merged["promptPresets"] = JsonArray(list.map { e ->
+                    val p = e as? JsonObject ?: return@map e
+                    JsonObject(p + ("blocks" to JsonArray(p.arr("blocks").map { b ->
+                        if (b.s("type") == "text" && b.s("name") == "메인 지시" && b.s("text").startsWith("You are SGU") && "{{user}}" !in b.s("text"))
+                            JsonObject(b + ("text" to JsonPrimitive(b.s("text").trimEnd() + "\n" + PromptBlocks.USER_LINE))) else b
+                    })))
+                })
+            }
+            merged["userLine0953"] = JsonPrimitive(true)
+        }
         // 0.9.52: 스트리밍·한 번에 불러오기·First System·Alternate Role을 모델에서 프로바이더로 (메인 모델 값 우선, 없으면 그 프로바이더의 첫 모델)
         if (!t.b("providerFlags0952")) {
             val models = (merged["models"] as? JsonArray)?.mapNotNull { it as? JsonObject }.orEmpty()
