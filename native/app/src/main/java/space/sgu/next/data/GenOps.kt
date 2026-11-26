@@ -76,9 +76,20 @@ object GenOps {
         else -> e
     }
 
+    /** 지금 그림체 모델이 V5M이면 네거티브를 아예 안 씀(생성 때도 안 보냄): AI에게 안 보여 주고, 써도 버림. */
+    fun noNegatives(g: JsonObject?): Boolean =
+        (SettingsStore.root.o("imageStyle")?.sOrNull("model") ?: g?.o("style")?.s("model")) == NaiModels.V5_MEDIUM
+    private val NEG_KEYS = setOf("assetNegative", "asset_negative", "negative", "freeNegative")
+    private fun dropNeg(e: JsonElement?): JsonElement? = when (e) {
+        is JsonObject -> JsonObject(e.filterKeys { it !in NEG_KEYS }.mapValues { (k, v) ->
+            if (k == "blocks" && v is JsonArray) JsonArray(v.filter { (it as? JsonObject)?.let { b -> str(b["type"]) == "negative" } != true }.map { dropNeg(it)!! }) else dropNeg(v)!! })
+        is JsonArray -> JsonArray(e.map { dropNeg(it)!! })
+        else -> e
+    }
+
     /** 블록 목록: 폴더 안 블록은 폴더 아래 blocks로 묶어서 보여 줌(고칠 때는 지금처럼 folderId). */
-    private fun blocksView(c: JsonObject, al: Aliases, withText: Boolean): JsonArray {
-        val all = c.arr("blocks")
+    private fun blocksView(c: JsonObject, al: Aliases, withText: Boolean, noNeg: Boolean = false): JsonArray {
+        val all = c.arr("blocks").filter { !noNeg || it.s("type") != "negative" }
         fun one(b: JsonObject) = buildJsonObject {
             put("id", al.s(b.s("id"))); put("name", b.s("name"))
             if (b.s("type") != "prompt") put("type", b.s("type"))
@@ -96,9 +107,11 @@ object GenOps {
         val al = aliases(g0)
         val defSize = ImageGenStore.size()
         fun sizeOf(o: JsonObject) = o.o("size") ?: defSize
+        val nn = noNegatives(g0)
+        val negNote = if (nn) " Negative prompts are not used with the current image model (V5M): they are hidden and must not be written." else ""
         return j(when (id) {
             "genFree" -> JsonArray(chars.map { c -> buildJsonObject {
-                put("id", al.s(c.s("id"))); put("name", c.s("name")); put("freePrompt", c.s("freePrompt")); put("freeNegative", c.s("freeNegative"))
+                put("id", al.s(c.s("id"))); put("name", c.s("name")); put("freePrompt", c.s("freePrompt")); if (!nn) put("freeNegative", c.s("freeNegative"))
                 put("activeBlockIds", JsonArray(c.arr("blocks").filter { it["free"]?.toString() != "false" }.map { JsonPrimitive(al.s(it.s("id"))) }))
             } })
             "genFreeRun" -> JsonArray(chars.map { c -> buildJsonObject { put("id", al.s(c.s("id"))); put("name", c.s("name")); if (sizeOf(c) != defSize) put("size", sizeOf(c)) } })
@@ -107,28 +120,28 @@ object GenOps {
                 put("defaults", buildJsonObject { put("format", "webp"); put("quality", 80) })
             }
             "genCharacters" -> buildJsonObject {
-                put("note", "Omitted when default: size = $defSize, block type = prompt. Blocks inside a folder are listed under the folder (edit with folderId).")
+                put("note", "Omitted when default: size = $defSize, block type = prompt. Blocks inside a folder are listed under the folder (edit with folderId).$negNote")
                 put("characters", JsonArray(chars.map { c -> buildJsonObject {
                     put("id", al.s(c.s("id"))); put("name", c.s("name")); if (sizeOf(c) != defSize) put("size", sizeOf(c))
-                    put("blocks", blocksView(c, al, true))
+                    put("blocks", blocksView(c, al, true, nn))
                 } }))
             }
             else -> buildJsonObject {
-                put("note", "Omitted when default: imageName = name, imageType = asset, size = $defSize, empty images, empty negative, pos = auto, block type = prompt.")
+                put("note", "Omitted when default: imageName = name, imageType = asset, size = $defSize, empty images, empty negative, pos = auto, block type = prompt.$negNote")
                 put("availableCharacters", JsonArray(chars.map { c -> buildJsonObject {
-                    put("id", al.s(c.s("id"))); put("name", c.s("name")); put("blocks", blocksView(c, al, false))
+                    put("id", al.s(c.s("id"))); put("name", c.s("name")); put("blocks", blocksView(c, al, false, nn))
                 } }))
                 put("presets", JsonArray(presets.map { p -> buildJsonObject {
                     put("id", al.s(p.s("id"))); put("name", p.s("name"))
                     if (p.s("imageName") != p.s("name")) put("imageName", p.s("imageName"))
                     p.s("imageType").takeIf { it.isNotBlank() && it != "asset" }?.let { put("imageType", it) }
                     if (sizeOf(p) != defSize) put("size", sizeOf(p))
-                    put("assetPrompt", p.s("assetPrompt")); if (p.s("assetNegative").isNotEmpty()) put("assetNegative", p.s("assetNegative"))
+                    put("assetPrompt", p.s("assetPrompt")); if (!nn && p.s("assetNegative").isNotEmpty()) put("assetNegative", p.s("assetNegative"))
                     if (p.arr("images").isNotEmpty()) put("images", JsonArray(p.arr("images").mapIndexed { i, im -> buildJsonObject { put("imageId", al.s(im.s("id"))); put("order", i + 1); put("usedInBot", im.b("selected")) } }))
                     put("chars", JsonArray(p.arr("chars").map { pc -> buildJsonObject {
                         put("characterId", al.s(pc.s("characterId")))
                         put("blockIds", JsonArray(((pc["blockIds"] as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull } ?: emptyList()).map { JsonPrimitive(al.s(it)) }))
-                        put("prompt", pc.s("prompt")); if (pc.s("negative").isNotEmpty()) put("negative", pc.s("negative"))
+                        put("prompt", pc.s("prompt")); if (!nn && pc.s("negative").isNotEmpty()) put("negative", pc.s("negative"))
                         val pos = pc.o("pos"); if (pos != null && pos.s("mode") != "auto") put("pos", pos)
                     } }))
                 } }))
@@ -209,7 +222,10 @@ object GenOps {
     fun apply(g: JsonObject, field: String, op: String, id0: String, value: JsonElement?): Result? {
         val al = aliases(g)
         val id = al.toReal[id0] ?: id0
-        val h = realize(value, al) as? JsonObject ?: JsonObject(emptyMap())
+        val nn = noNegatives(g)
+        if (nn && (op == "add_block" || op == "update_block") && str((value as? JsonObject)?.get("type")) == "negative")
+            error("지금 그림체 모델(V5M)은 네거티브를 쓰지 않아요")
+        val h = (if (nn) dropNeg(realize(value, al)) else realize(value, al)) as? JsonObject ?: JsonObject(emptyMap())
         val chars = g.arr("characters"); val presets = g.arr("presets")
         when (field) {
             "genFree" -> {
