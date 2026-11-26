@@ -94,7 +94,8 @@ private fun JsonElement?.str(): String = when (this) {
 }
 private fun JsonElement?.asBool(): Boolean? = (this as? JsonPrimitive)?.let { it.booleanOrNull ?: it.contentOrNull?.let { c -> Regex("^(true|1|on|yes)$", RegexOption.IGNORE_CASE).matches(c) } }
 private fun JsonElement?.asNum(): Double? = (this as? JsonPrimitive)?.let { if (it.isString) null else it.doubleOrNull }
-private val pretty1 = Json { prettyPrint = true; prettyPrintIndent = " " }
+/** AI에게 보내는 필드 JSON: 들여쓰기 없이(공백도 토큰이라). */
+private val pretty1 = Json { prettyPrint = false }
 fun jsonText(e: JsonElement) = pretty1.encodeToString(JsonElement.serializer(), e)
 
 // =====================================================================================

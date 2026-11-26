@@ -46,43 +46,90 @@ object GenOps {
             "remove_block" to "with id (character id); {blockId}. Removing a folder keeps its blocks and takes them out of the folder")
     }
 
-    private val pretty = kotlinx.serialization.json.Json { prettyPrint = true }
-    private fun j(e: JsonElement) = pretty.encodeToString(JsonElement.serializer(), e)
+    private val compact = kotlinx.serialization.json.Json { prettyPrint = false }
+    private fun j(e: JsonElement) = compact.encodeToString(JsonElement.serializer(), e)
     private fun str(v: JsonElement?): String = when (v) { null, is JsonNull -> ""; is JsonPrimitive -> v.contentOrNull ?: ""; else -> v.toString() }
     private fun num(v: JsonElement?): Double? = (v as? JsonPrimitive)?.let { it.doubleOrNull ?: it.contentOrNull?.toDoubleOrNull() }
+
+    // ---------- 짧은 id (0.9.54) ----------
+    // AI에게는 gb_mwxpb47q2cf 같은 긴 id 대신 c·b·p·i + 짧은 글자를 보여 줌. id에서 바로 계산(순서와 무관)해서 같은 응답 안에서 지우고 고쳐도 안 꼬임.
+    // 겹치면 그 id는 원래 id를 그대로 씀. AI가 원래 id나 이름을 써도 그대로 받음.
+    private fun code(kind: Char, id: String) = kind + Integer.toString(id.hashCode() and 0xFFFFF, 36)
+    private class Aliases(val toShort: Map<String, String>, val toReal: Map<String, String>)
+    private fun aliases(g: JsonObject): Aliases {
+        val all = mutableListOf<Pair<Char, String>>()
+        g.arr("characters").forEach { c -> all.add('c' to c.s("id")); c.arr("blocks").forEach { all.add('b' to it.s("id")) } }
+        g.arr("presets").forEach { p -> all.add('p' to p.s("id")); p.arr("images").forEach { all.add('i' to it.s("id")) } }
+        val byCode = all.filter { it.second.isNotBlank() }.groupBy { code(it.first, it.second) }
+        val toShort = mutableMapOf<String, String>(); val toReal = mutableMapOf<String, String>()
+        byCode.forEach { (k, v) -> if (v.size == 1) { toShort[v[0].second] = k; toReal[k] = v[0].second } }
+        return Aliases(toShort, toReal)
+    }
+    private fun Aliases.s(id: String) = toShort[id] ?: id
+    private val ID_KEYS = setOf("characterId", "blockId", "folderId", "imageId", "id")
+    /** AI가 보낸 값 안의 짧은 id를 원래 id로. */
+    private fun realize(e: JsonElement?, al: Aliases, key: String? = null): JsonElement? = when (e) {
+        null -> null
+        is JsonObject -> JsonObject(e.mapValues { (k, v) -> realize(v, al, k)!! })
+        is JsonArray -> JsonArray(e.map { v -> if (key == "blockIds" || key == "activeBlockIds") (v as? JsonPrimitive)?.contentOrNull?.let { JsonPrimitive(al.toReal[it] ?: it) } ?: v else realize(v, al, null)!! })
+        is JsonPrimitive -> if (key in ID_KEYS && e.isString) JsonPrimitive(al.toReal[e.content] ?: e.content) else e
+        else -> e
+    }
+
+    /** 블록 목록: 폴더 안 블록은 폴더 아래 blocks로 묶어서 보여 줌(고칠 때는 지금처럼 folderId). */
+    private fun blocksView(c: JsonObject, al: Aliases, withText: Boolean): JsonArray {
+        val all = c.arr("blocks")
+        fun one(b: JsonObject) = buildJsonObject {
+            put("id", al.s(b.s("id"))); put("name", b.s("name"))
+            if (b.s("type") != "prompt") put("type", b.s("type"))
+            if (withText && b.s("type") != "folder") put("text", b.s("text"))
+        }
+        val folderIds = all.filter { it.s("type") == "folder" }.map { it.s("id") }.toSet()
+        return JsonArray(all.filter { it.sOrNull("folderId")?.takeIf { f -> f in folderIds } == null }.map { b ->
+            if (b.s("type") == "folder") JsonObject(one(b) + ("blocks" to JsonArray(all.filter { it.sOrNull("folderId") == b.s("id") }.map { one(it) }))) else one(b)
+        })
+    }
 
     fun serialize(g: JsonObject?, id: String): String {
         val g0 = g ?: return ""
         val chars = g0.arr("characters"); val presets = g0.arr("presets")
+        val al = aliases(g0)
+        val defSize = ImageGenStore.size()
+        fun sizeOf(o: JsonObject) = o.o("size") ?: defSize
         return j(when (id) {
             "genFree" -> JsonArray(chars.map { c -> buildJsonObject {
-                put("id", c.s("id")); put("name", c.s("name")); put("freePrompt", c.s("freePrompt")); put("freeNegative", c.s("freeNegative"))
-                put("activeBlockIds", JsonArray(c.arr("blocks").filter { it["free"]?.toString() != "false" }.map { JsonPrimitive(it.s("id")) }))
+                put("id", al.s(c.s("id"))); put("name", c.s("name")); put("freePrompt", c.s("freePrompt")); put("freeNegative", c.s("freeNegative"))
+                put("activeBlockIds", JsonArray(c.arr("blocks").filter { it["free"]?.toString() != "false" }.map { JsonPrimitive(al.s(it.s("id"))) }))
             } })
-            "genFreeRun" -> JsonArray(chars.map { c -> buildJsonObject { put("id", c.s("id")); put("name", c.s("name")); put("size", c.o("size") ?: ImageGenStore.size()) } })
+            "genFreeRun" -> JsonArray(chars.map { c -> buildJsonObject { put("id", al.s(c.s("id"))); put("name", c.s("name")); if (sizeOf(c) != defSize) put("size", sizeOf(c)) } })
             "genCompress" -> buildJsonObject {
                 put("presets", presets.size); put("generatedImages", presets.sumOf { it.arr("images").size })
                 put("defaults", buildJsonObject { put("format", "webp"); put("quality", 80) })
             }
-            "genCharacters" -> JsonArray(chars.map { c -> buildJsonObject {
-                put("id", c.s("id")); put("name", c.s("name")); put("size", c.o("size") ?: ImageGenStore.size())
-                put("blocks", JsonArray(c.arr("blocks").map { b -> buildJsonObject {
-                    put("id", b.s("id")); put("name", b.s("name")); put("type", b.s("type"))
-                    if (b.s("type") != "folder") { put("text", b.s("text")); b.sOrNull("folderId")?.let { put("folderId", it) } }
+            "genCharacters" -> buildJsonObject {
+                put("note", "Omitted when default: size = $defSize, block type = prompt. Blocks inside a folder are listed under the folder (edit with folderId).")
+                put("characters", JsonArray(chars.map { c -> buildJsonObject {
+                    put("id", al.s(c.s("id"))); put("name", c.s("name")); if (sizeOf(c) != defSize) put("size", sizeOf(c))
+                    put("blocks", blocksView(c, al, true))
                 } }))
-            } })
+            }
             else -> buildJsonObject {
+                put("note", "Omitted when default: imageName = name, imageType = asset, size = $defSize, empty images, empty negative, pos = auto, block type = prompt.")
                 put("availableCharacters", JsonArray(chars.map { c -> buildJsonObject {
-                    put("id", c.s("id")); put("name", c.s("name"))
-                    put("blocks", JsonArray(c.arr("blocks").map { b -> buildJsonObject { put("id", b.s("id")); put("name", b.s("name")); put("type", b.s("type")); b.sOrNull("folderId")?.let { put("folderId", it) } } }))
+                    put("id", al.s(c.s("id"))); put("name", c.s("name")); put("blocks", blocksView(c, al, false))
                 } }))
                 put("presets", JsonArray(presets.map { p -> buildJsonObject {
-                    put("id", p.s("id")); put("name", p.s("name")); put("imageName", p.s("imageName")); put("imageType", p.s("imageType").ifBlank { "asset" })
-                    put("size", p.o("size") ?: ImageGenStore.size()); put("assetPrompt", p.s("assetPrompt")); put("assetNegative", p.s("assetNegative"))
-                    put("images", JsonArray(p.arr("images").mapIndexed { i, im -> buildJsonObject { put("imageId", im.s("id")); put("order", i + 1); put("usedInBot", im.b("selected")) } }))
+                    put("id", al.s(p.s("id"))); put("name", p.s("name"))
+                    if (p.s("imageName") != p.s("name")) put("imageName", p.s("imageName"))
+                    p.s("imageType").takeIf { it.isNotBlank() && it != "asset" }?.let { put("imageType", it) }
+                    if (sizeOf(p) != defSize) put("size", sizeOf(p))
+                    put("assetPrompt", p.s("assetPrompt")); if (p.s("assetNegative").isNotEmpty()) put("assetNegative", p.s("assetNegative"))
+                    if (p.arr("images").isNotEmpty()) put("images", JsonArray(p.arr("images").mapIndexed { i, im -> buildJsonObject { put("imageId", al.s(im.s("id"))); put("order", i + 1); put("usedInBot", im.b("selected")) } }))
                     put("chars", JsonArray(p.arr("chars").map { pc -> buildJsonObject {
-                        put("characterId", pc.s("characterId")); put("blockIds", pc["blockIds"] ?: JsonArray(emptyList()))
-                        put("prompt", pc.s("prompt")); put("negative", pc.s("negative")); put("pos", pc.o("pos") ?: buildJsonObject { put("mode", "auto") })
+                        put("characterId", al.s(pc.s("characterId")))
+                        put("blockIds", JsonArray(((pc["blockIds"] as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull } ?: emptyList()).map { JsonPrimitive(al.s(it)) }))
+                        put("prompt", pc.s("prompt")); if (pc.s("negative").isNotEmpty()) put("negative", pc.s("negative"))
+                        val pos = pc.o("pos"); if (pos != null && pos.s("mode") != "auto") put("pos", pos)
                     } }))
                 } }))
             }
@@ -159,8 +206,10 @@ object GenOps {
     private fun JsonObject.withList(k: String, list: List<JsonObject>) = JsonObject(this + (k to JsonArray(list)))
 
     /** Module 903 applyGenOp. Returns null for an op this field doesn't have. */
-    fun apply(g: JsonObject, field: String, op: String, id: String, value: JsonElement?): Result? {
-        val h = value as? JsonObject ?: JsonObject(emptyMap())
+    fun apply(g: JsonObject, field: String, op: String, id0: String, value: JsonElement?): Result? {
+        val al = aliases(g)
+        val id = al.toReal[id0] ?: id0
+        val h = realize(value, al) as? JsonObject ?: JsonObject(emptyMap())
         val chars = g.arr("characters"); val presets = g.arr("presets")
         when (field) {
             "genFree" -> {
