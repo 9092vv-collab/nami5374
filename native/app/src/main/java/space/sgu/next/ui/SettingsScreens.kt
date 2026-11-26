@@ -561,6 +561,11 @@ fun ModelScreen(id: String, onBack: () -> Unit) {
                     else set("favorite", JsonPrimitive(on))
                 }
             })
+        FieldLabel("메시지 변환 (RisuAI LLM 플래그)")
+        GroupRow(0, 2, "First System Prompt", subtitle = "맨 앞 시스템 메시지만 시스템 지시로 보내고, 중간 시스템 메시지는 user + \"system: \"으로 바꿉니다. 끄면 모든 시스템 메시지를 시스템 지시로 모읍니다.",
+            trailing = { SguSwitch(m.b("firstSystem")) { set("firstSystem", JsonPrimitive(it)) } })
+        GroupRow(1, 2, "Alternate Role", subtitle = "같은 역할 메시지가 이어지면 한 메시지로 합칩니다(줄바꿈으로 연결).",
+            trailing = { SguSwitch(m.b("altRole")) { set("altRole", JsonPrimitive(it)) } })
         AnimatedVisibility(thinking.b("enabled")) {
             Column {
                 FieldLabel("추론 토큰 예산 (Anthropic · Gemini 2.x)")

@@ -104,6 +104,44 @@ object Chat {
         return m
     }
 
+    /**
+     * RisuAI LLM 플래그와 같은 변환.
+     * First System Prompt: 맨 앞에 이어진 system만 system으로 두고(→ \n\n으로 합쳐 시스템 지시), 중간 system은 user + "system: " 접두어로.
+     * Alternate Role: 위 변환 뒤 같은 역할이 이어지면 한 메시지로 합침(글은 \n으로).
+     */
+    fun risuFlags(list: List<Msg>, firstSystem: Boolean, altRole: Boolean): List<Msg> {
+        var out = list
+        if (firstSystem) {
+            var lead = true
+            out = out.map { m ->
+                if (m.role != "system") { lead = false; m }
+                else if (lead) m
+                else m.copy(role = "user", text = "system: " + m.plain, parts = null)
+            }
+        }
+        if (altRole) {
+            val merged = mutableListOf<Msg>()
+            for (m in out) {
+                val last = merged.lastOrNull()
+                if (last != null && last.role == m.role) {
+                    val joined = if (last.parts == null && m.parts == null) last.copy(text = (last.text ?: "") + "\n" + (m.text ?: ""), cacheAfter = last.cacheAfter || m.cacheAfter)
+                        else {
+                            // 그림이 섞이면 글 조각끼리만 \n으로 잇고 그림은 그대로
+                            val ps = last.partsOrText.toMutableList()
+                            m.partsOrText.forEachIndexed { i, pt ->
+                                val lp = ps.lastOrNull()
+                                if (i == 0 && pt.isText && lp != null && lp.isText) ps[ps.size - 1] = Part(text = (lp.text ?: "") + "\n" + (pt.text ?: "")) else ps.add(pt)
+                            }
+                            last.copy(text = null, parts = ps, cacheAfter = last.cacheAfter || m.cacheAfter)
+                        }
+                    merged[merged.size - 1] = joined
+                } else merged.add(m)
+            }
+            out = merged
+        }
+        return out
+    }
+
     // ---------- request building (buildChatRequest, module 945) ----------
 
     fun buildRequest(
@@ -114,7 +152,7 @@ object Chat {
         val provider = SettingsStore.provider(model.s("providerId"))
         val (mode, ttl) = effectiveCache(model, provider)
         return ChatReq(
-            messages = messages,
+            messages = risuFlags(messages, model.b("firstSystem"), model.b("altRole")),
             params = params ?: model.o("params"),
             stream = stream ?: model.b("stream", true),
             thinking = thinking ?: model.o("thinking"),
