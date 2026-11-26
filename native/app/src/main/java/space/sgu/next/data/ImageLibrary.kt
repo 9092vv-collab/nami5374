@@ -270,13 +270,31 @@ open class JsonLibrary(private val fileName: String, private val idPrefix: Strin
 
 /** settings/image-templates.json — shared by all characters; "default" is the built-in 기본 템플릿. */
 object TemplateLibrary : JsonLibrary("image-templates.json", "lib") {
-    override fun defaults() = listOf(JsonObject(mapOf("id" to JsonPrimitive("default"), "name" to JsonPrimitive(Templates.DEFAULT_LABEL), "data" to Templates.defaultData)))
-    override fun fixUp(list: List<JsonObject>) = list.map { if (it.s("id") == "default") it.with("data" to Templates.defaultData.with("name" to JsonPrimitive(it.s("name")))) else it }
+    /** 0.9.51: 기본 = 빈 템플릿(캐릭터 하나, 프리셋 없음), 그리고 원래 내장 템플릿(에셋 프리셋 63종). 새 프로젝트는 ★ 템플릿, 없으면 빈 기본. */
+    const val EMPTY_ID = "empty"
+    const val EMPTY_LABEL = "기본 템플릿"
+    const val FULL_LABEL = "에셋 프리셋 63종"
+    val emptyData: JsonObject by lazy { Templates.exportTemplate(ImageGenStore.blankState()).with("name" to JsonPrimitive(EMPTY_LABEL)) }
 
-    /** Same as the original's newProjectTemplateState: ★ template, else the built-in default. */
+    override fun defaults() = listOf(
+        JsonObject(mapOf("id" to JsonPrimitive(EMPTY_ID), "name" to JsonPrimitive(EMPTY_LABEL), "data" to emptyData)),
+        JsonObject(mapOf("id" to JsonPrimitive("default"), "name" to JsonPrimitive(FULL_LABEL), "data" to Templates.defaultData.with("name" to JsonPrimitive(FULL_LABEL)))),
+    )
+    override fun fixUp(list: List<JsonObject>): List<JsonObject> {
+        val l = list.map {
+            if (it.s("id") == "default") {
+                // 예전 이름 "기본 템플릿"이던 내장 63종은 새 이름으로 (빈 기본과 헷갈리지 않게)
+                val name = if (it.s("name") == Templates.DEFAULT_LABEL) FULL_LABEL else it.s("name")
+                it.with("name" to JsonPrimitive(name), "data" to Templates.defaultData.with("name" to JsonPrimitive(name)))
+            } else it
+        }
+        return if (l.any { it.s("id") == EMPTY_ID }) l else listOf(defaults()[0]) + l
+    }
+
+    /** ★ 템플릿, 없으면 빈 기본 템플릿 (예전엔 내장 63종). */
     fun newProjectState(base: JsonObject): JsonObject {
         favorite()?.let { f -> Templates.importTemplate(base, f.o("data"))?.let { return it.with("templateName" to JsonPrimitive(f.s("name")), "templateId" to JsonPrimitive(f.s("id"))) } }
-        return (Templates.importTemplate(base, Templates.defaultData) ?: base).with("templateName" to JsonPrimitive(Templates.DEFAULT_LABEL), "templateId" to JsonPrimitive("default"))
+        return (Templates.importTemplate(base, emptyData) ?: base).with("templateName" to JsonPrimitive(EMPTY_LABEL), "templateId" to JsonPrimitive(EMPTY_ID))
     }
 
     /** On opening the manager: every template this character has is put in the library (original TemplateManager effect). */

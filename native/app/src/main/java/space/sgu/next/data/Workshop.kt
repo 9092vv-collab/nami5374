@@ -429,7 +429,8 @@ object Processors {
                        val open: Decision? = null)
 
     /** 서브 없이 메인이 필요한 필드를 직접 엶 (원본 SGU 1.4.0 open_fields와 같은 방식, 여기선 JSON 답으로). 기본 켜짐. */
-    fun mainOpens() = !SettingsStore.root.o("processors").o("main").b("sendAll")
+    /** 0.9.51: 항상 원본 SGU 방식(메인이 필요한 필드를 직접 엶). 예전 "필드를 처음부터 전부 보내기"는 없앰. */
+    fun mainOpens() = true
 
     /** 처음 보낼 것: 항상 보기(Lv3) 필드 + 그중 바로 편집 가능(편집 Lv2)한 필드 + 상시·키워드 참고 자료. */
     fun lightAccess(doc: JsonObject, command: String, turnId: String): Access {
