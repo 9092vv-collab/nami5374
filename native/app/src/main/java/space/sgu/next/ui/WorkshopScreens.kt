@@ -561,7 +561,7 @@ fun PromptPresetScreen(presetId: String, onBack: () -> Unit) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f).padding(vertical = 8.dp)) {
                     Text(b.s("name").ifBlank { b.s("type") }, style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.SemiBold), color = if (on) Sgu.Ink else Sgu.Sub)
-                    Text("${(b["risuItem"] as? JsonObject)?.let { space.sgu.next.data.RisuPreset.typeLabel(it) + if (b.s("type") == "risu") " · RisuAI 전용" else "" } ?: PromptBlocks.TYPE_LABELS[b.s("type")] ?: b.s("type")} · ${b.s("role").ifBlank { "system" }}${if (i == prefillIndex) " · 프리필" else ""}" + if (!on) " · 꺼짐" else "", style = MaterialTheme.typography.bodySmall, color = Sgu.Sub)
+                    Text("${(b["risuItem"] as? JsonObject)?.let { space.sgu.next.data.RisuPreset.typeLabel(it) + if (b.s("type") == "risu") " · RisuAI 전용" else "" } ?: PromptBlocks.typeLabel(b.s("type"))} · ${if (b.s("type") == "chat") PromptBlocks.chatRange(b) else if (b.s("type") == "cachePoint") "깊이 ${b.d("depth")?.toInt() ?: 1} · ${b.s("cacheRole").ifBlank { "all" }}" else PromptBlocks.fixedRole(b)}${if (i == prefillIndex) " · 프리필" else ""}" + if (!on) " · 꺼짐" else "", style = MaterialTheme.typography.bodySmall, color = Sgu.Sub)
                 }
                 SguSwitch(on) { v -> setBlocks { l -> l[i] = JsonObject(l[i] + ("enabled" to JsonPrimitive(v))) } }
                 IconButton(onClick = { setBlocks { l -> if (i > 0) { val t = l[i]; l[i] = l[i - 1]; l[i - 1] = t } } }, enabled = i > 0) { Icon(Icons.Outlined.KeyboardArrowUp, "위로", tint = Sgu.Sub) }
@@ -629,7 +629,13 @@ private fun BlockEditDialog(b: JsonObject, onSave: (JsonObject) -> Unit, onDelet
     var text by remember(b.s("id")) { mutableStateOf(b.s("text")) }
     var enabled by remember(b.s("id")) { mutableStateOf(b.b("enabled", true)) }
     var fmt by remember(b.s("id")) { mutableStateOf(b.s("fieldFormat").ifBlank { PromptBlocks.DEFAULT_FIELD_FORMAT }) }
-    var limit by remember(b.s("id")) { mutableStateOf((b.d("historyLimit")?.toInt() ?: 6).toString()) }
+    // 챗: RisuAI처럼 고급 꺼짐 = 전체(rangeStart -1000), 켜면 시작·끝(채팅 끝까지)
+    var adv by remember(b.s("id")) { mutableStateOf((b.d("rangeStart")?.toInt() ?: -1000) != -1000) }
+    var rStart by remember(b.s("id")) { mutableStateOf((b.d("rangeStart")?.toInt()?.takeIf { it != -1000 } ?: 0).toString()) }
+    var toEnd by remember(b.s("id")) { mutableStateOf(b["rangeEnd"].let { it == null || (it as? JsonPrimitive)?.content == "end" }) }
+    var rEnd by remember(b.s("id")) { mutableStateOf(b["rangeEnd"]?.let { (it as? JsonPrimitive)?.content?.toDoubleOrNull()?.toInt()?.toString() } ?: "0") }
+    var depth by remember(b.s("id")) { mutableStateOf((b.d("depth")?.toInt() ?: 1).toString()) }
+    var cacheRole by remember(b.s("id")) { mutableStateOf(b.s("cacheRole").ifBlank { "all" }) }
     var type by remember(b.s("id")) { mutableStateOf(b.s("type")) }
     // RisuAI 파일에서 온 블록: 타입 목록을 RisuAI 것으로 (원본 파일과 맞춤)
     val RP = space.sgu.next.data.RisuPreset
@@ -673,13 +679,13 @@ private fun BlockEditDialog(b: JsonObject, onSave: (JsonObject) -> Unit, onDelet
                             type = k
                             // 내용이 들어가는 타입인데 자리 표시가 없으면 넣어 줌
                             if (k in PromptBlocks.SLOT_TYPES && PromptBlocks.SLOT !in text) text = if (text.isBlank()) PromptBlocks.SLOT else text + "\n\n" + PromptBlocks.SLOT
-                            if (k == "command") role = "user"
+                            if (k != "text") role = "system"
                         }
                     } }
                 }
                 Text(PromptBlocks.TYPE_DESCRIPTIONS[type] ?: "", style = MaterialTheme.typography.bodySmall, color = Sgu.Sub, modifier = Modifier.padding(start = 6.dp, top = 6.dp))
                 }
-                if (type != "cachePoint" && type != "risu" && rtype != "chatML") {
+                if (type == "text" && rtype != "chatML") {
                     FieldLabel("역할")
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) { listOf("system", "user", "assistant").forEach { r -> PillChip(r, role == r) { role = r } } }
                 }
@@ -688,24 +694,42 @@ private fun BlockEditDialog(b: JsonObject, onSave: (JsonObject) -> Unit, onDelet
                 }
                 if (type == "risu") {
                     if (rtype in RP.FORMAT_TYPES) { FieldLabel("감싸는 글 (inner format, ${PromptBlocks.SLOT} 자리에 내용)"); InputBox(text, { text = it }, singleLine = false) }
-                } else if (type != "cachePoint") {
+                } else if (type == "chat") {
+                    Row(Modifier.padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text("고급 (범위 정하기)", modifier = Modifier.weight(1f).padding(start = 6.dp)); SguSwitch(adv) { adv = it }
+                    }
+                    if (adv) {
+                        FieldLabel("범위 시작 (0 = 첫 메시지, -1 = 마지막)")
+                        InputBox(rStart, { v -> rStart = v.filterIndexed { i, c -> c.isDigit() || (i == 0 && c == '-') }.take(5) }, number = true)
+                        Row(Modifier.padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text("채팅 끝까지", modifier = Modifier.weight(1f).padding(start = 6.dp)); SguSwitch(toEnd) { toEnd = it }
+                        }
+                        if (!toEnd) { FieldLabel("범위 끝 (이 앞까지, -1 = 마지막 하나 빼고)"); InputBox(rEnd, { v -> rEnd = v.filterIndexed { i, c -> c.isDigit() || (i == 0 && c == '-') }.take(5) }, number = true) }
+                    } else Hint("이 세션의 대화 전체를 보내요.")
+                } else if (type == "cachePoint") {
+                    FieldLabel("깊이 (이 자리에서 거꾸로 몇 개)")
+                    InputBox(depth, { v -> depth = v.filter { it.isDigit() }.take(3) }, number = true)
+                    FieldLabel("역할")
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) { listOf("all", "user", "assistant", "system").forEach { r -> PillChip(r, cacheRole == r) { cacheRole = r } } }
+                } else {
                     FieldLabel(if (type == "outputFormat") "outputFormat (비워 두면 내장 규칙)" else if (type in PromptBlocks.SLOT_TYPES) "텍스트 (${PromptBlocks.SLOT} 자리에 내용이 들어갑니다)" else "텍스트")
                     InputBox(text, { text = it }, singleLine = false)
                 }
-                if (type != "cachePoint" && text.isNotBlank()) {
+                if (type != "cachePoint" && type != "chat" && text.isNotBlank()) {
                     KoToggle(Modifier.padding(top = 8.dp))
                     if (space.sgu.next.data.KoTranslate.on) Text(koText(text), style = MaterialTheme.typography.bodySmall, color = Sgu.Ink,
                         modifier = Modifier.padding(top = 6.dp).fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Sgu.Bubble).padding(12.dp))
                 }
                 if (type == "fieldData") { FieldLabel("필드 포맷 ({{label}}, {{id}}, {{value}})"); InputBox(fmt, { fmt = it }, singleLine = false) }
-                if (type == "history") { FieldLabel("포함할 이전 턴 수 (0 = 전체)"); InputBox(limit, { v -> limit = v.filter { it.isDigit() }.take(3) }, number = true) }
             }
         },
         confirmButton = { TextButton(onClick = {
             var nb = JsonObject(b + mapOf("type" to JsonPrimitive(type), "name" to JsonPrimitive(name), "role" to JsonPrimitive(role), "text" to JsonPrimitive(text), "enabled" to JsonPrimitive(enabled)))
             risuNow()?.let { nb = JsonObject(nb + ("risuItem" to it)) }
             if (type == "fieldData") nb = JsonObject(nb + ("fieldFormat" to JsonPrimitive(fmt)))
-            if (type == "history") nb = JsonObject(nb + ("historyLimit" to JsonPrimitive(limit.toIntOrNull() ?: 0)))
+            if (type == "chat") nb = JsonObject(nb + mapOf("rangeStart" to JsonPrimitive(if (adv) rStart.toIntOrNull() ?: 0 else -1000),
+                "rangeEnd" to if (!adv || toEnd) JsonPrimitive("end") else JsonPrimitive(rEnd.toIntOrNull() ?: 0)))
+            if (type == "cachePoint") nb = JsonObject(nb + mapOf("depth" to JsonPrimitive(depth.toIntOrNull() ?: 1), "cacheRole" to JsonPrimitive(cacheRole)))
             onSave(nb)
         }) { Text("저장", color = Sgu.Ink) } },
         dismissButton = { TextButton(onClick = onDelete) { Text("삭제", color = Sgu.Danger) } },

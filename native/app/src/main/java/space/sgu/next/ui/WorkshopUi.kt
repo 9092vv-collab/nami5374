@@ -163,7 +163,7 @@ fun WorkshopPage(cid: String, openFieldTab: (String) -> Unit, openRoute: (String
             items(turns.asReversed(), key = { it.s("id") }) { t ->
                 TurnCard(cid, t, isLast = t.s("id") == turns.lastOrNull()?.s("id"), busy = busy, openFieldTab = openFieldTab)
             }
-            if (Workshop.summary(doc) != null || Workshop.summarizing[cid] == true) item(key = "summary") { SummaryCard(cid, doc) }
+            if (false) item(key = "summary") { SummaryCard(cid, doc) }
             if (turns.isEmpty()) item(key = "empty") {
                 Column(Modifier.fillMaxWidth().padding(vertical = 24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                     Icon(Icons.Filled.AutoAwesome, null, tint = Sgu.Accent, modifier = Modifier.size(28.dp))

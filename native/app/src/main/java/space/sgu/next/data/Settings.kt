@@ -115,10 +115,20 @@ object SettingsStore {
                     val p = e as? JsonObject ?: return@map e
                     val blocks = p.arr("blocks")
                     if (blocks.isEmpty() || blocks.any { it["risuItem"] != null } || blocks.any { it.s("name") == "JB" }) p
-                    else JsonObject(p + ("blocks" to JsonArray(listOf(PromptBlocks.defaults().first { it.s("name") == "JB" }) + blocks)))
+                    else JsonObject(p + ("blocks" to JsonArray(listOf(PromptBlocks.defaults().firstOrNull { it.s("name") == "JB" } ?: return@map p) + blocks)))
                 })
             }
             merged["jbRestored093"] = JsonPrimitive(true)
+        }
+        // 0.9.50: 세션 기록·유저 명령 → 챗 블록, JB 삭제, 앱 블록 역할 system 고정
+        if (!t.b("chatBlocks0950")) {
+            (merged["promptPresets"] as? JsonArray)?.let { list ->
+                merged["promptPresets"] = JsonArray(list.map { e ->
+                    val p = e as? JsonObject ?: return@map e
+                    JsonObject(p + ("blocks" to JsonArray(PromptBlocks.upgrade(p.arr("blocks")))))
+                })
+            }
+            merged["chatBlocks0950"] = JsonPrimitive(true)
         }
         return JsonObject(merged)
     }

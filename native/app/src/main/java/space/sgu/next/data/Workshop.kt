@@ -738,14 +738,15 @@ object Workshop {
 
     val summarizing = androidx.compose.runtime.mutableStateMapOf<String, Boolean>()
     private fun summarySettings() = SettingsStore.root.o("sessionSummary").orEmptyObj()
-    fun summaryEnabled() = summarySettings().b("enabled", true)
+    /** 0.9.50: 세션 요약 없앰(대화는 챗 블록으로 그대로 보냄). */
+    fun summaryEnabled() = false
     fun summaryEvery() = (summarySettings().d("everyTurns")?.toInt() ?: 6).coerceIn(2, 50)
     fun summaryKeep() = (summarySettings().d("keepRecent")?.toInt() ?: 6).coerceIn(1, 50)
 
     fun summary(doc: JsonObject): JsonObject? = doc.o("session").o("summary")
     fun summaryText(doc: JsonObject): String? = summary(doc)?.s("text")?.takeIf { it.isNotBlank() }
     private fun covered(doc: JsonObject) = (summary(doc)?.get("covered") as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.content }?.toSet() ?: emptySet()
-    fun historyTurns(doc: JsonObject): List<JsonObject> { val c = covered(doc); return doc.o("session").arr("turns").filter { it.s("id") !in c } }
+    fun historyTurns(doc: JsonObject): List<JsonObject> = doc.o("session").arr("turns")
     private fun foldable(doc: JsonObject, keep: Int) = historyTurns(doc).filter { it.s("status") == "done" && !it.b("noResponse") }.dropLast(keep)
 
     private fun setSummary(cid: String, sum: JsonObject?) = updateDoc(cid) { d ->

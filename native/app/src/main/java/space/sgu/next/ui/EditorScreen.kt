@@ -162,7 +162,6 @@ fun EditorScreen(characterId: String, onBack: (() -> Unit)?, openField: (String)
                             if (!wideBar) DropdownMenuItem(text = { Text(if (extra) "$EXTRA_TITLE 닫기" else EXTRA_TITLE) }, onClick = { menu = false; side = if (extra) "" else "extra" })
                             DropdownMenuItem(text = { Text("새로운 세션 추가") }, enabled = !busy, onClick = { menu = false; newSession = true })
                             DropdownMenuItem(text = { Text("세션 이동") }, onClick = { menu = false; sessions = true })
-                            DropdownMenuItem(text = { Text("세션 요약하기") }, enabled = !busy && Workshop.summarizing[characterId] != true, onClick = { menu = false; Workshop.summarizeNow(characterId) })
                             DropdownMenuItem(text = { Text("복제") }, onClick = {
                                 menu = false
                                 val nid = CharacterStore.duplicate(characterId)

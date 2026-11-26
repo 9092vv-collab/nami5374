@@ -12,8 +12,8 @@ android {
         applicationId = "space.sgu.next"
         minSdk = 31
         targetSdk = 36
-        versionCode = 86
-        versionName = "0.9.49"
+        versionCode = 87
+        versionName = "0.9.50"
         ndk { abiFilters.add("arm64-v8a") }
     }
 
