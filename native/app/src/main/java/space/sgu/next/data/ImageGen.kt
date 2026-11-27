@@ -915,11 +915,16 @@ object ImageGenStore {
         var name = ""
         update(cid) { g ->
             val t = g.arr("characters").firstOrNull { it.s("id") == targetId } ?: return@update g
-            val tb = t.arr("blocks"); val sb = src.arr("blocks")
-            // 이름 + 들어 있는 폴더 이름으로 맞춤 (기본의상/상의 ≠ 탈의/상의)
+            val tb = t.arr("blocks")
+            // 가져올 쪽도 의상 구조로 맞춘 뒤 비교 (탈의 폴더 → 상반신(탈의)·하반신(탈의) 고정 블록)
+            val src2 = outfitChar(src).first
+            val sb = src2.arr("blocks")
+            // 이름 + 들어 있는 폴더 이름으로 맞춤 (기본의상/상의 ≠ 탈의/상의).
+            // 띄어쓰기·대소문자와 ":" 뒤는 무시 (성별 = 성별:여, 가슴크기 = 가슴 크기) → 프리셋 연결 유지
+            fun norm(n: String) = n.substringBefore(':').filterNot { it.isWhitespace() }.lowercase()
             fun keyIn(list: List<JsonObject>, b: JsonObject): String {
                 val folder = b.sOrNull("folderId")?.let { f -> list.firstOrNull { it.s("id") == f && it.s("type") == "folder" }?.s("name") } ?: ""
-                return folder.trim().lowercase() + "/" + b.s("name").trim().lowercase()
+                return norm(folder) + "/" + norm(b.s("name"))
             }
             fun key(b: JsonObject) = keyIn(if (tb.any { it === b }) tb else sb, b)
             val out = mutableListOf<JsonObject>()
@@ -932,7 +937,7 @@ object ImageGenStore {
             }
             for (b in tb) {
                 val m = sb.firstOrNull { key(it) == key(b) && (it.s("type") == "folder") == (b.s("type") == "folder") && it.s("id") !in used }
-                if (m != null) { used.add(m.s("id")); out.add(if (b.s("type") == "folder") b else b.with("text" to JsonPrimitive(m.s("text")), "type" to JsonPrimitive(m.s("type").ifBlank { "prompt" }))) }
+                if (m != null) { used.add(m.s("id")); out.add(if (b.s("type") == "folder") b else b.with("name" to JsonPrimitive(m.s("name")), "text" to JsonPrimitive(m.s("text")), "type" to JsonPrimitive(if (isSlot(b)) "slot" else m.s("type").ifBlank { "prompt" }))) }
                 // src에 없는 블록·폴더는 지움
             }
             for (b in sb) {
@@ -948,7 +953,7 @@ object ImageGenStore {
             // 지워진 폴더를 가리키던 블록은 폴더 밖으로
             val ids = out.map { it.s("id") }.toSet()
             val fixed = out.map { b -> b.sOrNull("folderId")?.takeIf { it !in ids }?.let { JsonObject(b - "folderId") } ?: b }
-            val srcFit = outfit(src)?.s("id")?.let { folderMap[it] }?.takeIf { it in ids }
+            val srcFit = outfit(src2)?.s("id")?.let { folderMap[it] }?.takeIf { it in ids }
             val nt = t.with("name" to JsonPrimitive(newName), "blocks" to JsonArray(fixed)).let { x -> if (srcFit != null) x.with("outfit" to JsonPrimitive(srcFit)) else x }
             g.mapList("characters") { l -> val i = l.indexOfFirst { it.s("id") == targetId }; if (i >= 0) l[i] = nt }
                 .mapList("presets") { l -> for (k in l.indices) {
