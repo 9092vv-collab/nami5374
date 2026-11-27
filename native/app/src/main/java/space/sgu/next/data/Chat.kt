@@ -594,7 +594,8 @@ object Chat {
             o.o("promptFeedback").sOrNull("blockReason")?.let { throw ProviderError(geminiBlocked(it)) }
             val (t, th) = split(o)
             val fr = o.arr("candidates").firstOrNull().sOrNull("finishReason")
-            if (t.isBlank() && fr in GEMINI_BLOCKS) throw ProviderError(geminiBlocked(fr!!))
+            // 쓰다가 막혀도(글이 조금 나온 뒤) 반쪽 답을 쓰지 않고 막혔다고 알림
+            if (fr in GEMINI_BLOCKS) throw ProviderError(geminiBlocked(fr!!, partial = t.isNotBlank()))
             return ChatResult(t, th.ifEmpty { null }, Usage(o.o("usageMetadata").int("promptTokenCount"), o.o("usageMetadata").int("candidatesTokenCount")),
                 o.arr("candidates").firstOrNull().sOrNull("finishReason"))
         }
@@ -609,12 +610,12 @@ object Chat {
             o.o("usageMetadata")?.let { usage = Usage(it.int("promptTokenCount"), it.int("candidatesTokenCount")) }
             o.arr("candidates").firstOrNull().sOrNull("finishReason")?.let { finish = it }
         }
-        if (text.isBlank() && finish in GEMINI_BLOCKS) throw ProviderError(geminiBlocked(finish!!))
+        if (finish in GEMINI_BLOCKS) throw ProviderError(geminiBlocked(finish!!, partial = text.isNotBlank()))
         return ChatResult(text.toString(), th.toString().ifEmpty { null }, usage, finish)
     }
 
     private val GEMINI_BLOCKS = setOf("SAFETY", "PROHIBITED_CONTENT", "BLOCKLIST", "SPII", "IMAGE_SAFETY", "RECITATION", "OTHER")
-    fun geminiBlocked(reason: String) = "구글 안전 필터에 막혔어요 (사유: $reason). 앱의 안전 설정(BLOCK_NONE)으로는 끌 수 없는 필터예요."
+    fun geminiBlocked(reason: String, partial: Boolean = false) = "구글 안전 필터에 막혔어요" + (if (partial) " — 답을 쓰다가 중간에 끊겼어요" else "") + " (사유: $reason). 앱의 안전 설정(BLOCK_NONE)으로는 끌 수 없는 필터예요."
 
     // ---------- Jev (935) ----------
 

@@ -114,7 +114,7 @@ fun SettingsScreen(open: (String) -> Unit) {
             item { GroupRow(3, 4, "RisuAI 프리셋 편집기", subtitle = ".risup 열기 · 고치기 · 저장, 작업실 프리셋으로 가져오기", icon = Icons.Outlined.EditNote, onClick = { open("risupreset") }) }
             item {
                 Text(
-                    "Nami next 0.9.59 · 캐릭터·스크립트·기타·로어북·설정·이미지·작업실·참고 자료·내보내기 작동",
+                    "Nami next 0.9.60 · 캐릭터·스크립트·기타·로어북·설정·이미지·작업실·참고 자료·내보내기 작동",
                     modifier = Modifier.fillMaxWidth().padding(24.dp),
                     style = MaterialTheme.typography.bodySmall, color = Sgu.Sub,
                 )
