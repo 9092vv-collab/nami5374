@@ -66,7 +66,7 @@ private val tabs = listOf(
 fun SguApp() {
     val nav = rememberNavController()
     val dur = 280
-    fun openField(id: String, key: String) = nav.navigate("field/$id/${Uri.encode(key)}")
+    fun openField(id: String, key: String) = nav.navigate("field/${Uri.encode(id)}/${Uri.encode(key)}")
     // 첫 실행 안내: only before the user has finished it and has no provider yet
     val start = androidx.compose.runtime.saveable.rememberSaveable {
         "home"
@@ -82,10 +82,10 @@ fun SguApp() {
     ) {
         composable("home") {
             HomeScreen(
-                openCharacter = { id -> nav.navigate("character/$id") },
+                openCharacter = { id -> nav.navigate("character/${Uri.encode(id)}") },
                 openField = ::openField,
                 openSettings = { route -> nav.navigate(route) },
-                openPreset = { id, pid -> nav.navigate("genpreset/$id/$pid") },
+                openPreset = { id, pid -> nav.navigate("genpreset/${Uri.encode(id)}/${Uri.encode(pid)}") },
             )
         }
         val back: () -> Unit = { nav.popBackStack() }
@@ -100,7 +100,7 @@ fun SguApp() {
         composable("character/{id}") { entry ->
             val id = entry.arguments?.getString("id") ?: ""
             EditorScreen(characterId = id, onBack = { nav.popBackStack() }, openField = { key -> openField(id, key) },
-                openPreset = { pid -> nav.navigate("genpreset/$id/$pid") }, openRoute = go)
+                openPreset = { pid -> nav.navigate("genpreset/${Uri.encode(id)}/${Uri.encode(pid)}") }, openRoute = go)
         }
         composable("genpreset/{id}/{pid}") { entry ->
             val id = entry.arguments?.getString("id") ?: ""
@@ -116,7 +116,7 @@ fun SguApp() {
         composable("gentemplates/{id}") { e -> TemplateManagerScreen(e.arguments?.getString("id") ?: "", onBack = back) }
         composable("genpick/{id}") { e ->
             val id = e.arguments?.getString("id") ?: ""
-            ImagePickerScreen(id, openPreset = { pid -> nav.navigate("genpreset/$id/$pid") }, onBack = back)
+            ImagePickerScreen(id, openPreset = { pid -> nav.navigate("genpreset/${Uri.encode(id)}/${Uri.encode(pid)}") }, onBack = back)
         }
         composable("perms/{id}") { e -> PermissionsScreen(e.arguments?.getString("id") ?: "", onBack = back) }
         composable("prompt/{id}") { e -> PromptPreviewScreen(e.arguments?.getString("id") ?: "", openRoute = go, onBack = back) }
