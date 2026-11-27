@@ -40,7 +40,7 @@ object WFields {
         WField("lorebook", "character", "lorebook", "로어북", "Lorebook", "Keyword-triggered world/character info entries (key, content, insertion order, always-active flag) inserted into the prompt when keys appear in chat. Efficient for organizing a large amount of information systematically: split settings by topic (places, factions, NPCs, rules) so only the relevant parts are loaded.", true, 3, 2),
         WField("loreSettings", "character", "loreSettings", "로어북 설정", "Lorebook settings", "Lorebook scanning options: token budget, scan depth, recursive scanning, full-word matching. Each is a number/boolean, or null to use the global setting (default).", true, 1, 1),
         WField("genTemplate", "image", "gen", "프리셋 템플릿", "Preset templates (pose / action presets)", "Preset templates for image generation; a request for a \"template\" or \"preset\" means this field. Each preset holds ONE pose/action/scene only (name, image name/type, size, shared prompt/negative, attached characters with block checklist, positions, per-character pose prompt/negative) and generation. Appearance is never written in a preset: it comes from the attached characters' existing blocks. Quality/style tags belong to the art-style settings, not here. Generated images are listed by id only; the AI cannot see them. One permission covers everything.", true, 1, 1),
-        WField("genCharacters", "image", "gen", "이미지 캐릭터 설정", "Image character setup", "Characters used for image generation: their prompt/negative blocks (name, type, text) and generation size. Blocks describe APPEARANCE ONLY (gender, hair, face, body, outfit variants); poses and actions belong to preset templates, quality/style tags to the art-style settings. Do not change existing blocks unless the user explicitly asks. Blocks can be grouped in folders: a folder is a block with type \"folder\", and a block inside it carries that folder's id as folderId. One permission covers viewing/adding/removing/moving blocks and folders and size. The free prompt has its own permission (see Image character free prompt).", true, 1, 1),
+        WField("genCharacters", "image", "gen", "이미지 캐릭터 설정", "Image character setup", "Characters used for image generation: their prompt/negative blocks (name, type, text) and generation size. Blocks describe APPEARANCE ONLY (gender, hair, face, body, outfit variants); poses and actions belong to preset templates, quality/style tags to the art-style settings. Do not change existing blocks unless the user explicitly asks. Blocks can be grouped in folders: a folder is a block with type \"folder\" containing its child blocks in a nested \"blocks\" array (when adding or moving a block into a folder, pass its id as folderId). One permission covers viewing/adding/removing/moving blocks and folders and size. The free prompt has its own permission (see Image character free prompt).", true, 1, 1),
         WField("genFree", "image", "gen", "캐릭터 자유 프롬프트", "Image character free prompt", "Per-character free prompt and free negative, plus which of the character's blocks take part when the free prompt is run. Memo: the free prompt is used only to test whether a character's prompt produces good images and to make images for the character icon. It is NOT used by asset presets.", true, 1, 1),
         WField("genFreeRun", "image", "gen", "자유 프롬프트 실행", "Run image character free prompt", "Runs a character's free prompt with the NovelAI provider (costs Anlas) and shows the result in the character setup preview. Optionally adds the result to the character icons. Memo: free-prompt images are for prompt testing and character icons only; request this only when the user asks for it.", true, 1, 1),
         WField("genCompress", "image", "gen", "이미지 압축", "Image template compression", "Converts and compresses every generated image of the image template (webp or jpeg, quality percent). Its purpose is to reduce the file size of the bot card to be exported efficiently. Unless the user asks for something specific, run it with the defaults (webp, quality 80).", true, 1, 1),
@@ -101,6 +101,29 @@ fun jsonText(e: JsonElement) = pretty1.encodeToString(JsonElement.serializer(), 
 // =====================================================================================
 // card ⇄ SGU data view
 // =====================================================================================
+
+private class FieldAliases(d: JsonObject) {
+private val realToShort = mutableMapOf<Pair<Char, String>, String>()
+private val shortToReal = mutableMapOf<String, String>()
+init {
+(d["lorebook"] as? JsonArray).orEmpty().mapNotNull { it as? JsonObject }.forEach { add('l', Scripts.str(it, "id")) }
+(d["regexScripts"] as? JsonArray).orEmpty().mapNotNull { it as? JsonObject }.forEach { add('r', Scripts.str(it, "id")) }
+(d["bias"] as? JsonArray).orEmpty().mapNotNull { it as? JsonObject }.forEach { add('k', Scripts.str(it, "id")) }
+((d["onboarding"] as? JsonObject)?.get("questions") as? JsonArray).orEmpty().mapNotNull { it as? JsonObject }.forEach { q ->
+add('q', Scripts.str(q, "id"))
+(q["options"] as? JsonArray).orEmpty().mapNotNull { it as? JsonObject }.forEach { add('o', Scripts.str(it, "id")) }
+}
+}
+private fun add(kind: Char, realId: String) {
+if (realId.isEmpty()) return
+val key = kind to realId
+if (key in realToShort) return
+val short = "$kind${Integer.toString(realId.hashCode() and 0xFFFFF, 36)}"
+if (short in shortToReal) realToShort[key] = realId else { realToShort[key] = short; shortToReal[short] = realId }
+}
+fun toShort(kind: Char, realId: String): String = if (realId.isEmpty()) realId else realToShort[kind to realId] ?: realId
+fun toReal(id: String): String = shortToReal[id] ?: id
+}
 
 object SguData {
     /** Builds the original's doc.data (text/script fields) from card.data. Ids are by position. */
@@ -249,22 +272,67 @@ object SguData {
     }
 
     fun serialize(d: JsonObject, id: String): String {
-        val f = WFields.map[id] ?: return ""
+        val f = WFields.map[id] ?: return ""; val aliases by lazy { FieldAliases(d) }
         return when (f.kind) {
             "text", "longtext" -> d[id].str()
             "toggle" -> if (d[id].asBool() == true) "true" else "false"
-            "textList", "loreSettings", "regexList", "biasList", "onboarding" -> jsonText(d[id] ?: JsonArray(emptyList()))
+            "textList", "loreSettings" -> jsonText(d[id] ?: JsonArray(emptyList()))
+"regexList" -> jsonText(JsonArray((d[id] as? JsonArray).orEmpty().mapNotNull { it as? JsonObject }.map { t ->
+buildJsonObject {
+put("id", aliases.toShort('r', Scripts.str(t, "id")))
+Scripts.str(t, "comment").takeIf { it.isNotEmpty() }?.let { put("comment", it) }
+Scripts.str(t, "in").takeIf { it.isNotEmpty() }?.let { put("in", it) }
+Scripts.str(t, "out").takeIf { it.isNotEmpty() }?.let { put("out", it) }
+Scripts.str(t, "type").takeIf { it.isNotEmpty() && it != "editdisplay" }?.let { put("type", it) }
+Scripts.str(t, "flag").takeIf { it.isNotEmpty() && it != "g" }?.let { put("flag", it) }
+if (Scripts.bool(t, "ableFlag")) put("ableFlag", true)
+if (Scripts.bool(t, "disabled")) put("disabled", true)
+}
+}))
+"biasList" -> jsonText(JsonArray((d[id] as? JsonArray).orEmpty().mapNotNull { it as? JsonObject }.map { t ->
+buildJsonObject {
+put("id", aliases.toShort('k', Scripts.str(t, "id")))
+Scripts.str(t, "text").takeIf { it.isNotEmpty() }?.let { put("text", it) }
+(Scripts.num(t, "value") ?: 0.0).takeIf { it != 0.0 }?.let { put("value", it) }
+}
+}))
+"onboarding" -> {
+val ob = d[id] as? JsonObject ?: JsonObject(emptyMap())
+jsonText(buildJsonObject {
+if (Scripts.bool(ob, "enabled")) put("enabled", true)
+Scripts.str(ob, "title").takeIf { it.isNotEmpty() }?.let { put("title", it) }
+Scripts.str(ob, "html").takeIf { it.isNotEmpty() }?.let { put("html", it) }
+val qs = (ob["questions"] as? JsonArray).orEmpty().mapNotNull { it as? JsonObject }
+if (qs.isNotEmpty()) put("questions", JsonArray(qs.map { q ->
+buildJsonObject {
+put("id", aliases.toShort('q', Scripts.str(q, "id")))
+Scripts.str(q, "prompt").takeIf { it.isNotEmpty() }?.let { put("prompt", it) }
+Scripts.str(q, "type").takeIf { it.isNotEmpty() && it != "single" }?.let { put("type", it) }
+if (Scripts.bool(q, "allowCustom")) put("allowCustom", true)
+val opts = (q["options"] as? JsonArray).orEmpty().mapNotNull { it as? JsonObject }
+if (opts.isNotEmpty()) put("options", JsonArray(opts.map { o ->
+buildJsonObject {
+put("id", aliases.toShort('o', Scripts.str(o, "id")))
+Scripts.str(o, "label").takeIf { it.isNotEmpty() }?.let { put("label", it) }
+Scripts.str(o, "prompt").takeIf { it.isNotEmpty() }?.let { put("prompt", it) }
+(o["tags"] as? JsonArray)?.takeIf { it.isNotEmpty() }?.let { put("tags", it) }
+}
+}))
+}
+}))
+})
+}
             "lorebook" -> {
                 val list = (d["lorebook"] as? JsonArray).orEmpty().mapNotNull { it as? JsonObject }
                 jsonText(JsonArray(list.map { t ->
                     buildJsonObject {
-                        put("id", Scripts.str(t, "id")); put("comment", Scripts.str(t, "comment")); put("key", Scripts.str(t, "key"))
+                        put("id", aliases.toShort('l', Scripts.str(t, "id"))); Scripts.str(t, "comment").takeIf { it.isNotEmpty() }?.let { put("comment", it) }; Scripts.str(t, "key").takeIf { it.isNotEmpty() }?.let { put("key", it) }
                         Scripts.str(t, "secondKey").takeIf { it.isNotEmpty() }?.let { put("secondKey", it) }
-                        put("content", Scripts.str(t, "content")); put("mode", Scripts.str(t, "mode"))
+                        Scripts.str(t, "content").takeIf { it.isNotEmpty() }?.let { put("content", it) }; Scripts.str(t, "mode").takeIf { it.isNotEmpty() }?.let { put("mode", it) }
                         Scripts.str(t, "folder").takeIf { it.isNotEmpty() }?.let { fk ->
-                            list.firstOrNull { Scripts.str(it, "mode") == "folder" && Scripts.str(it, "key") == fk }?.let { put("folder", Scripts.str(it, "id")) }
+                            list.firstOrNull { Scripts.str(it, "mode") == "folder" && Scripts.str(it, "key") == fk }?.let { put("folder", aliases.toShort('l', Scripts.str(it, "id"))) }
                         }
-                        put("insertOrder", Scripts.num(t, "insertOrder")?.toInt() ?: 100)
+                        (Scripts.num(t, "insertOrder")?.toInt() ?: 100).takeIf { it != 100 }?.let { put("insertOrder", it) }
                         if (Scripts.bool(t, "alwaysActive")) put("alwaysActive", true)
                         if (Scripts.bool(t, "selective")) put("selective", true)
                         if (Scripts.bool(t, "useRegex")) put("useRegex", true)
@@ -386,7 +454,7 @@ object Edits {
     private fun JsonObject?.field(k: String): JsonElement? = this?.get(k)?.takeIf { it !is JsonNull }
 
     fun apply(data0: JsonObject, edits: List<JsonObject>, editFields: List<String>): EditResult {
-        val allowed = editFields.toSet()
+        val allowed = editFields.toSet(); val aliases = FieldAliases(SguData.from(data0))
         var d = data0
         val applied = mutableListOf<AppliedEdit>(); val rejected = mutableListOf<Pair<JsonObject, String>>(); val changed = linkedSetOf<String>(); val actions = mutableListOf<GenOps.Action>()
         for (e in edits) {
@@ -405,7 +473,7 @@ object Edits {
                 continue
             }
             try {
-                val r = one(d, f, e)
+                val r = one(d, f, e, aliases)
                 if (r == null) { rejected.add(e to "허용되지 않는 연산"); continue }
                 d = r.first; changed.add(f.id)
                 applied.add(AppliedEdit(f.id, Scripts.str(e, "op"), r.second))
@@ -422,8 +490,8 @@ object Edits {
 
     private fun keyText(v: JsonElement?): String? = when (v) { null, is JsonNull -> null; is JsonArray -> v.joinToString(", ") { o(it) }; else -> o(v) }
 
-    private fun loreEntry(list: List<JsonObject>, n: JsonObject?, t: JsonObject?): JsonObject = buildJsonObject {
-        val id = Scripts.str(t, "id").ifEmpty { Scripts.str(n, "id").ifEmpty { Scripts.newId("lore") } }
+    private fun loreEntry(list: List<JsonObject>, n: JsonObject?, t: JsonObject?, aliases: FieldAliases): JsonObject = buildJsonObject {
+        val id = Scripts.str(t, "id").ifEmpty { aliases.toReal(Scripts.str(n, "id")).ifEmpty { Scripts.newId("lore") } }
         put("id", id)
         put("comment", n.field("comment")?.let { o(it) } ?: Scripts.str(t, "comment"))
         put("key", keyText(n.field("key")) ?: Scripts.str(t, "key"))
@@ -432,7 +500,7 @@ object Edits {
         val nm = Scripts.str(n, "mode")
         put("mode", when (nm) { "folder" -> "folder"; "normal", "constant" -> "normal"; else -> Scripts.str(t, "mode").ifBlank { "normal" } })
         val nf = n?.get("folder")
-        val folder = if (nf is JsonPrimitive && nf.isString) (if (nf.content.isNotEmpty()) folderKeyFor(list, nf.content) else null) else Scripts.str(t, "folder").ifEmpty { null }
+        val folder = if (nf is JsonPrimitive && nf.isString) (if (nf.content.isNotEmpty()) folderKeyFor(list, aliases.toReal(nf.content)) else null) else Scripts.str(t, "folder").ifEmpty { null }
         if (folder != null) put("folder", folder)
         put("insertOrder", n.field("insertOrder").asNum()?.toInt() ?: Scripts.num(t, "insertOrder")?.toInt() ?: 100)
         put("alwaysActive", (n.field("alwaysActive") as? JsonPrimitive)?.booleanOrNull ?: (nm == "constant" || Scripts.bool(t, "alwaysActive")))
@@ -455,8 +523,8 @@ object Edits {
         }
     }
 
-    private fun one(t: JsonObject, f: WField, e: JsonObject): Pair<JsonObject, String>? {
-        val op = Scripts.str(e, "op"); val value = e["value"]; val id = Scripts.str(e, "id")
+    private fun one(t: JsonObject, f: WField, e: JsonObject, aliases: FieldAliases): Pair<JsonObject, String>? {
+        val op = Scripts.str(e, "op"); val value = e["value"]; val id = aliases.toReal(Scripts.str(e, "id"))
         val index = (e["index"] as? JsonPrimitive)?.doubleOrNull?.toInt()
         fun setK(k: String, v: JsonElement) = JsonObject(t + (k to v))
         when (f.kind) {
@@ -483,16 +551,16 @@ object Edits {
             "lorebook" -> {
                 val list = (t["lorebook"] as? JsonArray).orEmpty().mapNotNull { it as? JsonObject }.toMutableList()
                 when {
-                    op == "set" && value is JsonArray -> return setK("lorebook", JsonArray(normalize(value.map { loreEntry(list, it as? JsonObject, null) }))) to "로어북 전체 교체 (${value.size}개)"
+                    op == "set" && value is JsonArray -> return setK("lorebook", JsonArray(normalize(value.map { loreEntry(list, it as? JsonObject, null, aliases) }))) to "로어북 전체 교체 (${value.size}개)"
                     op == "add" -> {
-                        var r = loreEntry(list, value as? JsonObject, null)
+                        var r = loreEntry(list, value as? JsonObject, null, aliases)
                         if (list.any { Scripts.str(it, "id") == Scripts.str(r, "id") }) r = JsonObject(r + ("id" to s(Scripts.newId("lore"))))
                         return setK("lorebook", JsonArray(normalize(list + r))) to "로어북 항목 추가: ${clip(Scripts.str(r, "comment").ifEmpty { Scripts.str(r, "key") })}"
                     }
                     op == "update" && id.isNotEmpty() -> {
                         val i = list.indexOfFirst { Scripts.str(it, "id") == id }; if (i < 0) throw IllegalStateException("로어북 항목 $id 없음")
                         val old = list[i]
-                        list[i] = loreEntry(list, value as? JsonObject, old)
+                        list[i] = loreEntry(list, value as? JsonObject, old, aliases)
                         var out = list.toList()
                         // A folder's 항상 활성화 change goes to its entries (saveLoreEntry → setFolderAlways).
                         if (Scripts.str(list[i], "mode") == "folder" && Scripts.bool(old, "alwaysActive") != Scripts.bool(list[i], "alwaysActive")) {
@@ -513,7 +581,7 @@ object Edits {
             "regexList" -> {
                 val list = (t["regexScripts"] as? JsonArray).orEmpty().mapNotNull { it as? JsonObject }.toMutableList()
                 fun rx(n: JsonObject?, old: JsonObject?) = buildJsonObject {
-                    put("id", Scripts.str(old, "id").ifEmpty { Scripts.newId("rx") })
+                    put("id", Scripts.str(old, "id").ifEmpty { aliases.toReal(Scripts.str(n, "id")).ifEmpty { Scripts.newId("rx") } })
                     put("comment", n.field("comment")?.let { o(it) } ?: Scripts.str(old, "comment"))
                     put("in", n.field("in")?.let { o(it) } ?: Scripts.str(old, "in"))
                     put("out", n.field("out")?.let { o(it) } ?: Scripts.str(old, "out"))
@@ -544,7 +612,7 @@ object Edits {
             "biasList" -> {
                 val list = (t["bias"] as? JsonArray).orEmpty().mapNotNull { it as? JsonObject }.toMutableList()
                 fun bi(n: JsonObject?, old: JsonObject?) = buildJsonObject {
-                    put("id", Scripts.str(old, "id").ifEmpty { Scripts.newId("bias") })
+                    put("id", Scripts.str(old, "id").ifEmpty { aliases.toReal(Scripts.str(n, "id")).ifEmpty { Scripts.newId("bias") } })
                     put("text", n.field("text")?.let { o(it) } ?: Scripts.str(old, "text"))
                     put("value", n.field("value").asNum() ?: Scripts.num(old, "value") ?: 0.0)
                 }
@@ -586,7 +654,7 @@ object Edits {
                     cur["questions"] = JsonArray(qs.map { q0 ->
                         val q = q0 as? JsonObject
                         buildJsonObject {
-                            put("id", (q?.get("id") as? JsonPrimitive)?.takeIf { it.isString }?.content ?: Scripts.newId("q"))
+                            put("id", (q?.get("id") as? JsonPrimitive)?.takeIf { it.isString }?.content?.let { aliases.toReal(it) } ?: Scripts.newId("q"))
                             put("title", o(q?.get("title")))
                             q.field("description")?.let { put("description", o(it)) }
                             put("type", Scripts.str(q, "type").takeIf { it in listOf("single", "multiple", "text") } ?: "single")
@@ -596,7 +664,7 @@ object Edits {
                                 val oo = op0 as? JsonObject
                                 val label = if (oo != null) o(oo["label"] ?: op0) else o(op0)
                                 buildJsonObject {
-                                    put("id", (oo?.get("id") as? JsonPrimitive)?.takeIf { it.isString }?.content ?: Scripts.newId("opt"))
+                                    put("id", (oo?.get("id") as? JsonPrimitive)?.takeIf { it.isString }?.content?.let { aliases.toReal(it) } ?: Scripts.newId("opt"))
                                     put("label", label); put("value", if (oo != null) o(oo["value"] ?: oo["label"] ?: op0) else label)
                                 }
                             }))
