@@ -3,6 +3,9 @@ package space.sgu.next.data
 import android.util.Base64
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.ensureActive
+import java.io.IOException
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
@@ -89,7 +92,8 @@ object Llm {
         withContext(Dispatchers.IO) {
             var attempt = 0
             while (true) {
-                val c = (URL(url).openConnection() as HttpURLConnection)
+                val c = (URL(url).openConnection() as? HttpURLConnection) ?: throw IOException("지원하지 않는 URL 스킴이에요")
+val cancelHandle = coroutineContext[Job]?.invokeOnCompletion { if (it != null) runCatching { c.disconnect() } }
                 try {
                     c.requestMethod = method
                     c.connectTimeout = 20_000
@@ -111,11 +115,14 @@ object Llm {
                 } catch (e: ProviderError) {
                     throw e
                 } catch (e: java.net.SocketTimeoutException) {
+ensureActive()
                     throw ProviderError("응답 시간이 초과됐어요 (${timeoutMs / 1000}초)")
                 } catch (e: java.io.IOException) {
+ensureActive()
                     if (attempt < retries) { attempt++; kotlinx.coroutines.delay(1500L * attempt); continue }
                     throw ProviderError("네트워크 오류: ${e.message ?: e.javaClass.simpleName}")
                 } finally {
+cancelHandle?.dispose()
                     c.disconnect()
                 }
             }
