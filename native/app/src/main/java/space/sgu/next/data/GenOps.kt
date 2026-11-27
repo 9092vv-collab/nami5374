@@ -127,7 +127,7 @@ object GenOps {
                 } }))
             }
             else -> buildJsonObject {
-                put("note", "Omitted when default: imageName = name, imageType = asset, size = $defSize, empty images, empty negative, pos = auto, block type = prompt.$negNote")
+       if (nn) put("note", negNote.trim())
                 put("availableCharacters", JsonArray(chars.map { c -> buildJsonObject {
                     put("id", al.s(c.s("id"))); put("name", c.s("name")); put("blocks", blocksView(c, al, false, nn))
                 } }))
