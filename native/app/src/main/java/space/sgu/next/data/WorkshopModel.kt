@@ -818,11 +818,12 @@ object PromptBlocks {
         blk("text", "system", "메인 지시", "You are SGU, an expert author of RisuAI character cards (CCv3). You write and revise character data on behalf of the user.\nWrite in the same language as the user's command unless the field content clearly requires another language.\nFollow the user's instructions precisely. Only change the fields you are allowed to edit. Keep existing content unless asked to change it.\nAvoid using \"**\" (markdown bold/asterisk emphasis) in the content you write; use it sparingly and only where it is clearly needed.\n$USER_LINE"),
         blk("references", "system", "참고 자료", "## Reference materials\nUse the following materials as reference when writing.\n\n{{slot}}"),
         blk("outputFormat", "system", "출력 형식", ""),
+        blk("cachePoint", "system", "고정 캐시", "", mapOf("id" to s("blk_cache_static"), "depth" to JsonPrimitive(1), "cacheRole" to JsonPrimitive("all"))),
         chatBlk("과거 챗", 0, -10),
         blk("cachePoint", "system", "캐시 포인트", "", mapOf("depth" to JsonPrimitive(1), "cacheRole" to JsonPrimitive("all"))),
         chatBlk("최근 챗", -10, -1),
-        blk("fieldData", "system", "캐릭터 데이터", "## Current character data\nThe following fields are the character's current content. Fields not listed are hidden from you.\n\n{{slot}}", mapOf("fieldFormat" to s(DEFAULT_FIELD_FORMAT))),
-        blk("fieldSchema", "system", "편집 가능 필드", "## Editable fields\nYou may edit only these fields in this turn:\n\n{{slot}}"),
+        blk("fieldData", "user", "캐릭터 데이터", "## Current character data\nThe following fields are the character's current content. Fields not listed are hidden from you.\n\n{{slot}}", mapOf("fieldFormat" to s(DEFAULT_FIELD_FORMAT))),
+        blk("fieldSchema", "user", "편집 가능 필드", "## Editable fields\nYou may edit only these fields in this turn:\n\n{{slot}}"),
         chatBlk("Last Chat", -1, "end"),
     )
 
