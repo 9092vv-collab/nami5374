@@ -596,6 +596,7 @@ object Chat {
             val fr = o.arr("candidates").firstOrNull().sOrNull("finishReason")
             // 쓰다가 막혀도(글이 조금 나온 뒤) 반쪽 답을 쓰지 않고 막혔다고 알림
             if (fr in GEMINI_BLOCKS) throw ProviderError(geminiBlocked(fr!!, partial = t.isNotBlank()))
+            if (fr == "MAX_TOKENS") throw ProviderError(MAX_TOKENS_MSG)
             return ChatResult(t, th.ifEmpty { null }, Usage(o.o("usageMetadata").int("promptTokenCount"), o.o("usageMetadata").int("candidatesTokenCount")),
                 o.arr("candidates").firstOrNull().sOrNull("finishReason"))
         }
@@ -611,10 +612,14 @@ object Chat {
             o.arr("candidates").firstOrNull().sOrNull("finishReason")?.let { finish = it }
         }
         if (finish in GEMINI_BLOCKS) throw ProviderError(geminiBlocked(finish!!, partial = text.isNotBlank()))
+        if (finish == "MAX_TOKENS") throw ProviderError(MAX_TOKENS_MSG)
+        // 끝 신호(finishReason) 없이 스트림이 닫힘 = 연결이 중간에 끊김 → 반쪽 답 대신 오류(재시도·폴백이 돌게)
+        if (finish == null && text.isNotBlank()) throw ProviderError("응답이 중간에 끊겼어요 (서버 연결이 닫힘). 다시 시도해 주세요.")
         return ChatResult(text.toString(), th.toString().ifEmpty { null }, usage, finish)
     }
 
     private val GEMINI_BLOCKS = setOf("SAFETY", "PROHIBITED_CONTENT", "BLOCKLIST", "SPII", "IMAGE_SAFETY", "RECITATION", "OTHER")
+    private const val MAX_TOKENS_MSG = "출력 한도(최대 출력 토큰)에 걸려 답이 끊겼어요. 추론(thinking)도 이 한도를 같이 써요 — 모델 설정에서 최대 출력을 늘리거나 추론 강도를 낮춰 주세요."
     fun geminiBlocked(reason: String, partial: Boolean = false) = "구글 안전 필터에 막혔어요" + (if (partial) " — 답을 쓰다가 중간에 끊겼어요" else "") + " (사유: $reason). 앱의 안전 설정(BLOCK_NONE)으로는 끌 수 없는 필터예요."
 
     // ---------- Jev (935) ----------
