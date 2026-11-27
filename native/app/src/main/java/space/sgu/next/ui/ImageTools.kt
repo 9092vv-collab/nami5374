@@ -54,6 +54,7 @@ import androidx.compose.material.icons.outlined.FileUpload
 import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.Menu
 import androidx.compose.material.icons.outlined.MoreVert
+import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.RadioButtonUnchecked
 import androidx.compose.material.icons.outlined.StarBorder
 import androidx.compose.material.icons.outlined.Stop
@@ -187,6 +188,21 @@ fun TemplateTab(cid: String, openPreset: (String) -> Unit, openRoute: (String) -
         Row(Modifier.padding(start = 6.dp, end = 16.dp), verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = { openRoute("gentemplates/$cid") }) { Icon(Icons.Outlined.Menu, "템플릿 목록") }
             Text(g.s("templateName").ifBlank { Templates.DEFAULT_NAME }, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            val anyImages = presets.any { it.arr("images").isNotEmpty() }
+            var menu by remember { mutableStateOf(false) }
+            Box {
+                IconButton(onClick = { menu = true }) { Icon(Icons.Outlined.MoreVert, "더보기") }
+                DropdownMenu(menu, { menu = false }) {
+                    DropdownMenuItem(text = { Text("일괄 생성") }, enabled = !running && presets.isNotEmpty(), onClick = { menu = false; batchIds = presets.map { it.s("id") } })
+                    DropdownMenuItem(text = { Text("이미지 선별") }, enabled = anyImages, onClick = { menu = false; openRoute("genpick/$cid") })
+                    DropdownMenuItem(text = { Text("이미지 압축") }, enabled = anyImages && GenRun.compressing[cid] == null, onClick = { menu = false; compressOpen = true })
+                    DropdownMenuItem(text = { Text("내보내기") }, onClick = {
+                        menu = false
+                        if (ImageGenStore.selectedCount(g) == 0) GenRun.compressMsg[cid] = "선별된 이미지가 없습니다. 이미지 선별에서 먼저 선택하세요."
+                        else saveZip(ImageGenStore.safeName(g.s("templateName").ifBlank { "image-template" }) + ".zip") { ImageGenStore.writeSelectedZip(cid, it) }
+                    })
+                }
+            }
         }
         Column(Modifier.padding(horizontal = 16.dp)) {
             if (progress != null) LineCard {
@@ -215,16 +231,6 @@ fun TemplateTab(cid: String, openPreset: (String) -> Unit, openRoute: (String) -
                 Spacer(Modifier.height(6.dp))
                 LineCard(onClick = { GenRun.error.remove(cid) }) { Text(e, style = MaterialTheme.typography.bodyMedium, color = Sgu.Danger) }
             }
-            FlowRow(Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                val anyImages = presets.any { it.arr("images").isNotEmpty() }
-                PillChip("일괄 생성", selected = false) { if (!running && presets.isNotEmpty()) batchIds = presets.map { it.s("id") } }
-                PillChip("이미지 선별", selected = false) { if (anyImages) openRoute("genpick/$cid") }
-                PillChip("이미지 압축", selected = false) { if (anyImages && GenRun.compressing[cid] == null) compressOpen = true }
-                PillChip("내보내기", selected = false) {
-                    if (ImageGenStore.selectedCount(g) == 0) GenRun.compressMsg[cid] = "선별된 이미지가 없습니다. 이미지 선별에서 먼저 선택하세요."
-                    else saveZip(ImageGenStore.safeName(g.s("templateName").ifBlank { "image-template" }) + ".zip") { ImageGenStore.writeSelectedZip(cid, it) }
-                }
-            }
             if (selected.isNotEmpty()) {
                 Row(Modifier.fillMaxWidth().padding(top = 8.dp).clip(RoundedCornerShape(20.dp)).background(Sgu.Card).border(1.dp, Sgu.Line, RoundedCornerShape(20.dp)).padding(start = 14.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
                     verticalAlignment = Alignment.CenterVertically) {
@@ -234,8 +240,7 @@ fun TemplateTab(cid: String, openPreset: (String) -> Unit, openRoute: (String) -
                     TextButton(onClick = { if (!running) deleteOpen = true }) { Text("삭제", color = Sgu.Danger) }
                     IconButton(onClick = { selected.clear() }) { Icon(Icons.Outlined.Close, "선택 해제", tint = Sgu.Sub) }
                 }
-            } else Text("프리셋마다 에셋/감정 이미지를 생성해 둡니다. 프리셋을 길게 누르면 여러 개를 선택할 수 있습니다.",
-                style = MaterialTheme.typography.bodySmall, color = Sgu.Sub, modifier = Modifier.padding(start = 4.dp, top = 8.dp, bottom = 4.dp))
+            }
         }
         LazyVerticalGrid(
             columns = GridCells.Adaptive(104.dp),
@@ -626,6 +631,7 @@ fun ImagePickerScreen(cid: String, openPreset: (String) -> Unit, onBack: () -> U
     var size by rememberSaveable { mutableFloatStateOf(pinned ?: 110f) }
     var zoom by remember { mutableStateOf<File?>(null) }
     var genFor by remember { mutableStateOf<String?>(null) }
+    var delAsk by remember { mutableStateOf(0) }
     val apply = { if (changes.isNotEmpty()) { ImageGenStore.setUses(cid, changes.toMap()); changes.clear() } }
     DisposableEffect(cid) { onDispose { if (changes.isNotEmpty()) ImageGenStore.setUses(cid, changes.toMap()) } }
     val count = g.arr("presets").sumOf { p -> p.arr("images").count { changes[it.s("id")] ?: it.b("selected") } }
@@ -640,6 +646,7 @@ fun ImagePickerScreen(cid: String, openPreset: (String) -> Unit, onBack: () -> U
     }
     Box(Modifier.fillMaxSize()) {
     Page("이미지 선별", "${count}장 선택", { apply(); onBack() }, actions = {
+        if (count > 0) IconButton(onClick = { delAsk = 1 }) { Icon(Icons.Outlined.Delete, "선택한 이미지 삭제", tint = Sgu.Danger) }
         TextButton(onClick = { val on = count == 0; allIds.forEach { changes[it] = on } }) { Text(if (count == 0) "전체 선택" else "전체 해제", color = Sgu.Ink) }
     }) {
         Text("이미지 크기", style = MaterialTheme.typography.bodySmall, color = Sgu.Sub, modifier = Modifier.padding(start = 6.dp))
@@ -682,6 +689,22 @@ fun ImagePickerScreen(cid: String, openPreset: (String) -> Unit, onBack: () -> U
     }
     zoom?.let { ZoomDialog(it) { zoom = null } }
     genFor?.let { pid -> BatchDialog(1, onDismiss = { genFor = null }) { n -> genFor = null; GenRun.run(cid, listOf(pid), n) } }
+    if (delAsk > 0) AlertDialog(
+        onDismissRequest = { delAsk = 0 },
+        title = { Text(if (delAsk == 1) "${count}장을 정말 삭제할까요?" else "${count}장을 정말정말 삭제할까요?") },
+        text = { Text(if (delAsk == 1) "체크한 이미지가 삭제됩니다." else "되돌릴 수 없어요. 봇에 등록돼 있던 것도 함께 빠집니다.") },
+        confirmButton = { TextButton(onClick = {
+            if (delAsk == 1) delAsk = 2 else {
+                delAsk = 0
+                val gone = g.arr("presets").flatMap { p -> p.arr("images").filter { changes[it.s("id")] ?: it.b("selected") }.map { p.s("id") to it.s("id") } }
+                changes.clear()
+                gone.forEach { (pid, iid) -> ImageGenStore.deleteImage(cid, pid, iid) }
+                android.widget.Toast.makeText(ctx, "${gone.size}장을 삭제했어요", android.widget.Toast.LENGTH_SHORT).show()
+            }
+        }) { Text("삭제", color = Sgu.Danger) } },
+        dismissButton = { TextButton(onClick = { delAsk = 0 }) { Text("취소", color = Sgu.Ink) } },
+        containerColor = Sgu.Bg,
+    )
 }
 
 // =====================================================================================

@@ -679,7 +679,19 @@ fun SizePicker(size: JsonObject?, onChange: (JsonObject) -> Unit) {
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
-fun GenPresetScreen(cid: String, presetId: String, openField: (String) -> Unit, onBack: () -> Unit) {
+fun GenPresetPager(cid: String, startId: String, openField: (String) -> Unit, onBack: () -> Unit) {
+    val g = remember(cid, ImageGenStore.version) { ImageGenStore.load(cid) }
+    val ids = g.arr("presets").map { it.s("id") }
+    if (ids.isEmpty()) { LaunchedOnce(onBack); return }
+    val pager = androidx.compose.foundation.pager.rememberPagerState(ids.indexOf(startId).coerceAtLeast(0)) { ids.size }
+    androidx.compose.foundation.pager.HorizontalPager(pager, Modifier.fillMaxSize(), key = { ids.getOrElse(it) { "$it" } }, beyondViewportPageCount = 0) { i ->
+        GenPresetScreen(cid, ids.getOrElse(i) { "" }, openField, onBack, pos = "${i + 1} / ${ids.size}")
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@Composable
+fun GenPresetScreen(cid: String, presetId: String, openField: (String) -> Unit, onBack: () -> Unit, pos: String? = null) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     val g = remember(cid, ImageGenStore.version) { ImageGenStore.load(cid) }
@@ -699,7 +711,7 @@ fun GenPresetScreen(cid: String, presetId: String, openField: (String) -> Unit, 
     Scaffold(
         containerColor = Sgu.Bg,
         topBar = {
-            SguTopBar(p.s("name").ifBlank { "프리셋" }, CharacterStore.items.firstOrNull { it.id == cid }?.name, onBack = onBack, actions = {
+            SguTopBar(p.s("name").ifBlank { "프리셋" }, listOfNotNull(CharacterStore.items.firstOrNull { it.id == cid }?.name, pos).joinToString(" · ").ifBlank { null }, onBack = onBack, actions = {
                 IconButton(onClick = { confirmDelete = true }) { Icon(Icons.Outlined.Delete, "프리셋 삭제") }
             })
         },

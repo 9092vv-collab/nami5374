@@ -104,7 +104,7 @@ fun SguApp() {
         }
         composable("genpreset/{id}/{pid}") { entry ->
             val id = entry.arguments?.getString("id") ?: ""
-            GenPresetScreen(id, entry.arguments?.getString("pid") ?: "", openField = { key -> openField(id, key) }, onBack = { nav.popBackStack() })
+            GenPresetPager(id, entry.arguments?.getString("pid") ?: "", openField = { key -> openField(id, key) }, onBack = { nav.popBackStack() })
         }
         composable("regex/{id}/{i}/{new}") { e ->
             RegexScreen(e.arguments?.getString("id") ?: "", e.arguments?.getString("i")?.toIntOrNull() ?: -1, e.arguments?.getString("new") == "1", onBack = back)
