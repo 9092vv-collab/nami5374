@@ -537,7 +537,7 @@ fun versionOf(id: String): Int = charVersions[id] ?: 0
 
 /** Small downsampling bitmap cache for icons. */
 object Thumbs {
-    private val cache = LruCache<String, ImageBitmap>(80)
+    private val cache = LruCache<String, ImageBitmap>(((Runtime.getRuntime().maxMemory() / 4L) / (256L * 1024L)).toInt().coerceIn(512, 2048))
 
     fun load(file: File, key: String, maxPx: Int): ImageBitmap? {
         cache.get(key)?.let { return it }
