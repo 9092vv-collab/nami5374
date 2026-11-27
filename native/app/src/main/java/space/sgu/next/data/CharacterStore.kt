@@ -4,10 +4,12 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
+import android.os.Looper
 import android.util.LruCache
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
@@ -15,6 +17,11 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
@@ -25,6 +32,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.longOrNull
 import java.io.BufferedInputStream
 import java.io.File
+import java.util.concurrent.ConcurrentHashMap
 
 /** One character in the list (read from disk). */
 data class CharMeta(
@@ -54,11 +62,13 @@ object CharacterStore {
     /** Bumped on every card write so open screens re-read. */
     var version by mutableIntStateOf(0)
         private set
+val charVersions = mutableStateMapOf<String, Int>()
+fun versionOf(id: String): Int = charVersions[id] ?: 0
 
     fun init(ctx: Context) {
         if (::root.isInitialized) return
         root = File(ctx.filesDir, "characters").apply { mkdirs() }
-        reload()
+        reloadAsync()
     }
 
     // ---------- 백업에 캐릭터 글 데이터 넣기 (이미지 파일은 빼고) ----------
@@ -93,16 +103,50 @@ object CharacterStore {
         return n
     }
 
-    private fun reload() {
-        val list = root.listFiles()?.filter { it.isDirectory && File(it, "card.json").exists() }
-            ?.mapNotNull { runCatching { loadMeta(it.name) }.getOrNull() }
-            ?.sortedByDescending { it.updated } ?: emptyList()
-        items.clear(); items.addAll(list)
+    fun reloadAsync() {
+        io.launch {
+            val dirs = root.listFiles()?.filter { it.isDirectory && File(it, "card.json").exists() } ?: emptyList()
+            val list = coroutineScope {
+                dirs.map { d -> async(Dispatchers.IO) { runCatching { loadMeta(d.name) }.getOrNull() } }
+                    .awaitAll()
+                    .filterNotNull()
+                    .sortedByDescending { it.updated }
+            }
+            val saved = runCatching {
+                (CardIO.json.parseToJsonElement(File(root, "folders.json").readText()) as JsonArray)
+                    .mapNotNull { (it as? JsonPrimitive)?.contentOrNull }
+            }.getOrDefault(emptyList())
+            val allFolders = (saved + list.mapNotNull { it.folder }).distinct()
+            withContext(Dispatchers.Main) {
+                items.clear(); items.addAll(list)
+                folders.clear(); folders.addAll(allFolders)
+                version++
+            }
+        }
+    }
+
+    fun reload() {
+        val dirs = root.listFiles()?.filter { it.isDirectory && File(it, "card.json").exists() } ?: emptyList()
+        val list = runBlocking(Dispatchers.IO) {
+            dirs.map { d -> async { runCatching { loadMeta(d.name) }.getOrNull() } }
+                .awaitAll()
+                .filterNotNull()
+                .sortedByDescending { it.updated }
+        }
         val saved = runCatching {
             (CardIO.json.parseToJsonElement(File(root, "folders.json").readText()) as JsonArray)
                 .mapNotNull { (it as? JsonPrimitive)?.contentOrNull }
         }.getOrDefault(emptyList())
-        folders.clear(); folders.addAll((saved + list.mapNotNull { it.folder }).distinct())
+        val allFolders = (saved + list.mapNotNull { it.folder }).distinct()
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            items.clear(); items.addAll(list)
+            folders.clear(); folders.addAll(allFolders)
+        } else {
+            runBlocking(Dispatchers.Main) {
+                items.clear(); items.addAll(list)
+                folders.clear(); folders.addAll(allFolders)
+            }
+        }
     }
 
     fun dir(id: String) = File(root, id)
@@ -111,14 +155,12 @@ object CharacterStore {
 
     // 최근에 연 카드는 메모리에 둠: 화면 여러 곳이 version이 바뀔 때마다 readCard를 부르는데,
     // 그때마다 파일을 읽고 JSON을 다시 풀면 편집 한 번에 같은 파일을 여러 번 읽게 됨. 파일은 writeCard로만 바뀜.
-    private val cardCache = object : LinkedHashMap<String, JsonObject>(8, 0.75f, true) {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, JsonObject>?) = size > 4
-    }
+    private val cardCache = ConcurrentHashMap<String, JsonObject>()
 
     fun readCard(id: String): JsonObject {
-        synchronized(cardCache) { cardCache[id] }?.let { return it }
+        cardCache[id]?.let { return it }
         val read = runCatching { CardIO.json.parseToJsonElement(cardFile(id).readText()).jsonObject }.getOrNull()
-        if (read != null) synchronized(cardCache) { cardCache[id] = read }
+        if (read != null) cardCache[id] = read
         return read ?: CardIO.normalize(JsonObject(emptyMap()))
     }
 
@@ -168,6 +210,7 @@ object CharacterStore {
         val m = runCatching { loadMeta(id) }.getOrNull() ?: return
         items.removeAll { it.id == id }
         items.add(0, m)
+        charVersions[id] = (charVersions[id] ?: 0) + 1
         version++
     }
 
@@ -217,6 +260,7 @@ object CharacterStore {
         dir(id).deleteRecursively()
         items.removeAll { it.id == id }
         Thumbs.forget(id)
+        charVersions[id] = (charVersions[id] ?: 0) + 1
         version++
     }
 
