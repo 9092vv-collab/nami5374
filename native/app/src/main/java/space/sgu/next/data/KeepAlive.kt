@@ -124,6 +124,8 @@ class WorkService : Service() {
         return START_NOT_STICKY
     }
 
+override fun onTimeout(startId: Int, fgsType: Int) { stopSelf(startId) }
+
     override fun onDestroy() {
         lock?.let { if (it.isHeld) it.release() }; lock = null
         super.onDestroy()
