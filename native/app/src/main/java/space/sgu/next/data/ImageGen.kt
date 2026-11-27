@@ -811,8 +811,13 @@ object ImageGenStore {
         var name = ""
         update(cid) { g ->
             val t = g.arr("characters").firstOrNull { it.s("id") == targetId } ?: return@update g
-            fun key(b: JsonObject) = b.s("name").trim().lowercase()
             val tb = t.arr("blocks"); val sb = src.arr("blocks")
+            // 이름 + 들어 있는 폴더 이름으로 맞춤 (기본의상/상의 ≠ 탈의/상의)
+            fun keyIn(list: List<JsonObject>, b: JsonObject): String {
+                val folder = b.sOrNull("folderId")?.let { f -> list.firstOrNull { it.s("id") == f && it.s("type") == "folder" }?.s("name") } ?: ""
+                return folder.trim().lowercase() + "/" + b.s("name").trim().lowercase()
+            }
+            fun key(b: JsonObject) = keyIn(if (tb.any { it === b }) tb else sb, b)
             val out = mutableListOf<JsonObject>()
             val used = mutableSetOf<String>()
             // 폴더 id 대응: src 폴더 → target 폴더(이름 같음) 또는 새 폴더
