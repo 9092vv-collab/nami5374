@@ -258,7 +258,8 @@ object ImageGenStore {
         val blocks = character.arr("blocks")
         fun on(b: JsonObject) = b["free"]?.toString() != "false"
         val folders = blocks.filter { it.s("type") == "folder" }
-        val picked = blocks.filter { b -> b.s("type") != "folder" && on(b) && (b.sOrNull("folderId")?.let { f -> folders.firstOrNull { it.s("id") == f }?.let(::on) } ?: true) }.map { it.s("id") }
+        // 의상 폴더 안 블록은 슬롯(상반신·하반신)으로만 들어가니 직접 켜지 않음
+        val picked = blocks.filter { b -> b.s("type") != "folder" && on(b) && (b.sOrNull("folderId")?.let { f -> folders.none { it.s("id") == f } } ?: true) }.map { it.s("id") }
         return tidyIds(character, picked)
     }
 
@@ -271,7 +272,8 @@ object ImageGenStore {
         return (kids + keepFolders).distinct()
     }
 
-    private fun tidyAll(g: JsonObject): JsonObject {
+    private fun tidyAll(g0: JsonObject): JsonObject {
+        val g = outfitize(g0)
         val chars = g.arr("characters").associateBy { it.s("id") }
         var changed = false
         val presets = g.arr("presets").map { p ->
@@ -378,13 +380,115 @@ object ImageGenStore {
         parts.map { (it ?: "").trim().replace(Regex("[,\\s]+$"), "") }.filter { it.isNotEmpty() }.joinToString(", ")
 
     /** Blocks that count for a preset character: block checked and, if it is in a folder, the folder checked too. */
+    /**
+     * 켜진 블록 (0.9.62 의상 폴더): 폴더 = 의상, 캐릭터마다 하나(outfit)만 입음. 폴더 안 블록은 직접 켜지 않고,
+     * 슬롯 블록(상반신·하반신)이 켜져 있으면 입은 의상의 상의·하의가 그 자리에 들어감.
+     */
     fun activeBlocks(character: JsonObject, ids: Set<String>?): List<JsonObject> {
         val blocks = character.arr("blocks")
         val folderIds = blocks.filter { it.s("type") == "folder" }.map { it.s("id") }.toSet()
-        return blocks.filter { b ->
-            val folder = b.sOrNull("folderId")?.takeIf { it in folderIds }
-            b.s("type") != "folder" && (ids == null || (b.s("id") in ids && (folder == null || folder in ids)))
+        val fit = outfit(character)
+        return blocks.mapNotNull { b ->
+            when {
+                b.s("type") == "folder" -> null
+                b.sOrNull("folderId")?.takeIf { it in folderIds } != null -> null
+                ids != null && b.s("id") !in ids -> null
+                isSlot(b) -> fit?.let { f -> outfitPart(character, f, b.s("slot") != "bottom") }?.takeIf { it.s("type") != "negative" }
+                else -> b
+            }
         }
+    }
+
+    // ---------- 의상 폴더 (0.9.62) ----------
+    fun isSlot(b: JsonObject) = b.s("type") == "slot"
+    fun outfitFolders(c: JsonObject): List<JsonObject> = c.arr("blocks").filter { it.s("type") == "folder" }
+    /** 입은 의상 = outfit에 적힌 폴더, 없으면 첫 폴더. */
+    fun outfit(c: JsonObject): JsonObject? = outfitFolders(c).let { fs -> fs.firstOrNull { it.s("id") == c.s("outfit") } ?: fs.firstOrNull() }
+    /** 의상 폴더의 상의(이름에 "상")·하의(이름에 "하"), 없으면 첫째·둘째 블록. */
+    fun outfitPart(c: JsonObject, folder: JsonObject, top: Boolean): JsonObject? {
+        val kids = c.arr("blocks").filter { it.sOrNull("folderId") == folder.s("id") && it.s("type") != "folder" }
+        val k = if (top) "상" else "하"
+        return kids.firstOrNull { it.s("name").contains(k) } ?: kids.getOrNull(if (top) 0 else 1)
+    }
+    fun setOutfit(cid: String, charId: String, folderId: String) = patchCharacter(cid, charId) { it.with("outfit" to JsonPrimitive(folderId)) }
+
+    /**
+     * 예전 구조를 의상 폴더 구조로 (불러올 때마다 확인, 이미 바뀌었으면 그대로):
+     * - SGU식 "상반신"·"하반신" 블록 → 슬롯(id 그대로라 프리셋 연결 유지), 적혀 있던 글은 "기본의상" 폴더의 상의·하의로
+     * - "탈의" 폴더 → 폴더 밖 블록 "상반신(탈의)"·"하반신(탈의)" (고정 태그, 프리셋이 직접 켬)
+     * - 의상 폴더 안 블록을 켜던 프리셋 → 같은 자리의 슬롯을 켬, 폴더 id는 뺌
+     */
+    fun outfitize(g: JsonObject): JsonObject {
+        var changed = false
+        val remaps = mutableMapOf<String, Map<String, String?>>()
+        val chars = g.arr("characters").map { c ->
+            val (nc, remap) = outfitChar(c)
+            if (nc !== c) { changed = true; if (remap.isNotEmpty()) remaps[c.s("id")] = remap }
+            nc
+        }
+        if (!changed) return g
+        val presets = g.arr("presets").map { p ->
+            p.with("chars" to JsonArray(p.arr("chars").map { pc ->
+                val r = remaps[pc.s("characterId")] ?: return@map pc
+                val ids = blockIdList(pc).mapNotNull { id -> if (r.containsKey(id)) r[id] else id }.distinct()
+                pc.with("blockIds" to JsonArray(ids.map { JsonPrimitive(it) }))
+            }))
+        }
+        return g.with("characters" to JsonArray(chars), "presets" to JsonArray(presets))
+    }
+
+    private fun outfitChar(c: JsonObject): Pair<JsonObject, Map<String, String?>> {
+        val orig = c.arr("blocks")
+        if (orig.any { isSlot(it) }) return c to emptyMap()
+        val blocks = orig.toMutableList()
+        fun loose(b: JsonObject) = b.s("type") != "folder" && b.sOrNull("folderId") == null
+        val oldTop = blocks.firstOrNull { loose(it) && it.s("name").trim() == "상반신" }
+        val oldBottom = blocks.firstOrNull { loose(it) && it.s("name").trim() == "하반신" }
+        if (oldTop == null && oldBottom == null && blocks.none { it.s("type") == "folder" }) return c to emptyMap()
+        val remap = mutableMapOf<String, String?>()
+        // 탈의 폴더 → 고정 블록
+        blocks.firstOrNull { it.s("type") == "folder" && it.s("name").trim() == "탈의" }?.let { nude ->
+            for (i in blocks.indices) {
+                val k = blocks[i]
+                if (k.sOrNull("folderId") != nude.s("id")) continue
+                val nm = if (k.s("name").contains("하")) "하반신(탈의)" else "상반신(탈의)"
+                blocks[i] = JsonObject(k - "folderId" + ("name" to JsonPrimitive(nm)))
+            }
+            blocks.removeAll { it.s("id") == nude.s("id") }; remap[nude.s("id")] = null
+        }
+        val firstFolderAt = blocks.indexOfFirst { it.s("type") == "folder" }.let { if (it < 0) blocks.size else it }
+        fun slot(old: JsonObject?, name: String, kind: String): String {
+            if (old != null) {
+                val i = blocks.indexOfFirst { it.s("id") == old.s("id") }
+                blocks[i] = old.with("type" to JsonPrimitive("slot"), "slot" to JsonPrimitive(kind), "text" to JsonPrimitive(""))
+                return old.s("id")
+            }
+            val nb = block(name, "prompt").with("type" to JsonPrimitive("slot"), "slot" to JsonPrimitive(kind))
+            blocks.add(minOf(firstFolderAt + (if (kind == "bottom") 1 else 0), blocks.size), nb)
+            return nb.s("id")
+        }
+        val topId = slot(oldTop, "상반신", "top")
+        val bottomId = slot(oldBottom, "하반신", "bottom")
+        val outfits = blocks.filter { it.s("type") == "folder" }
+        // 예전 상반신·하반신에 적혀 있던 글 → 기본의상 폴더
+        val tText = oldTop?.s("text").orEmpty(); val bText = oldBottom?.s("text").orEmpty()
+        var created: String? = null
+        if (outfits.isEmpty() || tText.isNotBlank() || bText.isNotBlank()) {
+            val f = block(if (outfits.any { it.s("name").trim() == "기본의상" }) "기존 의상" else "기본의상", "folder")
+            blocks.add(f)
+            blocks.add(block("상의", "prompt", f.s("id")).with("text" to JsonPrimitive(tText)))
+            blocks.add(block("하의", "prompt", f.s("id")).with("text" to JsonPrimitive(bText)))
+            created = f.s("id")
+        }
+        for (f in outfits) {
+            remap[f.s("id")] = null
+            val kids = blocks.filter { it.sOrNull("folderId") == f.s("id") && it.s("type") != "folder" }
+            val top = kids.firstOrNull { it.s("name").contains("상") } ?: kids.getOrNull(0)
+            kids.forEach { k -> remap[k.s("id")] = if (k === top || (!k.s("name").contains("하") && k.s("name").contains("상"))) topId else bottomId }
+        }
+        val folderIds = blocks.filter { it.s("type") == "folder" }.map { it.s("id") }
+        val fit = c.s("outfit").takeIf { it in folderIds } ?: outfits.firstOrNull { it.s("name").trim() == "기본의상" }?.s("id") ?: outfits.firstOrNull()?.s("id") ?: created
+        return c.with("blocks" to JsonArray(blocks), "outfit" to (fit?.let { JsonPrimitive(it) } ?: JsonNull)) to remap
     }
 
     data class CharJob(val prompt: String, val negative: String, val center: Pair<Double, Double>?)
@@ -844,7 +948,9 @@ object ImageGenStore {
             // 지워진 폴더를 가리키던 블록은 폴더 밖으로
             val ids = out.map { it.s("id") }.toSet()
             val fixed = out.map { b -> b.sOrNull("folderId")?.takeIf { it !in ids }?.let { JsonObject(b - "folderId") } ?: b }
-            g.mapList("characters") { l -> val i = l.indexOfFirst { it.s("id") == targetId }; if (i >= 0) l[i] = t.with("name" to JsonPrimitive(newName), "blocks" to JsonArray(fixed)) }
+            val srcFit = outfit(src)?.s("id")?.let { folderMap[it] }?.takeIf { it in ids }
+            val nt = t.with("name" to JsonPrimitive(newName), "blocks" to JsonArray(fixed)).let { x -> if (srcFit != null) x.with("outfit" to JsonPrimitive(srcFit)) else x }
+            g.mapList("characters") { l -> val i = l.indexOfFirst { it.s("id") == targetId }; if (i >= 0) l[i] = nt }
                 .mapList("presets") { l -> for (k in l.indices) {
                     val p = l[k]
                     l[k] = p.with("chars" to JsonArray(p.arr("chars").map { pc ->

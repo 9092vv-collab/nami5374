@@ -39,7 +39,7 @@ object GenOps {
             "generate" to "with id (preset id); optional {n: 1-4}. Generates images with the NovelAI provider after the edits are applied (costs Anlas)")
         else -> listOf(
             "add_character" to "{name, size?, freePrompt?, freeNegative?, blocks?:[{name,type:\"prompt\"|\"negative\",text}]}",
-            "update_character" to "with id (character id); partial {name, size, freePrompt, freeNegative}",
+            "update_character" to "with id (character id); partial {name, size, freePrompt, freeNegative, outfit (folder id or exact folder name: the outfit the character wears)}",
             "remove_character" to "none, with id (also detaches it from presets)",
             "add_block" to "with id (character id); {name, type:\"prompt\"|\"negative\"|\"folder\", text, folderId?}. type \"folder\" makes a folder that groups blocks (no text). folderId puts the new block inside a folder: give the folder's id, or the exact name of a folder (use the name for a folder created earlier in the same response)",
             "update_block" to "with id (character id); {blockId, name?, type?, text?, folderId?}. folderId moves the block into that folder (folder id or exact folder name); folderId: null or \"\" takes it out of its folder. A folder cannot be put inside a folder, and a block cannot change to or from type \"folder\"",
@@ -66,7 +66,7 @@ object GenOps {
         return Aliases(toShort, toReal)
     }
     private fun Aliases.s(id: String) = toShort[id] ?: id
-    private val ID_KEYS = setOf("characterId", "blockId", "folderId", "imageId", "id")
+    private val ID_KEYS = setOf("characterId", "blockId", "folderId", "imageId", "id", "outfit")
     /** AI가 보낸 값 안의 짧은 id를 원래 id로. */
     private fun realize(e: JsonElement?, al: Aliases, key: String? = null): JsonElement? = when (e) {
         null -> null
@@ -120,9 +120,10 @@ object GenOps {
                 put("defaults", buildJsonObject { put("format", "webp"); put("quality", 80) })
             }
             "genCharacters" -> buildJsonObject {
-                put("note", "Omitted when default: size = $defSize, block type = prompt. Blocks inside a folder are listed under the folder (edit with folderId).$negNote")
+                put("note", "Omitted when default: size = $defSize, block type = prompt. Blocks inside a folder are listed under the folder (edit with folderId). Folders are OUTFITS: each holds a top (name has 상) and a bottom (name has 하); the character wears one (outfit). Slot blocks 상반신/하반신 (type slot) take the worn outfit's top/bottom; 상반신(탈의)/하반신(탈의) are fixed blocks.$negNote")
                 put("characters", JsonArray(chars.map { c -> buildJsonObject {
                     put("id", al.s(c.s("id"))); put("name", c.s("name")); if (sizeOf(c) != defSize) put("size", sizeOf(c))
+                    ImageGenStore.outfit(c)?.let { put("outfit", al.s(it.s("id"))) }
                     put("blocks", blocksView(c, al, true, nn))
                 } }))
             }
@@ -310,6 +311,10 @@ object GenOps {
                         if (h.containsKey("size")) nc = JsonObject(nc + ("size" to ImageGenStore.normalizeSize(h["size"] as? JsonObject)))
                         if (h.containsKey("freePrompt")) nc = JsonObject(nc + ("freePrompt" to JsonPrimitive(str(h["freePrompt"]))))
                         if (h.containsKey("freeNegative")) nc = JsonObject(nc + ("freeNegative" to JsonPrimitive(str(h["freeNegative"]))))
+                        if (h.containsKey("outfit")) {
+                            val o = str(h["outfit"]); val f = c.arr("blocks").firstOrNull { it.s("type") == "folder" && (it.s("id") == o || it.s("name") == o) } ?: error("없는 의상 폴더: $o")
+                            nc = JsonObject(nc + ("outfit" to JsonPrimitive(f.s("id"))))
+                        }
                         Result(with(nc), "이미지 캐릭터 수정: ${c.s("name")}")
                     }
                     "remove_character" -> {

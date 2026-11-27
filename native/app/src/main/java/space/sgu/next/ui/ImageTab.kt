@@ -404,12 +404,13 @@ private fun GenCharacterTab(cid: String, openField: (String) -> Unit) {
                 TextButton(onClick = { confirmDelete = true }) { Text("삭제", color = Sgu.Danger) }
             }
             Text("블록 (위에서 아래 순서로 NovelAI에 전달됩니다)", style = MaterialTheme.typography.bodySmall, color = Sgu.Sub, modifier = Modifier.padding(start = 4.dp))
-            Text("체크한 블록만 아래 '생성'에 들어가요. 블록을 누르면 내용 편집, 폴더를 누르면 폴더 안으로 들어가요. 길게 누르면 이름·종류·폴더 이동·삭제 메뉴가 열려요. 폴더 체크는 안의 블록을 한꺼번에 켜고 꺼요. 템플릿 프리셋은 프리셋마다 따로 골라요.",
+            Text("체크한 블록만 아래 '생성'에 들어가요. 블록을 누르면 내용 편집, 폴더를 누르면 폴더 안으로 들어가요. 길게 누르면 이름·종류·폴더 이동·삭제 메뉴가 열려요. 폴더는 의상이에요: 하나만 체크(입기)할 수 있고, 프리셋의 상반신·하반신 자리에 입은 의상의 상의·하의가 들어가요(이름에 '상'·'하'가 든 블록).",
                 style = MaterialTheme.typography.bodySmall, color = Sgu.Sub, modifier = Modifier.padding(start = 4.dp, bottom = 4.dp))
         }
         val blocks = c.arr("blocks")
         val folders = blocks.filter { it.s("type") == "folder" }
-        val loose = blocks.filter { it.s("type") != "folder" && (it.sOrNull("folderId") == null || folders.none { f -> f.s("id") == it.s("folderId") }) }
+        val loose = blocks.filter { it.s("type") != "folder" && !ImageGenStore.isSlot(it) && (it.sOrNull("folderId") == null || folders.none { f -> f.s("id") == it.s("folderId") }) }
+        val worn = ImageGenStore.outfit(c)?.s("id")
         fun on(b: JsonObject) = b["free"]?.toString() != "false"
         fun toggle(b: JsonObject) = ImageGenStore.patchBlocks(cid, charId) { l ->
             val i = l.indexOfFirst { it.s("id") == b.s("id") }; if (i >= 0) l[i] = l[i].with("free" to JsonPrimitive(!on(l[i])))
@@ -425,8 +426,8 @@ private fun GenCharacterTab(cid: String, openField: (String) -> Unit) {
             items((loose + folders).chunked(cols), key = { "row-" + it.first().s("id") }) { row ->
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     row.forEach { b ->
-                        if (b.s("type") == "folder") FolderTile(b, blocks.count { it.sOrNull("folderId") == b.s("id") }, on(b), Modifier.weight(1f),
-                            onToggle = { toggleFolder(b) }, onClick = { openBlockFolder[charId] = b.s("id") }, onMenu = { editBlock = b })
+                        if (b.s("type") == "folder") FolderTile(b, blocks.count { it.sOrNull("folderId") == b.s("id") }, worn == b.s("id"), Modifier.weight(1f),
+                            onToggle = { ImageGenStore.setOutfit(cid, charId, b.s("id")) }, onClick = { openBlockFolder[charId] = b.s("id") }, onMenu = { editBlock = b })
                         else BlockTile(b, checked = on(b), enabled = true, modifier = Modifier.weight(1f), onToggle = { toggle(b) }, onClick = { openField("gen:block:$charId:${b.s("id")}") }, onMenu = { editBlock = b })
                     }
                     repeat(cols - row.size) { Spacer(Modifier.weight(1f)) }
@@ -440,8 +441,8 @@ private fun GenCharacterTab(cid: String, openField: (String) -> Unit) {
                     IconButton(onClick = { openBlockFolder.remove(charId) }) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "폴더 밖으로", tint = Sgu.Ink) }
                     Icon(Icons.Outlined.Folder, null, tint = Sgu.Sub)
                     Text("  ${f.s("name").ifBlank { "폴더" }} · ${kids.size}개", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    IconButton(onClick = { toggleFolder(f) }) {
-                        Icon(if (on(f)) Icons.Outlined.CheckBox else Icons.Outlined.CheckBoxOutlineBlank, if (on(f)) "폴더 켜짐" else "폴더 꺼짐", tint = Sgu.Ink)
+                    IconButton(onClick = { ImageGenStore.setOutfit(cid, charId, f.s("id")) }) {
+                        Icon(if (worn == f.s("id")) Icons.Outlined.CheckBox else Icons.Outlined.CheckBoxOutlineBlank, if (worn == f.s("id")) "입은 의상" else "이 의상 입기", tint = Sgu.Ink)
                     }
                     IconButton(onClick = { editBlock = f }) { Icon(Icons.Outlined.MoreVert, "폴더 메뉴", tint = Sgu.Sub) }
                 }
@@ -449,7 +450,7 @@ private fun GenCharacterTab(cid: String, openField: (String) -> Unit) {
             if (kids.isEmpty()) item(key = "folder-empty") { Hint("폴더가 비어 있어요. 아래 '블록 추가'로 여기에 바로 만들거나, 밖의 블록을 길게 눌러 이 폴더로 옮기세요.") }
             items(kids.chunked(cols), key = { "row-" + it.first().s("id") }) { row ->
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    row.forEach { b -> BlockTile(b, checked = on(b), enabled = on(f), modifier = Modifier.weight(1f), onToggle = { toggle(b) }, onClick = { openField("gen:block:$charId:${b.s("id")}") }, onMenu = { editBlock = b }) }
+                    row.forEach { b -> BlockTile(b, checked = worn == f.s("id"), enabled = true, modifier = Modifier.weight(1f), onToggle = { ImageGenStore.setOutfit(cid, charId, f.s("id")) }, onClick = { openField("gen:block:$charId:${b.s("id")}") }, onMenu = { editBlock = b }) }
                     repeat(cols - row.size) { Spacer(Modifier.weight(1f)) }
                 }
             }
@@ -768,15 +769,12 @@ fun GenPresetScreen(cid: String, presetId: String, openField: (String) -> Unit, 
                                     FieldLabel("블록 지정")
                                     if (blocks.isEmpty()) Hint("캐릭터 설정 탭에서 태그 블록을 먼저 만들어 주세요.")
                                     FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        // 의상 폴더는 여기서 고르지 않음: 상반신·하반신(슬롯)을 켜면 캐릭터가 입은 의상이 들어감
                                         val loose = blocks.filter { it.s("type") != "folder" && (it.sOrNull("folderId") == null || folders.none { f -> f.s("id") == it.s("folderId") }) }
-                                        loose.forEach { b -> BlockChip(b, b.s("id") in ids, true) { ImageGenStore.toggleBlock(cid, presetId, pc.s("id"), b.s("id")) } }
-                                        folders.forEach { f ->
-                                            val kids = blocks.filter { it.sOrNull("folderId") == f.s("id") }
-                                            val fOn = f.s("id") in ids && kids.any { it.s("id") in ids }
-                                            BlockChip(f, fOn, true, folder = true) { ImageGenStore.toggleBlock(cid, presetId, pc.s("id"), f.s("id")) }
-                                            kids.forEach { b ->
-                                                BlockChip(b, fOn && b.s("id") in ids, true) { ImageGenStore.toggleBlock(cid, presetId, pc.s("id"), b.s("id")) }
-                                            }
+                                        val wornName = ImageGenStore.outfit(c)?.s("name")
+                                        loose.forEach { b ->
+                                            val shown = if (ImageGenStore.isSlot(b)) b.with("name" to kotlinx.serialization.json.JsonPrimitive(b.s("name") + " · " + (wornName ?: "의상 없음"))) else b
+                                            BlockChip(shown, b.s("id") in ids, true) { ImageGenStore.toggleBlock(cid, presetId, pc.s("id"), b.s("id")) }
                                         }
                                     }
                                     PositionPicker(cid, p, pc)

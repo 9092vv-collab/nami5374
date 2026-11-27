@@ -25,10 +25,15 @@ object Templates {
     const val DEFAULT_NAME = "이미지 템플릿"
     const val DEFAULT_LABEL = "기본 템플릿"
     private lateinit var ctx: Context
-    val defaultData: JsonObject by lazy {
-        runCatching { CardIO.json.parseToJsonElement(ctx.assets.open("default_template.json").bufferedReader().readText()).jsonObject }
+    private fun asset(file: String): JsonObject =
+        runCatching { CardIO.json.parseToJsonElement(ctx.assets.open(file).bufferedReader().readText()).jsonObject }
             .getOrElse { JsonObject(mapOf("name" to JsonPrimitive(DEFAULT_LABEL), "characters" to JsonArray(emptyList()), "presets" to JsonArray(emptyList()))) }
-    }
+    /** 원작 SGU 내장 템플릿 (단일 NSFW 63종). */
+    val defaultData: JsonObject by lazy { asset("default_template.json") }
+    /** SGU 원작 템플릿 4종: id → 파일. "default"는 위의 단일 NSFW. */
+    val SGU_BUILTINS = listOf("default" to "default_template.json", "sgu_single_sfw" to "sgu_single_sfw.json", "sgu_multi_sfw" to "sgu_multi_sfw.json", "sgu_multi_nsfw" to "sgu_multi_nsfw.json")
+    private val builtinCache = mutableMapOf<String, JsonObject>()
+    fun builtin(id: String): JsonObject? = SGU_BUILTINS.firstOrNull { it.first == id }?.let { (k, f) -> builtinCache.getOrPut(k) { if (k == "default") defaultData else asset(f) } }
 
     fun init(c: Context) { ctx = c }
 
@@ -45,7 +50,7 @@ object Templates {
                     put("size", c.o("size") ?: ImageGenStore.size())
                     put("blocks", JsonArray(c.arr("blocks").mapIndexed { j, b ->
                         buildJsonObject {
-                            put("id", JsonPrimitive("c${i + 1}b${j + 1}")); put("name", JsonPrimitive(b.s("name"))); put("type", JsonPrimitive(b.s("type").ifBlank { "prompt" }))
+                            put("id", JsonPrimitive("c${i + 1}b${j + 1}")); put("name", JsonPrimitive(b.s("name"))); put("type", JsonPrimitive(b.s("type").ifBlank { "prompt" }.let { if (it == "slot") "prompt" else it }))
                             if (b.b("keep")) { put("keep", JsonPrimitive(true)); put("text", JsonPrimitive(b.s("text"))) }
                             b.sOrNull("folderId")?.let { f -> bMap[f]?.let { put("folderId", JsonPrimitive(it)) } }
                         }
@@ -77,7 +82,8 @@ object Templates {
         val bMap = mutableMapOf<String, String>()
         val chars = data.arr("characters").mapIndexed { i, c ->
             val id = newLibId("gc"); cMap[c.s("id")] = id
-            val blocks = c.arr("blocks").map { b -> val nid = newLibId("gb"); bMap[b.s("id")] = nid; b to nid }.map { (b, nid) ->
+            // SGU의 "레퍼런스 이미지"(reference) 블록은 next에 없는 기능이라 뺌
+            val blocks = c.arr("blocks").filter { it.s("type") != "reference" }.map { b -> val nid = newLibId("gb"); bMap[b.s("id")] = nid; b to nid }.map { (b, nid) ->
                 val keep = b.b("keep")
                 buildJsonObject {
                     put("id", JsonPrimitive(nid)); put("name", JsonPrimitive(b.s("name")))
@@ -111,10 +117,10 @@ object Templates {
                 "chars" to JsonArray(ImageGenStore.normalizePositions(pcs)),
             )
         }
-        return g.with(
+        return ImageGenStore.outfitize(g.with(
             "characters" to JsonArray(chars), "selectedCharacterId" to str(chars.firstOrNull()?.s("id")),
             "preview" to JsonNull, "presets" to JsonArray(presets),
-        )
+        ))
     }
 
     // ---------- one character's templates (module 1684) ----------
@@ -276,19 +282,19 @@ object TemplateLibrary : JsonLibrary("image-templates.json", "lib") {
     const val FULL_LABEL = "에셋 프리셋 63종"
     val emptyData: JsonObject by lazy { Templates.exportTemplate(ImageGenStore.blankState()).with("name" to JsonPrimitive(EMPTY_LABEL)) }
 
-    override fun defaults() = listOf(
-        JsonObject(mapOf("id" to JsonPrimitive(EMPTY_ID), "name" to JsonPrimitive(EMPTY_LABEL), "data" to emptyData)),
-        JsonObject(mapOf("id" to JsonPrimitive("default"), "name" to JsonPrimitive(FULL_LABEL), "data" to Templates.defaultData.with("name" to JsonPrimitive(FULL_LABEL)))),
-    )
+    override fun defaults() = listOf(JsonObject(mapOf("id" to JsonPrimitive(EMPTY_ID), "name" to JsonPrimitive(EMPTY_LABEL), "data" to emptyData))) +
+        Templates.SGU_BUILTINS.mapNotNull { (id, _) -> Templates.builtin(id)?.let { d -> JsonObject(mapOf("id" to JsonPrimitive(id), "name" to JsonPrimitive(d.s("name")), "data" to d)) } }
+    private val BUILTIN_IDS get() = Templates.SGU_BUILTINS.map { it.first }.toSet()
     override fun fixUp(list: List<JsonObject>): List<JsonObject> {
+        // 내장(SGU 원작 4종)은 늘 앱에 든 최신 데이터로; 예전 이름("기본 템플릿", "에셋 프리셋 63종")은 원작 이름으로
         val l = list.map {
-            if (it.s("id") == "default") {
-                // 예전 이름 "기본 템플릿"이던 내장 63종은 새 이름으로 (빈 기본과 헷갈리지 않게)
-                val name = if (it.s("name") == Templates.DEFAULT_LABEL) FULL_LABEL else it.s("name")
-                it.with("name" to JsonPrimitive(name), "data" to Templates.defaultData.with("name" to JsonPrimitive(name)))
-            } else it
+            val d = Templates.builtin(it.s("id")) ?: return@map it
+            val name = if (it.s("name") == Templates.DEFAULT_LABEL || it.s("name") == FULL_LABEL) d.s("name") else it.s("name")
+            it.with("name" to JsonPrimitive(name), "data" to d.with("name" to JsonPrimitive(name)))
         }
-        return if (l.any { it.s("id") == EMPTY_ID }) l else listOf(defaults()[0]) + l
+        val have = l.map { it.s("id") }.toSet()
+        val missing = defaults().filter { it.s("id") !in have }
+        return missing.filter { it.s("id") == EMPTY_ID } + l + missing.filter { it.s("id") != EMPTY_ID }
     }
 
     /** ★ 템플릿, 없으면 빈 기본 템플릿 (예전엔 내장 63종). */
