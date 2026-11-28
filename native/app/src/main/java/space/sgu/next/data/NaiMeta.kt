@@ -72,4 +72,33 @@ object NaiMeta {
         if (j != null) rows.add(Row("원본 (Comment)", CardIO.json.encodeToString(kotlinx.serialization.json.JsonElement.serializer(), j)))
         return rows
     }
+
+    /**
+     * 그림체 가져오기: 캐릭터 프롬프트를 뺀 긍정·부정(v4 base_caption, 없으면 prompt·uc)과 모델·샘플러·스텝만.
+     * StyleLibrary 데이터 모양으로 돌려줌 (메타데이터 없으면 null).
+     */
+    fun styleData(file: File): JsonObject? {
+        val c = chunks(file)
+        val j = c["Comment"]?.let { runCatching { CardIO.json.parseToJsonElement(it).jsonObject }.getOrNull() } ?: return null
+        fun p(o: JsonObject?, k: String) = (o?.get(k) as? JsonPrimitive)?.contentOrNull
+        fun base(k: String) = p(((j[k] as? JsonObject)?.get("caption") as? JsonObject), "base_caption")
+        val pos = base("v4_prompt") ?: p(j, "prompt") ?: ""
+        val neg = base("v4_negative_prompt") ?: p(j, "uc") ?: ""
+        val src = listOfNotNull(c["Source"], c["Software"]).joinToString(" ")
+        val model = when {
+            src.contains("4.5") -> "nai-diffusion-4-5-full"
+            Regex("""V5|5\.0""").containsMatchIn(src) -> when {
+                src.contains("medium", true) -> NaiModels.V5_MEDIUM
+                src.contains("curated", true) -> "nai-diffusion-5-curated"
+                else -> "nai-diffusion-5-full"
+            }
+            else -> ""
+        }
+        return kotlinx.serialization.json.buildJsonObject {
+            if (model.isNotBlank()) put("model name", JsonPrimitive(model))
+            p(j, "steps")?.toDoubleOrNull()?.let { put("Steps", JsonPrimitive(it.toInt())) }
+            p(j, "sampler")?.takeIf { s -> NaiModels.samplers.any { it.first == s } }?.let { put("Sampler", JsonPrimitive(it)) }
+            put("Art style prompt", JsonPrimitive(pos)); put("Art style negative", JsonPrimitive(neg))
+        }
+    }
 }

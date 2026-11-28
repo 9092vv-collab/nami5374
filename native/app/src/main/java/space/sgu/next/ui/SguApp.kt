@@ -118,6 +118,7 @@ fun SguApp() {
             val id = e.arguments?.getString("id") ?: ""
             ImagePickerScreen(id, openPreset = { pid -> nav.navigate("genpreset/${Uri.encode(id)}/${Uri.encode(pid)}") }, onBack = back)
         }
+        composable("styleimport") { StyleImportScreen(onBack = back) }
         composable("perms/{id}") { e -> PermissionsScreen(e.arguments?.getString("id") ?: "", onBack = back) }
         composable("prompt/{id}") { e -> PromptPreviewScreen(e.arguments?.getString("id") ?: "", openRoute = go, onBack = back) }
         composable("promptpresets") { PromptPresetsScreen(openRoute = go, onBack = back) }

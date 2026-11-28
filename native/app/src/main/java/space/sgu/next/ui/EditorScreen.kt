@@ -117,6 +117,7 @@ fun EditorScreen(characterId: String, onBack: (() -> Unit)?, openField: (String)
     var side by rememberSaveable(characterId) { mutableStateOf("") }
     val extra = side == "extra"
     val sideOpen = side.isNotEmpty()
+    val importStyle = rememberStyleImporter { openRoute("styleimport") }
     val sideTitle = when (side) { "extra" -> EXTRA_TITLE; "" -> ""; else -> imageTabs[side.removePrefix("img").toIntOrNull() ?: 0] }
     val wideBar = androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp >= 480
     androidx.activity.compose.BackHandler(!sideOpen && pager.currentPage != 1) { scope.launch { pager.animateScrollToPage(1) } }
@@ -189,6 +190,7 @@ fun EditorScreen(characterId: String, onBack: (() -> Unit)?, openField: (String)
                     if (sideOpen) Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                         IconButton(onClick = { side = "" }) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "닫기") }
                         Text(sideTitle, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                        if (side == "img1") androidx.compose.material3.TextButton(onClick = importStyle) { Text("가져오기", color = Sgu.Ink) }
                     } else {
                     if (BotSearch.query.isNotBlank() && ("script" in hitGroups || "etc" in hitGroups))
                         Text("$EXTRA_TITLE 에도 검색 결과가 있어요 ›", style = MaterialTheme.typography.bodySmall, color = Sgu.Sub,
