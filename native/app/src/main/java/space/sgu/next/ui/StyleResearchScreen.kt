@@ -62,7 +62,7 @@ fun StyleResearchScreen(cid: String, onBack: () -> Unit) {
     Page("그림체 연구", ch?.let { "${it.s("name")} 기준" + if (items.isNotEmpty()) " · ${items.size}장" else "" }, onBack, actions = {
         if (items.isNotEmpty() && run == null) TextButton(onClick = { clearAsk = 1 }) { Text("전체 삭제", color = Sgu.Danger) }
     }) {
-        Hint("작가마다 0.2~1.0(0.05 단위) 가중치를 랜덤으로 붙여 한 장씩 뽑아요. 지금 열려 있는 캐릭터의 켜진 블록과 자유 프롬프트로, 한 번 연구하는 동안 같은 시드로 그리고, 퀄리티 태그·부정 프롬프트·모델은 그림체 설정 값을 써요. 마음에 드는 사진을 눌러 저장하면 그림체 라이브러리에 들어가요.")
+        Hint("작가 순서를 섞고 작가마다 0.2~1.0(0.05 단위) 가중치를 랜덤으로 붙여 한 장씩 뽑아요. 지금 열려 있는 캐릭터의 켜진 블록과 자유 프롬프트로, 한 번 연구하는 동안 같은 시드로 그리고, 퀄리티 태그·부정 프롬프트·모델은 그림체 설정 값을 써요. 마음에 드는 사진을 눌러 저장하면 그림체 라이브러리에 들어가요.")
         FieldLabel("작가 태그 (쉼표·줄바꿈으로 구분)")
         InputBox(artists, { artists = it }, placeholder = "artist:ebora, artist:fishine …", singleLine = false)
         FieldLabel("장수 (최대 ${StyleResearch.MAX})")

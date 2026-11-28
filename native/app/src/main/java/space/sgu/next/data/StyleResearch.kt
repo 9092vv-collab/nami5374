@@ -21,7 +21,7 @@ import kotlinx.serialization.json.jsonObject
 import java.io.File
 
 /**
- * 그림체 연구: 작가 태그마다 0.2~1.0(0.05 단위) 가중치를 랜덤으로 붙여 한 장씩 뽑아 봄.
+ * 그림체 연구: 작가 태그 순서를 섞고 0.2~1.0(0.05 단위) 가중치를 랜덤으로 붙여 한 장씩 뽑아 봄.
  * 열려 있는 이미지 캐릭터(켜진 블록 + 자유 프롬프트) 기준. 결과는 지우기 전까지 남음 (gen/research.json).
  */
 object StyleResearch {
@@ -49,7 +49,8 @@ object StyleResearch {
 
     private val weights = (4..20).map { it * 5 }   // 20..100 (%)
     private fun fmt(p: Int): String = if (p == 100) "1" else "0." + (if (p % 10 == 0) "${p / 10}" else "%02d".format(p))
-    fun combo(artists: List<String>): String = artists.joinToString(", ") { "${fmt(weights.random())}::$it::" }
+    /** 순서도 그림체에 영향이 커서 매 장 섞음. */
+    fun combo(artists: List<String>): String = artists.shuffled().joinToString(", ") { "${fmt(weights.random())}::$it::" }
 
     fun running(cid: String) = progress.containsKey(cid)
 
