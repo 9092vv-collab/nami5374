@@ -207,7 +207,7 @@ fun EditorScreen(characterId: String, onBack: (() -> Unit)?, openField: (String)
                 exit = androidx.compose.animation.shrinkVertically() + androidx.compose.animation.fadeOut()) {
                 Row(Modifier.fillMaxWidth().height(androidx.compose.foundation.layout.IntrinsicSize.Min).padding(horizontal = 12.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     listOf(0, 1, 3).forEach { sub ->
-                        Row(Modifier.weight(1f).fillMaxHeight().clip(RoundedCornerShape(14.dp)).background(Sgu.Card).clickable { side = "img$sub" }.padding(horizontal = 10.dp, vertical = 14.dp),
+                        Row(Modifier.weight(1f).fillMaxHeight().clip(RoundedCornerShape(14.dp)).background(Sgu.Card).clickable { side = "img$sub" }.padding(horizontal = 10.dp, vertical = 8.dp),
                             verticalAlignment = Alignment.CenterVertically) {
                             Text(imageTabs[sub], style = MaterialTheme.typography.labelLarge, maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                             Text("›", color = Sgu.Sub)
