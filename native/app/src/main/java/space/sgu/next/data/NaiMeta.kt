@@ -51,7 +51,7 @@ object NaiMeta {
 
     /** 화면에 보일 항목들 (비어 있으면 메타데이터 없음). */
     fun rows(file: File): List<Row> {
-        val c = chunks(file)
+        val c = anyMeta(file)
         val rows = mutableListOf<Row>()
         val j = c["Comment"]?.let { runCatching { CardIO.json.parseToJsonElement(it).jsonObject }.getOrNull() }
         fun p(o: JsonObject?, k: String) = (o?.get(k) as? JsonPrimitive)?.contentOrNull
@@ -77,13 +77,74 @@ object NaiMeta {
      * 그림체 가져오기: 캐릭터 프롬프트를 뺀 긍정·부정(v4 base_caption, 없으면 prompt·uc)과 모델·샘플러·스텝만.
      * StyleLibrary 데이터 모양으로 돌려줌 (메타데이터 없으면 null).
      */
-    fun styleData(file: File): JsonObject? {
+    /**
+     * PNG 글자 칸 → 없으면 투명도 칸에 숨긴 정보(stealth_pngcomp / pnginfo) → 없으면 파일 안의 JSON(webp·jpg EXIF 등).
+     * Comment(JSON 문자열)·Source·Software 를 돌려줌.
+     */
+    fun anyMeta(file: File): Map<String, String> {
         val c = chunks(file)
+        if (c["Comment"] != null) return c
+        runCatching { stealth(file) }.getOrNull()?.takeIf { it["Comment"] != null }?.let { return it }
+        runCatching { scanJson(file.readBytes()) }.getOrNull()?.let { return mapOf("Comment" to it) + c }
+        return c
+    }
+
+    /** NovelAI가 알파 채널 맨 아래 비트에 숨긴 정보 (열 단위로 읽음). */
+    private fun stealth(file: File): Map<String, String>? {
+        val opt = android.graphics.BitmapFactory.Options().apply { inPremultiplied = false; inPreferredConfig = android.graphics.Bitmap.Config.ARGB_8888 }
+        val bmp = android.graphics.BitmapFactory.decodeFile(file.path, opt) ?: return null
+        try {
+            if (!bmp.hasAlpha()) return null
+            val w = bmp.width; val h = bmp.height
+            val col = IntArray(h)
+            var x = 0; var y = h
+            fun bit(): Int {
+                if (y >= h) { if (x >= w) throw IllegalStateException(); bmp.getPixels(col, 0, 1, x, 0, 1, h); x++; y = 0 }
+                return (col[y++] ushr 24) and 1
+            }
+            fun bytes(n: Int) = ByteArray(n) { var v = 0; repeat(8) { v = (v shl 1) or bit() }; v.toByte() }
+            val magic = String(bytes(15), Charsets.ISO_8859_1)
+            val zipped = when (magic) { "stealth_pngcomp" -> true; "stealth_pnginfo" -> false; else -> return null }
+            var bits = 0; repeat(32) { bits = (bits shl 1) or bit() }
+            if (bits <= 0 || bits / 8 > w * h) return null
+            val raw = bytes(bits / 8)
+            val text = (if (zipped) java.util.zip.GZIPInputStream(raw.inputStream()).readBytes() else raw).toString(Charsets.UTF_8)
+            val o = CardIO.json.parseToJsonElement(text).jsonObject
+            return o.mapNotNull { (k, v) ->
+                val str = (v as? JsonPrimitive)?.takeIf { it.isString }?.content ?: CardIO.json.encodeToString(kotlinx.serialization.json.JsonElement.serializer(), v)
+                k to str
+            }.toMap()
+        } finally { bmp.recycle() }
+    }
+
+    /** 파일 안 어딘가에 들어 있는 NovelAI JSON ({"prompt": … }) 찾기. */
+    private fun scanJson(b: ByteArray): String? {
+        val t = String(b, Charsets.ISO_8859_1)
+        var from = 0
+        while (true) {
+            val k = t.indexOf("\"prompt\"", from).takeIf { it >= 0 } ?: return null
+            from = k + 1
+            val start = t.lastIndexOf('{', k).takeIf { it >= 0 } ?: continue
+            var depth = 0; var inStr = false; var esc = false; var end = -1
+            for (i in start until t.length) {
+                val ch = t[i]
+                if (inStr) { if (esc) esc = false else if (ch == '\\') esc = true else if (ch == '"') inStr = false; continue }
+                when (ch) { '"' -> inStr = true; '{' -> depth++; '}' -> { depth--; if (depth == 0) { end = i; break } } }
+            }
+            if (end < 0) continue
+            val json = String(t.substring(start, end + 1).toByteArray(Charsets.ISO_8859_1), Charsets.UTF_8)
+            if (runCatching { CardIO.json.parseToJsonElement(json).jsonObject }.isSuccess) return json
+        }
+    }
+
+    fun styleData(file: File): JsonObject? {
+        val c = anyMeta(file)
         val j = c["Comment"]?.let { runCatching { CardIO.json.parseToJsonElement(it).jsonObject }.getOrNull() } ?: return null
         fun p(o: JsonObject?, k: String) = (o?.get(k) as? JsonPrimitive)?.contentOrNull
         fun base(k: String) = p(((j[k] as? JsonObject)?.get("caption") as? JsonObject), "base_caption")
-        val pos = base("v4_prompt") ?: p(j, "prompt") ?: ""
-        val neg = base("v4_negative_prompt") ?: p(j, "uc") ?: ""
+        val par = j["parameters"] as? JsonObject
+        val pos = base("v4_prompt") ?: p(j, "prompt") ?: p(j, "input") ?: p(par, "prompt") ?: ""
+        val neg = base("v4_negative_prompt") ?: p(j, "uc") ?: p(j, "negative_prompt") ?: p(par, "negative_prompt") ?: ""
         val src = listOfNotNull(c["Source"], c["Software"]).joinToString(" ")
         val model = when {
             src.contains("4.5") -> "nai-diffusion-4-5-full"
@@ -96,8 +157,8 @@ object NaiMeta {
         }
         return kotlinx.serialization.json.buildJsonObject {
             if (model.isNotBlank()) put("model name", JsonPrimitive(model))
-            p(j, "steps")?.toDoubleOrNull()?.let { put("Steps", JsonPrimitive(it.toInt())) }
-            p(j, "sampler")?.takeIf { s -> NaiModels.samplers.any { it.first == s } }?.let { put("Sampler", JsonPrimitive(it)) }
+            (p(j, "steps") ?: p(par, "steps"))?.toDoubleOrNull()?.let { put("Steps", JsonPrimitive(it.toInt())) }
+            (p(j, "sampler") ?: p(par, "sampler"))?.takeIf { s -> NaiModels.samplers.any { it.first == s } }?.let { put("Sampler", JsonPrimitive(it)) }
             put("Art style prompt", JsonPrimitive(pos)); put("Art style negative", JsonPrimitive(neg))
         }
     }
