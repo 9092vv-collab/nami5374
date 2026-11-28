@@ -64,6 +64,8 @@ object StyleResearch {
         progress[cid] = Run(0, total)
         jobs[cid] = scope.launch {
             try {
+                // 시드 고정: 이번 연구 내내 같은 시드 → 작가 가중치만 달라짐
+                val seed = ImageGenStore.seedFor(cid)
                 for (i in 0 until total) {
                     if (!isActive) break
                     val g = ImageGenStore.load(cid)
@@ -71,11 +73,11 @@ object StyleResearch {
                     val cb = combo(list)
                     val base = ImageGenStore.jobForCharacter(g, c)
                     val job = base.copy(basePrompt = ImageGenStore.joinSections(cb, g.o("style").s("quality")))
-                    val png = ImageGenStore.generate(g, job, ImageGenStore.seedFor(cid))
+                    val png = ImageGenStore.generate(g, job, seed)
                     val name = "research_${System.currentTimeMillis()}.png"
                     withContext(Dispatchers.IO) { ImageGenStore.imageFile(cid, name).writeBytes(png) }
                     val o = load(cid)
-                    val item = buildJsonObject { put("file", JsonPrimitive(name)); put("combo", JsonPrimitive(cb)); put("createdAt", JsonPrimitive(System.currentTimeMillis())) }
+                    val item = buildJsonObject { put("file", JsonPrimitive(name)); put("combo", JsonPrimitive(cb)); put("seed", JsonPrimitive(seed)); put("createdAt", JsonPrimitive(System.currentTimeMillis())) }
                     save(cid, o.with("items" to JsonArray(listOf(item) + o.arr("items"))))
                     progress[cid] = Run(i + 1, total)
                     // 매크로로 보이지 않게 0.1초 + 0~0.3초 랜덤 텀
