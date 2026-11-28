@@ -30,6 +30,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -424,7 +425,7 @@ private fun GenCharacterTab(cid: String, openField: (String) -> Unit) {
         if (inFolder == null) {
             // 메인 화면처럼: 블록과 폴더가 같은 크기의 칸. 폴더 칸을 누르면 그 안으로 들어감
             items((loose + folders).chunked(cols), key = { "row-" + it.first().s("id") }) { row ->
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(Modifier.height(androidx.compose.foundation.layout.IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     row.forEach { b ->
                         if (b.s("type") == "folder") FolderTile(b, blocks.count { it.sOrNull("folderId") == b.s("id") }, worn == b.s("id"), Modifier.weight(1f),
                             onToggle = { ImageGenStore.setOutfit(cid, charId, b.s("id")) }, onClick = { openBlockFolder[charId] = b.s("id") }, onMenu = { editBlock = b })
@@ -449,7 +450,7 @@ private fun GenCharacterTab(cid: String, openField: (String) -> Unit) {
             }
             if (kids.isEmpty()) item(key = "folder-empty") { Hint("폴더가 비어 있어요. 아래 '블록 추가'로 여기에 바로 만들거나, 밖의 블록을 길게 눌러 이 폴더로 옮기세요.") }
             items(kids.chunked(cols), key = { "row-" + it.first().s("id") }) { row ->
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(Modifier.height(androidx.compose.foundation.layout.IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     row.forEach { b -> BlockTile(b, checked = worn == f.s("id"), enabled = true, modifier = Modifier.weight(1f), onToggle = { ImageGenStore.setOutfit(cid, charId, f.s("id")) }, onClick = { openField("gen:block:$charId:${b.s("id")}") }, onMenu = { editBlock = b }) }
                     repeat(cols - row.size) { Spacer(Modifier.weight(1f)) }
                 }
@@ -529,12 +530,12 @@ private val openBlockFolder = mutableStateMapOf<String, String>()
 @Composable
 private fun FolderTile(f: JsonObject, count: Int, checked: Boolean, modifier: Modifier = Modifier, onToggle: () -> Unit, onClick: () -> Unit, onMenu: () -> Unit) {
     Column(
-        modifier.height(84.dp).clip(RoundedCornerShape(16.dp)).background(Sgu.Bubble)
-            .combinedClickable(onClick = onClick, onLongClick = onMenu).padding(start = 2.dp, end = 8.dp, bottom = 6.dp),
+        modifier.heightIn(min = 56.dp).fillMaxHeight().clip(RoundedCornerShape(16.dp)).background(Sgu.Bubble)
+            .combinedClickable(onClick = onClick, onLongClick = onMenu).padding(start = 2.dp, end = 8.dp, bottom = 7.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = onToggle, modifier = Modifier.size(36.dp)) {
-                Icon(if (checked) Icons.Outlined.CheckBox else Icons.Outlined.CheckBoxOutlineBlank, if (checked) "폴더 켜짐" else "폴더 꺼짐", tint = Sgu.Ink, modifier = Modifier.size(22.dp))
+            IconButton(onClick = onToggle, modifier = Modifier.size(30.dp)) {
+                Icon(if (checked) Icons.Outlined.CheckBox else Icons.Outlined.CheckBoxOutlineBlank, if (checked) "폴더 켜짐" else "폴더 꺼짐", tint = Sgu.Ink, modifier = Modifier.size(20.dp))
             }
             Spacer(Modifier.weight(1f))
             Icon(Icons.Outlined.Folder, null, tint = Sgu.Sub, modifier = Modifier.size(18.dp))
@@ -556,12 +557,12 @@ private fun BlockTile(b: JsonObject, checked: Boolean, enabled: Boolean, modifie
     val locked = negative && negOff()
     val active = checked && enabled && !locked
     Column(
-        modifier.height(84.dp).alpha(if (locked) 0.4f else 1f).clip(RoundedCornerShape(16.dp)).background(if (negative) Sgu.AccentSoft.copy(alpha = 0.45f) else Sgu.Card).border(1.dp, Sgu.Line, RoundedCornerShape(16.dp))
-            .combinedClickable(onClick = { if (!locked) onClick() }, onLongClick = onMenu).padding(start = 2.dp, end = 8.dp, bottom = 6.dp),
+        modifier.heightIn(min = 56.dp).fillMaxHeight().alpha(if (locked) 0.4f else 1f).clip(RoundedCornerShape(16.dp)).background(if (negative) Sgu.AccentSoft.copy(alpha = 0.45f) else Sgu.Card).border(1.dp, Sgu.Line, RoundedCornerShape(16.dp))
+            .combinedClickable(onClick = { if (!locked) onClick() }, onLongClick = onMenu).padding(start = 2.dp, end = 8.dp, bottom = 7.dp),
     ) {
-        IconButton(onClick = { if (!locked) onToggle() }, enabled = !locked, modifier = Modifier.size(36.dp)) {
+        IconButton(onClick = { if (!locked) onToggle() }, enabled = !locked, modifier = Modifier.size(30.dp)) {
             Icon(if (checked) Icons.Outlined.CheckBox else Icons.Outlined.CheckBoxOutlineBlank, if (checked) "켜짐" else "꺼짐",
-                tint = if (enabled) Sgu.Ink else Sgu.Sub.copy(alpha = 0.5f), modifier = Modifier.size(22.dp))
+                tint = if (enabled) Sgu.Ink else Sgu.Sub.copy(alpha = 0.5f), modifier = Modifier.size(20.dp))
         }
         Text(b.s("name").ifBlank { "(이름 없음)" }, style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
             color = if (negative) Color(0xFF8A3B22) else Sgu.Ink, maxLines = 2, overflow = TextOverflow.Ellipsis,
