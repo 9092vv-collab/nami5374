@@ -583,7 +583,7 @@ object ImageGenStore {
      * 시드: 그림체 설정(style)의 seedFixed가 켜져 있으면 마지막에 쓴 시드(style.seed)를 계속 씀.
      * 랜덤일 때도 쓴 시드를 style.seed에 남겨서, 마음에 드는 그림이 나온 뒤 "고정"을 누르면 그 시드로 고정됨.
      */
-    private suspend fun seedFor(cid: String): Long {
+    suspend fun seedFor(cid: String): Long {
         val st = load(cid).o("style")
         val last = (st?.get("seed") as? JsonPrimitive)?.content?.toLongOrNull()
         val seed = if (st?.b("seedFixed") == true && last != null) last else (Math.random() * 4294967295.0).toLong()

@@ -190,7 +190,14 @@ fun EditorScreen(characterId: String, onBack: (() -> Unit)?, openField: (String)
                     if (sideOpen) Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                         IconButton(onClick = { side = "" }) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "닫기") }
                         Text(sideTitle, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-                        if (side == "img1") androidx.compose.material3.TextButton(onClick = importStyle) { Text("가져오기", color = Sgu.Ink) }
+                        if (side == "img1") Box {
+                            var styleMenu by remember { mutableStateOf(false) }
+                            IconButton(onClick = { styleMenu = true }) { Icon(Icons.Outlined.MoreVert, "그림체 메뉴") }
+                            DropdownMenu(styleMenu, { styleMenu = false }) {
+                                DropdownMenuItem(text = { Text("가져오기") }, onClick = { styleMenu = false; importStyle() })
+                                DropdownMenuItem(text = { Text("그림체 연구") }, onClick = { styleMenu = false; openRoute("styleresearch/$characterId") })
+                            }
+                        }
                     } else {
                     if (BotSearch.query.isNotBlank() && ("script" in hitGroups || "etc" in hitGroups))
                         Text("$EXTRA_TITLE 에도 검색 결과가 있어요 ›", style = MaterialTheme.typography.bodySmall, color = Sgu.Sub,
