@@ -39,13 +39,42 @@ object StyleResearch {
     private fun save(cid: String, o: JsonObject) {
         file(cid).writeText(CardIO.json.encodeToString(JsonElement.serializer(), o)); version++
     }
-    fun setArtists(cid: String, text: String) { val o = load(cid); if (o.s("artists") != text) save(cid, o.with("artists" to JsonPrimitive(text))) }
+    fun setInputs(cid: String, artists: String, fixed: String) {
+        val o = load(cid)
+        if (o.s("artists") != artists || o.s("fixed") != fixed) save(cid, o.with("artists" to JsonPrimitive(artists), "fixed" to JsonPrimitive(fixed)))
+    }
 
     /** 쉼표·줄바꿈으로 나눔. 이미 붙은 가중치(0.6::…::)는 벗기고, artist: 가 없으면 붙임. */
     fun artists(text: String): List<String> = text.split(',', '\n').map { it.trim() }.filter { it.isNotEmpty() }.map { t ->
         val bare = Regex("""^-?[\d.]+::(.*?)(::)?$""").find(t)?.groupValues?.get(1)?.trim() ?: t
         if (bare.startsWith("artist:", true)) bare else "artist:$bare"
     }.distinct()
+
+    /**
+     * 그림체 긍정을 나눔: artist: 가 든 태그 → 작가(가중치 벗김), 나머지 → 고정 태그(그대로).
+     * 0.6::a, b:: 처럼 가중치 묶음 안의 쉼표는 묶음째로 봄.
+     */
+    fun splitPrompt(text: String): Pair<List<String>, String> {
+        val tokens = mutableListOf<String>()
+        val cur = StringBuilder(); var open = false
+        var i = 0
+        while (i < text.length) {
+            if (text.startsWith("::", i)) { cur.append("::"); open = !open; i += 2; continue }
+            val ch = text[i]
+            if (!open && (ch == ',' || ch == '\n')) { tokens.add(cur.toString()); cur.clear() } else cur.append(ch)
+            i++
+        }
+        tokens.add(cur.toString())
+        val arts = mutableListOf<String>(); val fixed = mutableListOf<String>()
+        tokens.map { it.trim() }.filter { it.isNotEmpty() }.forEach { t ->
+            val m = Regex("""^(-?[\d.]+)::(.*?)::$""", RegexOption.DOT_MATCHES_ALL).find(t)
+            val inner = m?.groupValues?.get(2) ?: t
+            if (inner.contains("artist:", true)) {
+                inner.split(',').map { it.trim() }.filter { it.isNotEmpty() }.forEach { x -> if (x.contains("artist:", true)) arts.add(x) else fixed.add(x) }
+            } else fixed.add(t)
+        }
+        return arts.distinct() to fixed.joinToString(", ")
+    }
 
     private val weights = (4..20).map { it * 5 }   // 20..100 (%)
     private fun fmt(p: Int): String = if (p == 100) "1" else "0." + (if (p % 10 == 0) "${p / 10}" else "%02d".format(p))
@@ -54,12 +83,12 @@ object StyleResearch {
 
     fun running(cid: String) = progress.containsKey(cid)
 
-    fun start(cid: String, charId: String, artistText: String, n: Int) {
+    fun start(cid: String, charId: String, artistText: String, fixed: String, n: Int) {
         if (running(cid)) return
         val list = artists(artistText)
         if (list.isEmpty()) { error[cid] = "작가 태그를 입력하세요."; return }
         if (GenRun.running(cid)) { error[cid] = "다른 이미지 생성이 진행 중이에요. 끝난 뒤에 시작하세요."; return }
-        setArtists(cid, artistText)
+        setInputs(cid, artistText, fixed)
         error.remove(cid)
         val total = n.coerceIn(1, MAX)
         progress[cid] = Run(0, total)
@@ -73,12 +102,12 @@ object StyleResearch {
                     val c = ImageGenStore.character(g, charId) ?: throw ProviderError("캐릭터가 없습니다.")
                     val cb = combo(list)
                     val base = ImageGenStore.jobForCharacter(g, c)
-                    val job = base.copy(basePrompt = ImageGenStore.joinSections(cb, g.o("style").s("quality")))
+                    val job = base.copy(basePrompt = ImageGenStore.joinSections(ImageGenStore.joinTags(cb, fixed), g.o("style").s("quality")))
                     val png = ImageGenStore.generate(g, job, seed)
                     val name = "research_${System.currentTimeMillis()}.png"
                     withContext(Dispatchers.IO) { ImageGenStore.imageFile(cid, name).writeBytes(png) }
                     val o = load(cid)
-                    val item = buildJsonObject { put("file", JsonPrimitive(name)); put("combo", JsonPrimitive(cb)); put("seed", JsonPrimitive(seed)); put("createdAt", JsonPrimitive(System.currentTimeMillis())) }
+                    val item = buildJsonObject { put("file", JsonPrimitive(name)); put("combo", JsonPrimitive(cb)); put("fixed", JsonPrimitive(fixed)); put("seed", JsonPrimitive(seed)); put("createdAt", JsonPrimitive(System.currentTimeMillis())) }
                     save(cid, o.with("items" to JsonArray(listOf(item) + o.arr("items"))))
                     progress[cid] = Run(i + 1, total)
                     // 매크로로 보이지 않게 0.1초 + 0~0.3초 랜덤 텀
@@ -102,13 +131,13 @@ object StyleResearch {
     }
 
     /** 라이브러리에 넣을 그림체: 작가 조합 + 지금 부정·모델·샘플러·스텝 (퀄리티 태그·가이던스는 건드리지 않음). */
-    fun styleData(cid: String, combo: String): JsonObject {
+    fun styleData(cid: String, combo: String, fixed: String = ""): JsonObject {
         val st = ImageGenStore.load(cid).o("style")
         return buildJsonObject {
             st.s("model").takeIf { it.isNotBlank() }?.let { put("model name", JsonPrimitive(it)) }
             put("Steps", JsonPrimitive((st.d("steps") ?: 28.0).toInt()))
             st.s("sampler").takeIf { it.isNotBlank() }?.let { put("Sampler", JsonPrimitive(it)) }
-            put("Art style prompt", JsonPrimitive(combo)); put("Art style negative", JsonPrimitive(st.s("negative")))
+            put("Art style prompt", JsonPrimitive(ImageGenStore.joinTags(combo, fixed))); put("Art style negative", JsonPrimitive(st.s("negative")))
         }
     }
 }
